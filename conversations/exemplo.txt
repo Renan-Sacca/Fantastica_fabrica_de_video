@@ -1,0 +1,19 @@
+[DATE] 10 de Junho de 2024
+[10:30] João: Olá Maria! Tudo bem? 😊
+[10:31] Maria: Oi João! Tudo sim, e você?
+[10:31] João: Tudo ótimo! Estava pensando em você
+[10:32] Maria: Que fofo! 🥰
+[10:32] João: Lembra daquela viagem que a gente planejou?
+[10:33] Maria: Claro! Para a praia, né?
+[10:33] João: Isso! Olha que foto linda que achei do lugar:
+[IMAGE] assets/imagens/praia.jpg
+[10:34] Maria: Nossa, que lugar lindo!! 😍
+[10:34] Maria: Quando vamos?
+[10:35] João: Que tal no próximo feriado?
+[10:35] Maria: Perfeito! Vou adorar!
+[EMOJI] ❤️
+[10:36] João: Então está combinado! 🎉
+[10:36] Maria: Mal posso esperar!
+[10:37] João: Eu também! Vai ser incrível 🌊
+[10:37] Maria: Com certeza! Obrigada por planejar isso 😘
+[10:38] João: Sempre! Você merece o melhor 💕
