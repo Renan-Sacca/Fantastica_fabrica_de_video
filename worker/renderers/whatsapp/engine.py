@@ -5,6 +5,7 @@ import json
 import logging
 import shutil
 import tempfile
+import asyncio
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -143,6 +144,114 @@ def _build_conversation_data(job: RenderJob) -> dict:
     }
 
 
+async def _render_chunk_async(
+    context, 
+    chunk_frames: list[int], 
+    html_path: Path, 
+    conversation_data: dict, 
+    timeline, 
+    frames_dir: Path, 
+    progress_queue: asyncio.Queue
+):
+    page = await context.new_page()
+    await page.goto(f"file://{html_path.resolve()}")
+    await page.wait_for_load_state("networkidle")
+    await page.evaluate(f"window.initConversation({json.dumps(conversation_data)})")
+    await page.wait_for_timeout(500)
+
+    for frame_idx in chunk_frames:
+        state = timeline.get_frame_state(frame_idx)
+        state_json = json.dumps({
+            "scrollY": state.scroll_y,
+            "visibleMessages": state.visible_messages,
+            "messageOpacity": {str(k): v for k, v in state.message_opacity.items()},
+            "messageTranslateY": {str(k): v for k, v in state.message_translate_y.items()},
+            "showTyping": state.show_typing,
+            "typingSender": state.typing_sender,
+            "statusBarTime": state.status_bar_time,
+        })
+        await page.evaluate(f"window.renderFrame({state_json})")
+        frame_path = frames_dir / f"frame_{frame_idx + 1:06d}.jpg"
+        await page.screenshot(path=str(frame_path), type="jpeg", quality=90, animations="disabled")
+        
+        await progress_queue.put(frame_idx)
+        
+    await page.close()
+
+async def _progress_reporter(total_frames: int, progress_queue: asyncio.Queue, report_callback):
+    frames_done = 0
+    last_reported_threshold = 0
+    
+    while frames_done < total_frames:
+        await progress_queue.get()
+        frames_done += 1
+        
+        raw_progress = 10.0 + (frames_done / max(1, total_frames - 1)) * 80.0
+        for threshold in _PROGRESS_THRESHOLDS:
+            if last_reported_threshold < threshold <= raw_progress:
+                last_reported_threshold = threshold
+                report_callback(raw_progress, f"Frame {frames_done}/{total_frames}")
+                break
+
+async def _render_frames_async(
+    job_id: str,
+    conversation_data: dict,
+    timeline: Timeline,
+    frames_dir: Path,
+    width: int,
+    height: int,
+    total_frames: int,
+    progress_callback: Optional[Callable] = None,
+) -> None:
+    from playwright.async_api import async_playwright
+    
+    html_path = FRONTEND_DIR / "whatsapp" / "index.html"
+
+    def report(progress, detail):
+        if progress_callback:
+            progress_callback(status="rendering", progress=progress, detail=detail)
+
+    # Vamos usar 12 workers (chunks)
+    NUM_CHUNKS = 12
+    chunks = [[] for _ in range(NUM_CHUNKS)]
+    for i in range(total_frames):
+        chunks[i % NUM_CHUNKS].append(i)
+    
+    chunks = [c for c in chunks if c]
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--no-first-run",
+                "--no-zygote",
+                "--disable-extensions",
+            ],
+        )
+        context = await browser.new_context(
+            viewport={"width": width, "height": height},
+            device_scale_factor=2,
+        )
+        
+        progress_queue = asyncio.Queue()
+        reporter_task = asyncio.create_task(_progress_reporter(total_frames, progress_queue, report))
+        
+        tasks = []
+        for chunk in chunks:
+            tasks.append(_render_chunk_async(
+                context, chunk, html_path, conversation_data, timeline, frames_dir, progress_queue
+            ))
+            
+        await asyncio.gather(*tasks)
+        await reporter_task
+        await browser.close()
+        
+    logger.info(f"[{job_id}] {total_frames} frames renderizados paralelamente")
+
 def _render_frames(
     job_id: str,
     conversation_data: dict,
@@ -153,64 +262,7 @@ def _render_frames(
     total_frames: int,
     progress_callback: Optional[Callable] = None,
 ) -> None:
-    """Renderiza todos os frames usando Playwright headless."""
-    from playwright.sync_api import sync_playwright
-
-    html_path = FRONTEND_DIR / "whatsapp" / "index.html"
-
-    def report(progress, detail):
-        if progress_callback:
-            progress_callback(status="rendering", progress=progress, detail=detail)
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--no-first-run",
-                "--no-zygote",
-                "--single-process",
-                "--disable-extensions",
-            ],
-        )
-        context = browser.new_context(
-            viewport={"width": width, "height": height},
-            device_scale_factor=2,
-        )
-        page = context.new_page()
-        page.goto(f"file://{html_path.resolve()}")
-        page.wait_for_load_state("networkidle")
-        page.evaluate(f"window.initConversation({json.dumps(conversation_data)})")
-        page.wait_for_timeout(500)
-
-        last_reported_threshold = 0
-
-        for frame_idx in range(total_frames):
-            state = timeline.get_frame_state(frame_idx)
-            state_json = json.dumps({
-                "scrollY": state.scroll_y,
-                "visibleMessages": state.visible_messages,
-                "messageOpacity": {str(k): v for k, v in state.message_opacity.items()},
-                "messageTranslateY": {str(k): v for k, v in state.message_translate_y.items()},
-                "showTyping": state.show_typing,
-                "typingSender": state.typing_sender,
-                "statusBarTime": state.status_bar_time,
-            })
-            page.evaluate(f"window.renderFrame({state_json})")
-            frame_path = frames_dir / f"frame_{frame_idx + 1:06d}.png"
-            page.screenshot(path=str(frame_path))
-
-            # Reportar progresso apenas nos thresholds definidos
-            raw_progress = 10.0 + (frame_idx / max(1, total_frames - 1)) * 80.0
-            for threshold in _PROGRESS_THRESHOLDS:
-                if last_reported_threshold < threshold <= raw_progress:
-                    last_reported_threshold = threshold
-                    report(raw_progress, f"Frame {frame_idx + 1}/{total_frames}")
-                    break
-
-        browser.close()
-
-    logger.info(f"[{job_id}] {total_frames} frames renderizados")
+    """Renderiza os frames delegando para o loop assíncrono."""
+    asyncio.run(_render_frames_async(
+        job_id, conversation_data, timeline, frames_dir, width, height, total_frames, progress_callback
+    ))

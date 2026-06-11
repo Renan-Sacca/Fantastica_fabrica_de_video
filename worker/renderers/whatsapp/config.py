@@ -2,7 +2,7 @@
 
 # ── FFmpeg ──
 FFMPEG_CRF = 18
-FFMPEG_PRESET = "medium"
+FFMPEG_PRESET = "ultrafast"
 FFMPEG_AUDIO_BITRATE = "192k"
 
 # ── Animação ──

@@ -19,7 +19,7 @@ def compose_video(
     width: int = 1080,
     height: int = 1920,
 ) -> None:
-    frames_pattern = str(frames_dir / "frame_%06d.png")
+    frames_pattern = str(frames_dir / "frame_%06d.jpg")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if background_music and Path(background_music).exists():
