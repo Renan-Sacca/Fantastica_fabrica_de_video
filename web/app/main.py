@@ -311,17 +311,32 @@ async def job_status(job_id: str):
 
 @app.get("/api/jobs/{job_id}/stream")
 async def job_stream(job_id: str):
-    """SSE: stream de progresso em tempo real (lê do Drive)."""
-    job_info = jobs_store.get_job(job_id)
-    if not job_info:
-        return JSONResponse({"error": "Job não encontrado"}, status_code=404)
-
-    metadata_file_id = job_info["metadata_file_id"]
-    drive = get_drive(TOKEN_FILE)
-
     async def event_generator():
         loop = asyncio.get_event_loop()
         while True:
+            job_info = jobs_store.get_job(job_id)
+            if not job_info:
+                yield f"data: {json.dumps({'error': 'Job não encontrado'})}\n\n"
+                break
+                
+            metadata_file_id = job_info.get("metadata_file_id")
+            drive = get_drive(TOKEN_FILE)
+            
+            # Buscar metadata ID sob demanda se não existir no cache local
+            if not metadata_file_id:
+                try:
+                    metadata_file_id = await loop.run_in_executor(
+                        None, drive.find_file_in_folder, job_info["drive_folder_id"], "metadata.json"
+                    )
+                    if metadata_file_id:
+                        jobs_store.update_job(job_id, {"metadata_file_id": metadata_file_id})
+                    else:
+                        yield f"data: {json.dumps({'status': 'error', 'error': 'metadata.json não encontrado no Drive'})}\n\n"
+                        break
+                except Exception as e:
+                    yield f"data: {json.dumps({'status': 'error', 'error': f'Erro ao buscar metadata no Drive: {e}'})}\n\n"
+                    break
+
             try:
                 metadata = await loop.run_in_executor(
                     None, drive.read_json, metadata_file_id
@@ -366,4 +381,4 @@ async def sync_drive(request: Request):
     """Sincroniza os jobs com o Drive manualmente."""
     drive = get_drive(TOKEN_FILE)
     await asyncio.get_event_loop().run_in_executor(None, jobs_store.sync_with_drive, drive)
-    return RedirectResponse(url="/", status_code=303)
+    return {"status": "ok"}

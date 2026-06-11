@@ -57,6 +57,14 @@ def add_job(
         _save()
 
 
+
+def update_job(job_id: str, updates: dict) -> None:
+    """Atualiza campos de um job existente."""
+    with _lock:
+        if job_id in _store:
+            _store[job_id].update(updates)
+            _save()
+
 def get_job(job_id: str) -> Optional[dict]:
     """Retorna as informações de um job pelo ID."""
     return _store.get(job_id)
@@ -82,7 +90,7 @@ def delete_job(job_id: str) -> Optional[dict]:
 from datetime import datetime
 
 def sync_with_drive(drive_client) -> None:
-    """Sincroniza o cache local lendo todas as pastas diretamente do Drive."""
+    """Sincroniza o cache local lendo apenas as pastas de jobs do Drive (mais rápido)."""
     try:
         root_id = drive_client.get_or_create_folder("FantasticaFabricaDeVideo")
         zap_id = drive_client.get_or_create_folder("WhatsApp", root_id)
@@ -93,17 +101,6 @@ def sync_with_drive(drive_client) -> None:
             q=query, spaces='drive', fields='files(id, name, createdTime)'
         ).execute(num_retries=5)
         folders = response.get('files', [])
-        
-        query_meta = "name='metadata.json' and trashed=false"
-        response_meta = drive_client.service.files().list(
-            q=query_meta, spaces='drive', fields='files(id, parents)'
-        ).execute(num_retries=5)
-        metadatas = response_meta.get('files', [])
-        
-        meta_map = {}
-        for m in metadatas:
-            if m.get('parents'):
-                meta_map[m['parents'][0]] = m['id']
 
         global _store
         with _lock:
@@ -111,8 +108,6 @@ def sync_with_drive(drive_client) -> None:
             for f in folders:
                 folder_id = f['id']
                 name = f['name']
-                meta_id = meta_map.get(folder_id)
-                if not meta_id: continue
                 
                 parts = name.rsplit("-", 1)
                 if len(parts) == 2:
@@ -125,10 +120,10 @@ def sync_with_drive(drive_client) -> None:
                     "title": title,
                     "video_type": "whatsapp",
                     "drive_folder_id": folder_id,
-                    "metadata_file_id": meta_id,
+                    "metadata_file_id": None,  # Buscado apenas sob demanda quando abrir o job
                     "created_at": f.get('createdTime', datetime.now().isoformat()),
                 }
             _save()
-        logger.info(f"Sincronização com Drive concluída. {len(_store)} jobs encontrados.")
+        logger.info(f"Sincronização rápida com Drive concluída. {len(_store)} jobs.")
     except Exception as e:
         logger.error(f"Erro ao sincronizar com o Drive: {e}")
