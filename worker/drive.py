@@ -1,0 +1,126 @@
+"""Cliente Google Drive para o serviço worker."""
+from __future__ import annotations
+
+import json
+import logging
+from io import BytesIO
+from pathlib import Path
+from typing import Optional
+
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
+logger = logging.getLogger(__name__)
+SCOPES = ["https://www.googleapis.com/auth/drive"]
+
+
+class DriveClient:
+    """Cliente Drive via OAuth2 (token.json)."""
+
+    def __init__(self, token_file: str):
+        try:
+            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
+            self.service = build("drive", "v3", credentials=creds)
+            logger.info("Worker autenticado no Google Drive com sucesso (OAuth2)!")
+        except Exception as e:
+            logger.error(f"Erro ao carregar token.json: {e}")
+            raise RuntimeError(f"Falha na autenticação do Drive no Worker: {e}")
+
+    def find_folder_by_job_id(self, job_id: str) -> Optional[str]:
+        """
+        Busca a pasta do job pelo job_id (que faz parte do nome da pasta).
+        Ex: 'GarotaDaCaixa-a3f2c1' → job_id='a3f2c1'
+        """
+        query = (
+            f"name contains '{job_id}' "
+            f"and mimeType='application/vnd.google-apps.folder' "
+            f"and trashed=false"
+        )
+        results = self.service.files().list(
+            q=query, fields="files(id, name)", spaces="drive"
+        ).execute(num_retries=5)
+        files = results.get("files", [])
+        if not files:
+            logger.warning(f"Pasta para job_id={job_id} não encontrada no Drive")
+            return None
+        logger.info(f"Pasta encontrada: {files[0]['name']} ({files[0]['id']})")
+        return files[0]["id"]
+
+    def find_file_in_folder(self, folder_id: str, filename: str) -> Optional[str]:
+        """Busca um arquivo por nome em uma pasta."""
+        query = (
+            f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+        )
+        results = self.service.files().list(q=query, fields="files(id)").execute(num_retries=5)
+        files = results.get("files", [])
+        return files[0]["id"] if files else None
+
+    def read_json(self, file_id: str) -> dict:
+        """Lê e parseia um arquivo JSON."""
+        content = self.service.files().get_media(fileId=file_id).execute(num_retries=5)
+        return json.loads(content.decode("utf-8"))
+
+    def update_json(self, file_id: str, data: dict) -> None:
+        """Atualiza um arquivo JSON existente no Drive."""
+        content = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+        media = MediaIoBaseUpload(BytesIO(content), mimetype="application/json")
+        self.service.files().update(fileId=file_id, media_body=media).execute(num_retries=5)
+
+    def download_file(self, file_id: str, dest_path: Path) -> None:
+        """Baixa um arquivo do Drive para o disco de forma robusta e em chunks."""
+        from googleapiclient.http import MediaIoBaseDownload
+        
+        request = self.service.files().get_media(fileId=file_id, acknowledgeAbuse=True)
+        fh = BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk(num_retries=3)
+            
+        dest_path.write_bytes(fh.getvalue())
+
+    def upload_bytes(
+        self,
+        content: bytes,
+        filename: str,
+        parent_id: str,
+        mime_type: str = "application/octet-stream",
+    ) -> str:
+        """Faz upload de bytes. Retorna o ID do arquivo criado."""
+        metadata = {"name": filename, "parents": [parent_id]}
+        media = MediaIoBaseUpload(BytesIO(content), mimetype=mime_type)
+        file = self.service.files().create(
+            body=metadata, media_body=media, fields="id"
+        ).execute(num_retries=5)
+        return file["id"]
+
+    def get_or_create_folder(self, name: str, parent_id: Optional[str] = None) -> str:
+        """Obtém ou cria uma pasta."""
+        query = (
+            f"name='{name}' and mimeType='application/vnd.google-apps.folder' "
+            f"and trashed=false"
+        )
+        if parent_id:
+            query += f" and '{parent_id}' in parents"
+        results = self.service.files().list(q=query, fields="files(id)").execute(num_retries=5)
+        files = results.get("files", [])
+        if files:
+            return files[0]["id"]
+        metadata: dict = {"name": name, "mimeType": "application/vnd.google-apps.folder"}
+        if parent_id:
+            metadata["parents"] = [parent_id]
+        folder = self.service.files().create(body=metadata, fields="id").execute(num_retries=5)
+        return folder["id"]
+
+    def make_public(self, file_id: str) -> str:
+        """Torna o arquivo público e retorna o link."""
+        try:
+            self.service.permissions().create(
+                fileId=file_id,
+                body={"type": "anyone", "role": "reader"},
+            ).execute(num_retries=5)
+        except Exception as e:
+            logger.warning(f"Não foi possível tornar o arquivo público: {e}")
+        return f"https://drive.google.com/file/d/{file_id}/view"

@@ -8,3 +8,5 @@ uploads/
 dist/
 build/
 .progress_*.json
+token.json
+credentials.json

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ job.title }} — Fábrica de Vídeo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <style>
+        .detail-header { display:flex; align-items:center; gap:16px; margin-bottom:24px; }
+        .detail-title { font-size:2rem; font-weight:800; background:var(--gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+        .meta-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; margin:20px 0; }
+        .meta-item { background:var(--glass-bg); border:1px solid var(--border); border-radius:12px; padding:14px; }
+        .meta-label { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin-bottom:4px; }
+        .meta-value { font-weight:600; color:var(--text); font-size:15px; }
+        .action-row { display:flex; gap:12px; flex-wrap:wrap; margin-top:24px; }
+        .btn-primary { background:var(--gradient); color:#fff; border:none; padding:12px 24px; border-radius:12px; font-size:15px; font-weight:600; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:8px; }
+        .btn-secondary { background:var(--glass-bg); border:1px solid var(--border); color:var(--text); padding:12px 24px; border-radius:12px; font-size:15px; font-weight:600; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:8px; }
+        .btn-secondary:hover, .btn-primary:hover { opacity:.85; transform:translateY(-1px); }
+        .drive-link { display:inline-flex; align-items:center; gap:8px; color:var(--accent); text-decoration:none; font-size:14px; margin-top:12px; }
+        .drive-link:hover { text-decoration:underline; }
+        .back-link { display:inline-flex; align-items:center; gap:6px; color:var(--text-muted); text-decoration:none; font-size:14px; margin-bottom:20px; }
+        .back-link:hover { color:var(--text); }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="app-header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🎬</span>
+                    <div class="logo-text">
+                        <h1>Fantástica Fábrica de Vídeo</h1>
+                        <p class="tagline">Detalhes do Vídeo</p>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <a href="/" class="back-link">← Voltar ao Dashboard</a>
+
+            <section class="card">
+                <div class="detail-header">
+                    <div>
+                        <div class="detail-title">{{ job.title }}</div>
+                        <div style="display:flex;gap:10px;align-items:center;margin-top:8px;">
+                            <span class="job-type-badge">{{ job.video_type }}</span>
+                            <span class="job-id">#{{ job.job_id }}</span>
+                        </div>
+                    </div>
+                    <div style="margin-left:auto;">
+                        <span id="status-badge" class="job-status-badge {{ job.status }}">{{ job.status }}</span>
+                    </div>
+                </div>
+
+                <!-- Progresso -->
+                <div id="detail-progress" style="{% if job.status not in ['rendering','preparing','composing','pending'] %}display:none{% endif %}">
+                    <div class="progress-bar-wrapper" style="margin:16px 0;">
+                        <div class="progress-bar-track">
+                            <div class="progress-bar-fill" id="detail-bar" style="width:{{ job.progress }}%"></div>
+                        </div>
+                        <div class="progress-info">
+                            <span id="detail-detail">{{ job.detail }}</span>
+                            <span id="detail-percent">{{ job.get('progress', 0)|int }}%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Erro -->
+                {% if job.error %}
+                <div class="error-banner" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin:12px 0;color:#f87171;">
+                    ⚠️ {{ job.error }}
+                </div>
+                {% endif %}
+
+                <!-- Metadados -->
+                <div class="meta-grid">
+                    <div class="meta-item">
+                        <div class="meta-label">Contato</div>
+                        <div class="meta-value">{{ job.contact_name }}</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Status do Contato</div>
+                        <div class="meta-value">{{ job.contact_status }}</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Formato</div>
+                        <div class="meta-value">{{ job.video_format }}</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">FPS</div>
+                        <div class="meta-value">{{ job.fps }}</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Velocidade</div>
+                        <div class="meta-value">{{ job.speed }}x</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Animação</div>
+                        <div class="meta-value">{{ job.animation_style }}</div>
+                    </div>
+                    <div class="meta-item">
+                        <div class="meta-label">Criado em</div>
+                        <div class="meta-value" style="font-size:12px;">{{ job.created_at[:16] }}</div>
+                    </div>
+                </div>
+
+                <!-- Ações -->
+                <div class="action-row">
+                    {% if job.video_url %}
+                    <a href="{{ job.video_url }}" target="_blank" class="btn-primary">⬇️ Abrir Vídeo no Drive</a>
+                    {% endif %}
+
+                    <button onclick="recriarVideo('{{ job.job_id }}')" class="btn-secondary">🔄 Recriar Vídeo</button>
+                    <a href="{{ drive_link }}" target="_blank" class="btn-secondary">📁 Abrir no Drive</a>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+    const JOB_ID = "{{ job.job_id }}";
+    const JOB_STATUS = "{{ job.status }}";
+
+    // SSE se ainda processando
+    if (!["done", "error"].includes(JOB_STATUS)) {
+        const evtSource = new EventSource(`/api/jobs/${JOB_ID}/stream`);
+        evtSource.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            document.getElementById("detail-percent").textContent = Math.round(data.progress) + "%";
+            document.getElementById("detail-detail").textContent = data.detail || "";
+            document.getElementById("detail-bar").style.width = data.progress + "%";
+            document.getElementById("status-badge").textContent = data.status;
+            document.getElementById("status-badge").className = "job-status-badge " + data.status;
+
+            if (data.status === "done" || data.status === "error") {
+                evtSource.close();
+                document.getElementById("detail-progress").style.display = "none";
+                setTimeout(() => location.reload(), 1000);
+            }
+        };
+    }
+
+    async function recriarVideo(jobId) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = "Criando...";
+        try {
+            const res = await fetch(`/video/${jobId}/recriar`, { method: "POST" });
+            const data = await res.json();
+            if (data.job_id) {
+                showToast("✅ Novo job criado: #" + data.job_id, "success");
+                setTimeout(() => window.location.href = `/video/${data.job_id}`, 1500);
+            } else {
+                showToast("❌ " + (data.error || "Erro ao recriar"), "error");
+                btn.disabled = false;
+                btn.textContent = "🔄 Recriar Vídeo";
+            }
+        } catch (e) {
+            showToast("❌ Erro de rede", "error");
+            btn.disabled = false;
+            btn.textContent = "🔄 Recriar Vídeo";
+        }
+    }
+
+    function showToast(msg, type = "info") {
+        const t = document.createElement("div");
+        t.className = `toast ${type}`;
+        t.textContent = msg;
+        document.getElementById("toast-container").appendChild(t);
+        setTimeout(() => t.remove(), 4000);
+    }
+    </script>
+</body>
+</html>

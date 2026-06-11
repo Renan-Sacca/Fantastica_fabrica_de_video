@@ -801,3 +801,76 @@ input[type="range"]::-webkit-slider-thumb:hover {
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+/* ── Title Card ── */
+.title-card { padding: 20px 24px; }
+.title-row { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end; }
+.title-group { flex: 1; }
+.type-group { min-width: 200px; }
+.title-group input { font-size: 16px; font-weight: 600; }
+
+/* ── Video Type Badge ── */
+.job-type-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+    text-transform: capitalize;
+}
+
+/* ── Detail Button ── */
+.btn-detail {
+    background: var(--glass-bg);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+}
+.btn-detail:hover {
+    background: var(--accent-glow);
+}
+
+/* ── Images Preview Grid ── */
+.images-preview-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+.images-preview-grid img {
+    width: 60px;
+    height: 60px;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle);
+}
+
+/* ── Progress Bar Wrapper (video_detail) ── */
+.progress-bar-wrapper { }
+.progress-bar-track {
+    width: 100%;
+    height: 8px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #25d366, #128c7e, #25d366);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+    animation: shimmer 2s infinite linear;
+}
+.progress-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+/* ── Gradient utility ── */
+.gradient { background: linear-gradient(135deg, #25d366, #128c7e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+:root { --gradient: linear-gradient(135deg, #25d366, #128c7e); --text: var(--text-primary); --text-muted: #5a5a6e; --border: var(--glass-border); }
+

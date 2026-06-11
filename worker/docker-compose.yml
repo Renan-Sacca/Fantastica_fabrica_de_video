@@ -1,0 +1,11 @@
+services:
+  worker:
+    build: .
+    container_name: fabrica-worker
+    volumes:
+      - ../credentials.json:/app/credentials.json:ro
+      - ../token.json:/app/token.json:ro
+    environment:
+      - RABBITMQ_URL=amqp://financepowder:rgs050601@rabbitmq.financepowder.cloud/
+      - TOKEN_FILE=/app/token.json
+    restart: unless-stopped

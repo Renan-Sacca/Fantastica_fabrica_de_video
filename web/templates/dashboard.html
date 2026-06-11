@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fantástica Fábrica de Vídeo</title>
+    <meta name="description" content="Gere vídeos automatizados para TikTok, Reels e Shorts">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🎬</span>
+                    <div class="logo-text">
+                        <h1>Fantástica Fábrica de Vídeo</h1>
+                        <p class="tagline">Conversas → Vídeos virais</p>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <form id="render-form" class="config-form" enctype="multipart/form-data">
+
+                <!-- ── Linha 1: Título + Tipo ── -->
+                <section class="card title-card">
+                    <div class="title-row">
+                        <div class="form-group title-group">
+                            <label for="title">🎯 Título do Vídeo</label>
+                            <input type="text" id="title" name="title"
+                                   placeholder="Ex: Conversa do casal, Surpresa de aniversário..."
+                                   required autocomplete="off" />
+                        </div>
+                        <div class="form-group type-group">
+                            <label for="video_type">📱 Tipo de Conteúdo</label>
+                            <select id="video_type" name="video_type">
+                                {% for vt in video_types %}
+                                <option value="{{ vt.video_type }}">{{ vt.icon }} {{ vt.display_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ── Grade principal ── -->
+                <div class="form-grid">
+
+                    <!-- Coluna esquerda: Configurações -->
+                    <div class="form-column">
+                        <section class="card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <h2 class="card-title" style="margin-bottom: 0;"><span class="card-icon">🗂️</span> Vídeos Gerados</h2>
+                    <form action="/api/sync" method="post" style="margin: 0;">
+                        <button type="submit" class="btn btn-secondary" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
+                            Sincronizar com Drive
+                        </button>
+                    </form>
+                </div>
+                <div class="jobs-list" id="jobs-list">
+                    {% if jobs %}
+                        {% for job in jobs %}
+                        <div class="job-item" data-job-id="{{ job.job_id }}">
+                            <div class="job-info">
+                                <span class="job-name">{{ job.title }}</span>
+                                <span class="job-id">#{{ job.job_id }}</span>
+                                <span class="job-type-badge">{{ job.video_type }}</span>
+                            </div>
+                            <div class="job-actions">
+                                <a href="/video/{{ job.job_id }}" class="btn btn-detail">🔍 Detalhes</a>
+                                <button class="btn btn-delete" onclick="deleteJob('{{ job.job_id }}')">🗑️</button>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="jobs-empty">
+                            <span class="empty-icon">🎞️</span>
+                            <p>Nenhum vídeo gerado ainda</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>
