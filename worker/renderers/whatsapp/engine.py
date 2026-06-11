@@ -146,10 +146,9 @@ def _build_conversation_data(job: RenderJob) -> dict:
 
 async def _render_chunk_async(
     context, 
-    chunk_frames: list[int], 
+    chunk_data: list[tuple[int, str]], 
     html_path: Path, 
     conversation_data: dict, 
-    timeline, 
     frames_dir: Path, 
     progress_queue: asyncio.Queue
 ):
@@ -159,17 +158,7 @@ async def _render_chunk_async(
     await page.evaluate(f"window.initConversation({json.dumps(conversation_data)})")
     await page.wait_for_timeout(500)
 
-    for frame_idx in chunk_frames:
-        state = timeline.get_frame_state(frame_idx)
-        state_json = json.dumps({
-            "scrollY": state.scroll_y,
-            "visibleMessages": state.visible_messages,
-            "messageOpacity": {str(k): v for k, v in state.message_opacity.items()},
-            "messageTranslateY": {str(k): v for k, v in state.message_translate_y.items()},
-            "showTyping": state.show_typing,
-            "typingSender": state.typing_sender,
-            "statusBarTime": state.status_bar_time,
-        })
+    for frame_idx, state_json in chunk_data:
         await page.evaluate(f"window.renderFrame({state_json})")
         frame_path = frames_dir / f"frame_{frame_idx + 1:06d}.jpg"
         await page.screenshot(path=str(frame_path), type="jpeg", quality=90, animations="disabled")
@@ -178,19 +167,22 @@ async def _render_chunk_async(
         
     await page.close()
 
-async def _progress_reporter(total_frames: int, progress_queue: asyncio.Queue, report_callback):
+async def _progress_reporter(frames_to_render: int, progress_queue: asyncio.Queue, report_callback):
+    if frames_to_render == 0:
+        return
+        
     frames_done = 0
     last_reported_threshold = 0
     
-    while frames_done < total_frames:
+    while frames_done < frames_to_render:
         await progress_queue.get()
         frames_done += 1
         
-        raw_progress = 10.0 + (frames_done / max(1, total_frames - 1)) * 80.0
+        raw_progress = 10.0 + (frames_done / max(1, frames_to_render - 1)) * 80.0
         for threshold in _PROGRESS_THRESHOLDS:
             if last_reported_threshold < threshold <= raw_progress:
                 last_reported_threshold = threshold
-                report_callback(raw_progress, f"Frame {frames_done}/{total_frames}")
+                report_callback(raw_progress, f"Renderizando únicos: {frames_done}/{frames_to_render}")
                 break
 
 async def _render_frames_async(
@@ -204,6 +196,7 @@ async def _render_frames_async(
     progress_callback: Optional[Callable] = None,
 ) -> None:
     from playwright.async_api import async_playwright
+    import os
     
     html_path = FRONTEND_DIR / "whatsapp" / "index.html"
 
@@ -211,11 +204,38 @@ async def _render_frames_async(
         if progress_callback:
             progress_callback(status="rendering", progress=progress, detail=detail)
 
-    # Vamos usar 12 workers (chunks)
+    # ── Fase 1: Pré-computar estados e achar frames únicos ──
+    unique_states = {}  # state_json -> master_frame_idx
+    master_frames = []  # list of (frame_idx, state_json)
+    frame_mapping = {}  # frame_idx -> master_frame_idx
+
+    for i in range(total_frames):
+        state = timeline.get_frame_state(i)
+        state_json = json.dumps({
+            "scrollY": state.scroll_y,
+            "visibleMessages": state.visible_messages,
+            "messageOpacity": {str(k): v for k, v in state.message_opacity.items()},
+            "messageTranslateY": {str(k): v for k, v in state.message_translate_y.items()},
+            "showTyping": state.show_typing,
+            "typingSender": state.typing_sender,
+            "statusBarTime": state.status_bar_time,
+        }, sort_keys=True)
+        
+        if state_json not in unique_states:
+            unique_states[state_json] = i
+            master_frames.append((i, state_json))
+            frame_mapping[i] = i
+        else:
+            frame_mapping[i] = unique_states[state_json]
+
+    num_unique = len(master_frames)
+    logger.info(f"[{job_id}] Otimização de Cache: {num_unique} frames únicos identificados em {total_frames} totais.")
+
+    # ── Fase 2: Renderizar apenas os frames únicos ──
     NUM_CHUNKS = 12
     chunks = [[] for _ in range(NUM_CHUNKS)]
-    for i in range(total_frames):
-        chunks[i % NUM_CHUNKS].append(i)
+    for idx, (frame_idx, state_json) in enumerate(master_frames):
+        chunks[idx % NUM_CHUNKS].append((frame_idx, state_json))
     
     chunks = [c for c in chunks if c]
 
@@ -238,19 +258,30 @@ async def _render_frames_async(
         )
         
         progress_queue = asyncio.Queue()
-        reporter_task = asyncio.create_task(_progress_reporter(total_frames, progress_queue, report))
+        reporter_task = asyncio.create_task(_progress_reporter(num_unique, progress_queue, report))
         
         tasks = []
         for chunk in chunks:
             tasks.append(_render_chunk_async(
-                context, chunk, html_path, conversation_data, timeline, frames_dir, progress_queue
+                context, chunk, html_path, conversation_data, frames_dir, progress_queue
             ))
             
         await asyncio.gather(*tasks)
         await reporter_task
         await browser.close()
         
-    logger.info(f"[{job_id}] {total_frames} frames renderizados paralelamente")
+    # ── Fase 3: Clonagem dos frames idênticos ──
+    for i in range(total_frames):
+        master_idx = frame_mapping[i]
+        if master_idx != i:
+            src = frames_dir / f"frame_{master_idx + 1:06d}.jpg"
+            dst = frames_dir / f"frame_{i + 1:06d}.jpg"
+            try:
+                os.link(src, dst)
+            except Exception:
+                shutil.copyfile(src, dst)
+
+    logger.info(f"[{job_id}] Clonagem completa: reconstruídos {total_frames} frames totais.")
 
 def _render_frames(
     job_id: str,
