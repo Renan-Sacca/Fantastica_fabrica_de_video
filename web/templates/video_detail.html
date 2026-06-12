@@ -158,32 +158,49 @@
                     <div class="edit-grid">
                         <div class="form-group">
                             <label>Foto de Perfil (Opcional)</label>
-                            <div class="file-upload compact">
-                                <input type="file" name="contact_photo" accept="image/*" />
+                            <div class="file-upload compact" id="upload-contact_photo">
+                                <input type="file" name="contact_photo" accept="image/*" onchange="handleFilePreview(this, 'image')" />
                                 <div class="file-upload-content">
-                                    <span class="upload-placeholder" style="font-size:24px;">👤</span>
+                                    {% if job.get('files', {}).get('foto_perfil') %}
+                                    <div class="file-upload-preview"><img src="/api/drive/media/{{ job.get('files').get('foto_perfil') }}" /></div>
                                     <span class="file-upload-text">Substituir Foto</span>
+                                    {% else %}
+                                    <span class="upload-placeholder" style="font-size:24px;">👤</span>
+                                    <span class="file-upload-text">Enviar Foto</span>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
                         <div class="form-group">
                             <label>Papel de Parede (Opcional)</label>
-                            <div class="file-upload compact">
-                                <input type="file" name="wallpaper" accept="image/*" />
+                            <div class="file-upload compact" id="upload-wallpaper">
+                                <input type="file" name="wallpaper" accept="image/*" onchange="handleFilePreview(this, 'image')" />
                                 <div class="file-upload-content">
-                                    <span class="upload-placeholder" style="font-size:24px;">🖼️</span>
+                                    {% if job.get('files', {}).get('papel_parede') %}
+                                    <div class="file-upload-preview"><img src="/api/drive/media/{{ job.get('files').get('papel_parede') }}" /></div>
                                     <span class="file-upload-text">Substituir Fundo</span>
+                                    {% else %}
+                                    <span class="upload-placeholder" style="font-size:24px;">🖼️</span>
+                                    <span class="file-upload-text">Enviar Fundo</span>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>
                         <div class="form-group">
                             <label>Música de Fundo (Opcional)</label>
-                            <div class="file-upload compact">
-                                <input type="file" name="background_music" accept="audio/*" />
+                            <div class="file-upload compact" style="flex-direction: column;" id="upload-background_music">
+                                <input type="file" name="background_music" accept="audio/*" onchange="handleFilePreview(this, 'audio')" />
                                 <div class="file-upload-content">
                                     <span class="upload-placeholder" style="font-size:24px;">🎵</span>
                                     <span class="file-upload-text">Substituir Áudio</span>
                                 </div>
+                            </div>
+                            <div id="audio-preview-container">
+                                {% if job.get('files', {}).get('musica') %}
+                                <audio controls style="width: 100%; margin-top: 10px; height: 30px;">
+                                    <source src="/api/drive/media/{{ job.get('files').get('musica') }}">
+                                </audio>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -251,19 +268,73 @@
 
     const JOB_IMAGES = {{ job.get('files', {}).get('imagens', {}) | tojson | safe }};
 
+    function handleFilePreview(input, type) {
+        const container = input.nextElementSibling;
+        if (input.files && input.files[0]) {
+            const file = input.files[0];
+            const url = URL.createObjectURL(file);
+            const parent = input.parentElement;
+            
+            if (type === 'image') {
+                container.innerHTML = `
+                    <div class="file-upload-preview"><img src="${url}" /></div>
+                    <span class="file-upload-text" style="color: var(--accent);">✅ ${file.name} selecionado</span>
+                `;
+            } else if (type === 'audio') {
+                container.innerHTML = `
+                    <span class="upload-placeholder" style="font-size:24px; color: var(--accent);">🎵</span>
+                    <span class="file-upload-text" style="color: var(--accent);">✅ ${file.name} selecionado</span>
+                `;
+                // Atualiza o audio container fora da div
+                let audioContainer = parent.nextElementSibling;
+                let audioTag = audioContainer.querySelector('audio');
+                if (!audioTag) {
+                    audioTag = document.createElement('audio');
+                    audioTag.controls = true;
+                    audioTag.style.width = '100%';
+                    audioTag.style.marginTop = '10px';
+                    audioTag.style.height = '30px';
+                    audioContainer.appendChild(audioTag);
+                }
+                audioTag.src = url;
+            }
+        }
+    }
+
+    function handleModalImagePreview(input) {
+        if (input.files && input.files[0]) {
+            const file = input.files[0];
+            const url = URL.createObjectURL(file);
+            const statusSpan = input.parentElement.parentElement.querySelector('.image-status');
+            const previewHtml = `<img src="${url}" style="width: 40px; height: 40px; border-radius: 4px; object-fit: cover; vertical-align: middle; margin-right: 8px;">`;
+            statusSpan.innerHTML = `${previewHtml} <span style="color: var(--accent);">✅ Substituído por: ${file.name}</span>`;
+            statusSpan.style.color = ""; // Limpa a cor de warning se tiver
+        }
+    }
+
     function showImagesModal(requiredImages) {
         const list = document.getElementById('modal-images-list');
         list.innerHTML = '';
         requiredImages.forEach((name, idx) => {
-            const hasExisting = !!JOB_IMAGES[name];
+            const existingId = JOB_IMAGES[name];
+            let statusHtml = '';
+            if (existingId) {
+                statusHtml = `
+                    <img src="/api/drive/media/${existingId}" style="width: 40px; height: 40px; border-radius: 4px; object-fit: cover; vertical-align: middle; margin-right: 8px;">
+                    <span style="color:var(--accent);">✅ Arquivo no Drive. Substitua ou deixe vazio para manter.</span>
+                `;
+            } else {
+                statusHtml = `<span style="color:var(--warning)">⚠️ Nova imagem. É necessário enviar o arquivo.</span>`;
+            }
+            
             list.innerHTML += `
                 <div class="image-upload-row">
                     <div class="image-upload-info">
                         <span class="image-tag-name">[IMAGE] ${name}</span>
-                        ${hasExisting ? `<span class="image-status">✅ Arquivo já enviado. Selecione outro para substituir ou deixe vazio para manter.</span>` : '<span class="image-status" style="color:var(--warning)">⚠️ Nova imagem. É necessário enviar o arquivo.</span>'}
+                        <div class="image-status" style="margin-top: 6px;">${statusHtml}</div>
                     </div>
                     <div>
-                        <input type="file" id="modal-img-${idx}" class="image-file-input" accept="image/*" data-name="${name}">
+                        <input type="file" id="modal-img-${idx}" class="image-file-input" accept="image/*" data-name="${name}" onchange="handleModalImagePreview(this)">
                     </div>
                 </div>
             `;
@@ -309,7 +380,7 @@
         const btnText = btn.querySelector('.btn-text');
         
         btn.disabled = true;
-        btnText.textContent = "Verificando...";
+        btnText.textContent = "Verificando e montando requisição...";
 
         const formData = new FormData(e.target);
         const convText = formData.get('conversation_text') || "";
@@ -339,7 +410,7 @@
         const btnText = btn.querySelector('.btn-text');
         
         btn.disabled = true;
-        btnText.textContent = "Salvando e enviando para renderização...";
+        btnText.textContent = "Fazendo upload dos arquivos... Aguarde.";
         
         try {
             const res = await fetch(`/video/${JOB_ID}/edit`, { 

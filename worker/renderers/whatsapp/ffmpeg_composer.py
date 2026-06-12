@@ -27,6 +27,7 @@ def compose_video(
             "ffmpeg", "-y",
             "-framerate", str(fps),
             "-i", frames_pattern,
+            "-stream_loop", "-1",
             "-i", background_music,
             "-c:v", "libx264",
             "-preset", FFMPEG_PRESET,

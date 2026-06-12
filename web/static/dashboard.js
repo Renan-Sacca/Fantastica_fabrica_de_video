@@ -153,6 +153,22 @@ if (form) {
     });
 }
 
+function handleModalImagePreview(input) {
+    if (input.files && input.files[0]) {
+        const file = input.files[0];
+        const url = URL.createObjectURL(file);
+        const statusSpan = input.parentElement.parentElement.querySelector('.image-status');
+        const previewHtml = `<img src="${url}" style="width: 40px; height: 40px; border-radius: 4px; object-fit: cover; vertical-align: middle; margin-right: 8px;">`;
+        if (statusSpan) {
+            statusSpan.innerHTML = `${previewHtml} <span style="color: var(--accent);">✅ Arquivo selecionado: ${file.name}</span>`;
+            statusSpan.style.color = "";
+        } else {
+            const infoDiv = input.parentElement.parentElement.querySelector('.image-upload-info');
+            infoDiv.innerHTML += `<div class="image-status" style="margin-top: 6px;">${previewHtml} <span style="color: var(--accent);">✅ Selecionado: ${file.name}</span></div>`;
+        }
+    }
+}
+
 function showImagesModal(requiredImages, existingImagesMap = {}) {
     const list = document.getElementById('modal-images-list');
     if (!list) return;
@@ -163,10 +179,10 @@ function showImagesModal(requiredImages, existingImagesMap = {}) {
             <div class="image-upload-row">
                 <div class="image-upload-info">
                     <span class="image-tag-name">[IMAGE] ${name}</span>
-                    ${hasExisting ? `<span class="image-status">✅ Arquivo já enviado. Selecione outro para substituir ou deixe vazio para manter.</span>` : ''}
+                    ${hasExisting ? `<div class="image-status" style="margin-top: 6px;"><span style="color:var(--accent);">✅ Arquivo já enviado. Selecione outro para substituir ou deixe vazio para manter.</span></div>` : ''}
                 </div>
                 <div>
-                    <input type="file" id="modal-img-${idx}" class="image-file-input" accept="image/*" data-name="${name}">
+                    <input type="file" id="modal-img-${idx}" class="image-file-input" accept="image/*" data-name="${name}" onchange="handleModalImagePreview(this)">
                 </div>
             </div>
         `;

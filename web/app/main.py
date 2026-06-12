@@ -12,7 +12,7 @@ from typing import List, Optional
 
 import aio_pika
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -689,10 +689,23 @@ async def edit_video(
         await publish_job(job_id, video_type)
 
         return JSONResponse({"job_id": job_id, "status": "queued"})
-
     except Exception as e:
-        logger.error(f"Erro ao editar/recriar job: {e}")
-        return JSONResponse({"error": f"Erro interno: {e}"}, status_code=500)
+        logger.error(f"Erro ao editar vídeo: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/drive/media/{file_id}")
+async def get_drive_media(file_id: str):
+    """Retorna o conteúdo binário de um arquivo do Drive (usado para preview)."""
+    drive = get_drive(TOKEN_FILE)
+    loop = asyncio.get_event_loop()
+    try:
+        content = await loop.run_in_executor(None, drive.read_bytes, file_id)
+        # Como o mimetype não é estrito para exibição em img/audio tags, o browser infere.
+        return Response(content=content)
+    except Exception as e:
+        logger.error(f"Erro ao obter mídia {file_id}: {e}")
+        return Response(content=b"Not found", status_code=404)
 
 
 @app.post("/api/sync")
