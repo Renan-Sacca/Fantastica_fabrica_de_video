@@ -97,8 +97,8 @@ def render_video(
             height=config.height,
         )
 
-        report(status="done", progress=100.0, detail="Vídeo pronto!")
-        logger.info(f"[{job_id}] Concluído: {output_path}")
+        report(status="composing", progress=95.0, detail="Renderização e composição concluídas. Aguardando upload...")
+        logger.info(f"[{job_id}] Concluído localmente: {output_path}")
 
     except Exception as e:
         logger.error(f"[{job_id}] Erro: {e}")

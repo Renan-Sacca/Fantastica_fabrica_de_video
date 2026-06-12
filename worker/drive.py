@@ -114,6 +114,14 @@ class DriveClient:
         folder = self.service.files().create(body=metadata, fields="id").execute(num_retries=5)
         return folder["id"]
 
+    def delete_file(self, file_id: str) -> None:
+        """Deleta um arquivo permanentemente do Drive."""
+        try:
+            self.service.files().delete(fileId=file_id).execute(num_retries=5)
+            logger.info(f"Arquivo deletado do Drive: {file_id}")
+        except Exception as e:
+            logger.warning(f"Erro ao deletar arquivo {file_id}: {e}")
+
     def make_public(self, file_id: str) -> str:
         """Torna o arquivo público e retorna o link."""
         try:

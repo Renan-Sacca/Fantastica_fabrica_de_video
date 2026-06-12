@@ -261,7 +261,7 @@ Comandos especiais:
                 </div>
                 <div class="jobs-list" id="jobs-list">
                     {% if jobs %}
-                        {% for job in jobs %}
+                        {% for job in jobs[:5] %}
                         <div class="job-item" data-job-id="{{ job.job_id }}">
                             <div class="job-info">
                                 <span class="job-name">{{ job.title }}</span>
@@ -274,6 +274,11 @@ Comandos especiais:
                             </div>
                         </div>
                         {% endfor %}
+                        {% if jobs|length > 5 %}
+                        <div style="text-align: center; margin-top: 1rem;">
+                            <a href="/jobs" class="btn btn-secondary" style="width: 100%; justify-content: center;">Ver todos os vídeos ({{ jobs|length }})</a>
+                        </div>
+                        {% endif %}
                     {% else %}
                         <div class="jobs-empty">
                             <span class="empty-icon">🎞️</span>

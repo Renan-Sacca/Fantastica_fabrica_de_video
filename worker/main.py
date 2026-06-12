@@ -35,6 +35,8 @@ class VideoWorker:
     def __init__(self):
         self.drive = DriveClient(TOKEN_FILE)
         self.connection: Optional[aio_pika.RobustConnection] = None
+        self._channel: Optional[aio_pika.Channel] = None
+        self._progress_exchange: Optional[aio_pika.Exchange] = None
 
     async def start(self):
         """Inicia a conexão e começa a consumir a fila."""
@@ -43,6 +45,7 @@ class VideoWorker:
 
         async with self.connection:
             channel = await self.connection.channel()
+            self._channel = channel
             # Permitir processar apenas 1 job por vez
             await channel.set_qos(prefetch_count=1)
 
@@ -53,6 +56,41 @@ class VideoWorker:
                 async for message in q_iter:
                     async with message.process():
                         await self._process_message(message.body.decode())
+
+    async def _get_progress_exchange(self) -> aio_pika.Exchange:
+        """Retorna o exchange padrao de progresso, criando-o se necessario."""
+        if self._progress_exchange is None:
+            self._progress_exchange = await self._channel.declare_exchange(
+                "video_progress",
+                aio_pika.ExchangeType.TOPIC,
+                durable=True,
+                auto_delete=False,
+            )
+        return self._progress_exchange
+
+    async def _publish_progress(self, job_id: str, status: str, progress: float, detail: str):
+        """Publica atualizacao de progresso no exchange padrao (routing_key = job_id)."""
+        if not self._channel:
+            return
+        try:
+            exchange = await self._get_progress_exchange()
+            payload = json.dumps({
+                "job_id": job_id,
+                "status": status,
+                "progress": progress,
+                "detail": detail,
+            })
+            await exchange.publish(
+                aio_pika.Message(
+                    body=payload.encode(),
+                    delivery_mode=aio_pika.DeliveryMode.NOT_PERSISTENT,
+                ),
+                routing_key=job_id,
+            )
+            logger.debug(f"[{job_id}] Progresso publicado: {status} {progress}%")
+        except Exception as e:
+            logger.warning(f"[{job_id}] Nao foi possivel publicar progresso no RabbitMQ: {e}")
+            self._progress_exchange = None  # Forcar re-declaracao na proxima tentativa
 
     async def _process_message(self, body: str):
         job_id = None
@@ -95,8 +133,16 @@ class VideoWorker:
             await self._download_files(metadata, folder_id, work_dir)
 
             # ── 5. Preparar função de progresso ──
+            # Capturar o loop ANTES de entrar no executor (onde não há loop)
+            _loop = asyncio.get_event_loop()
+
             def progress_callback(status=None, progress=0, detail=""):
                 self._update_progress(metadata_file_id, metadata, status, progress, detail)
+                # Publicar no RabbitMQ de forma thread-safe
+                asyncio.run_coroutine_threadsafe(
+                    self._publish_progress(job_id, status or metadata.get("status", ""), progress, detail),
+                    _loop,
+                )
 
             progress_callback(status="preparing", progress=2, detail="Arquivos baixados. Iniciando...")
 
@@ -111,7 +157,15 @@ class VideoWorker:
 
             video_bytes = output_path.read_bytes()
             video_filename = f"{metadata.get('title', 'Video')}_{job_id}.mp4"
-            
+
+            # Se já existir um vídeo anterior, deleta para não acumular lixo
+            old_video_id = metadata.get("video_drive_id")
+            if old_video_id:
+                logger.info(f"[{job_id}] Deletando vídeo antigo do Drive: {old_video_id}")
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self.drive.delete_file, old_video_id
+                )
+
             video_file_id = await asyncio.get_event_loop().run_in_executor(
                 None, self.drive.upload_bytes, video_bytes, video_filename, folder_id, "video/mp4"
             )
@@ -127,6 +181,7 @@ class VideoWorker:
             metadata["video_drive_id"] = video_file_id
             metadata["video_url"] = video_url
             self._update_progress(metadata_file_id, metadata, status="done", progress=100, detail="Vídeo pronto!")
+            await self._publish_progress(job_id, "done", 100, "Vídeo pronto!")
             logger.info(f"[{job_id}] JOB FINALIZADO COM SUCESSO")
 
         except Exception as e:
@@ -141,6 +196,7 @@ class VideoWorker:
                             meta = self.drive.read_json(meta_id)
                             meta["error"] = str(e)
                             self._update_progress(meta_id, meta, status="error", progress=0, detail=f"Erro: {e}")
+                    await self._publish_progress(job_id, "error", 0, f"Erro: {e}")
                 except Exception as meta_err:
                     logger.error(f"[{job_id}] Não foi possível atualizar status de erro no Drive: {meta_err}")
         finally:
@@ -161,7 +217,7 @@ class VideoWorker:
     async def _download_files(self, metadata: dict, folder_id: str, work_dir: Path):
         """Baixa todos os arquivos registrados no metadata sequencialmente (httplib2 não é thread-safe)."""
         files_info = metadata.get("files", {})
-        
+
         # Arquivos raiz
         for key in ["conversa", "foto_perfil", "papel_parede", "musica"]:
             file_id = files_info.get(key)
@@ -172,7 +228,7 @@ class VideoWorker:
                 await asyncio.get_event_loop().run_in_executor(
                     None, self.drive.download_file, file_id, dest_path
                 )
-        
+
         # Imagens da conversa
         imagens_info = files_info.get("imagens", {})
         if imagens_info:

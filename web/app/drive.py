@@ -107,9 +107,13 @@ class DriveClient:
 
     # ── Leitura ──
 
+    def read_bytes(self, file_id: str) -> bytes:
+        """Lê o conteúdo binário de um arquivo do Drive."""
+        return self.service.files().get_media(fileId=file_id).execute(num_retries=5)
+
     def read_json(self, file_id: str) -> dict:
         """Lê e parseia um arquivo JSON do Drive."""
-        content = self.service.files().get_media(fileId=file_id).execute(num_retries=5)
+        content = self.read_bytes(file_id)
         return json.loads(content.decode("utf-8"))
 
     def update_json(self, file_id: str, data: dict) -> None:

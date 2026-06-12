@@ -149,7 +149,6 @@ if (form) {
             const jobId = data.job_id;
             showToast(`✅ Job #${jobId} criado! Aguardando worker...`, 'success');
             startProgressTracking(jobId, title);
-            form.reset();
 
         } catch (err) {
             showToast('❌ Erro de rede: ' + err.message, 'error');
@@ -161,7 +160,41 @@ if (form) {
     });
 }
 
-// ── Progresso via SSE ──
+// ── SSE Global de Progresso — 1 conexão por sessão de navegador ──
+const _trackedJobs = {};   // { [jobId]: { title } }
+let _progressSSE = null;
+let _sseRetryTimeout = null;
+
+function initProgressStream() {
+    if (_progressSSE && _progressSSE.readyState !== EventSource.CLOSED) return;
+
+    _progressSSE = new EventSource('/api/progress/stream');
+
+    _progressSSE.onopen = () => {
+        if (_sseRetryTimeout) { clearTimeout(_sseRetryTimeout); _sseRetryTimeout = null; }
+    };
+
+    _progressSSE.onmessage = (e) => {
+        let data;
+        try { data = JSON.parse(e.data); } catch { return; }
+
+        const jobId = data.job_id;
+        if (!jobId || !_trackedJobs[jobId]) return;  // job não monitorado nesta sessão
+
+        updateProgressCard(jobId, data, _trackedJobs[jobId].title);
+    };
+
+    _progressSSE.onerror = () => {
+        _progressSSE.close();
+        _progressSSE = null;
+        // Tentar reconectar após 4s se ainda há jobs sendo monitorados
+        if (Object.keys(_trackedJobs).length > 0) {
+            _sseRetryTimeout = setTimeout(initProgressStream, 4000);
+        }
+    };
+}
+
+// ── Progresso: criar card e registrar job ──
 function startProgressTracking(jobId, title) {
     const section = document.getElementById('progress-section');
     const container = document.getElementById('progress-container');
@@ -184,40 +217,50 @@ function startProgressTracking(jobId, title) {
     `;
     container.prepend(card);
 
-    // SSE
-    const es = new EventSource(`/api/jobs/${jobId}/stream`);
+    // Registrar no mapa de jobs monitorados
+    _trackedJobs[jobId] = { title };
 
-    es.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        const pct = Math.round(data.progress || 0);
+    // Garantir que o SSE global está aberto
+    initProgressStream();
+}
 
-        document.getElementById(`pct-${jobId}`).textContent = pct + '%';
-        document.getElementById(`bar-${jobId}`).style.width = pct + '%';
-        document.getElementById(`det-${jobId}`).textContent = data.detail || '';
+// ── Atualizar card de um job específico ──
+function updateProgressCard(jobId, data, title) {
+    const pct = Math.round(data.progress || 0);
+    const pctEl = document.getElementById(`pct-${jobId}`);
+    if (!pctEl) return;
 
-        if (data.status === 'done') {
-            es.close();
-            card.innerHTML += `
-                <div class="progress-done">
-                    <span>✅ Vídeo pronto!</span>
-                    <a href="/video/${jobId}" class="btn btn-download">🔍 Ver Detalhes</a>
-                </div>
-            `;
-            addJobToList(jobId, title, data.video_type || 'whatsapp');
-            showToast('🎉 Vídeo gerado com sucesso!', 'success');
+    pctEl.textContent = pct + '%';
+    document.getElementById(`bar-${jobId}`).style.width = pct + '%';
+    document.getElementById(`det-${jobId}`).textContent = data.detail || '';
+
+    if (data.status === 'done') {
+        const card = document.getElementById(`progress-${jobId}`);
+        card.innerHTML += `
+            <div class="progress-done">
+                <span>✅ Vídeo pronto!</span>
+                <a href="/video/${jobId}" class="btn btn-download">🔍 Ver Detalhes</a>
+            </div>
+        `;
+        addJobToList(jobId, title || _trackedJobs[jobId]?.title || '', data.video_type || 'whatsapp');
+        showToast('🎉 Vídeo gerado com sucesso!', 'success');
+        delete _trackedJobs[jobId];
+        if (Object.keys(_trackedJobs).length === 0 && _progressSSE) {
+            _progressSSE.close();
+            _progressSSE = null;
         }
+    }
 
-        if (data.status === 'error') {
-            es.close();
-            card.innerHTML += `<div class="progress-error">❌ ${data.error || 'Erro na renderização'}</div>`;
-            showToast('❌ Erro ao gerar vídeo', 'error');
+    if (data.status === 'error') {
+        const card = document.getElementById(`progress-${jobId}`);
+        card.innerHTML += `<div class="progress-error">❌ ${data.error || 'Erro na renderização'}</div>`;
+        showToast('❌ Erro ao gerar vídeo', 'error');
+        delete _trackedJobs[jobId];
+        if (Object.keys(_trackedJobs).length === 0 && _progressSSE) {
+            _progressSSE.close();
+            _progressSSE = null;
         }
-    };
-
-    es.onerror = () => {
-        es.close();
-        document.getElementById(`det-${jobId}`).textContent = 'Conexão SSE perdida. Verifique os Detalhes.';
-    };
+    }
 }
 
 // ── Adicionar Job à Lista ──

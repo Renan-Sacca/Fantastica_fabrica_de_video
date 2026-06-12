@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Todos os Vídeos — Fábrica de Vídeo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <style>
+        .back-link { display:inline-flex; align-items:center; gap:6px; color:var(--text-muted); text-decoration:none; font-size:14px; margin-bottom:20px; }
+        .back-link:hover { color:var(--text); }
+        .jobs-grid { display:grid; gap:16px; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="app-header">
+            <div class="header-content">
+                <div class="logo">
+                    <span class="logo-icon">🎬</span>
+                    <div class="logo-text">
+                        <h1>Fantástica Fábrica de Vídeo</h1>
+                        <p class="tagline">Todos os Vídeos Gerados</p>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <a href="/" class="back-link">← Voltar ao Dashboard</a>
+
+            <section class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <h2 class="card-title" style="margin-bottom: 0;">
+                        <span class="card-icon">🗂️</span>
+                        Histórico Completo
+                    </h2>
+                    <button type="button" class="btn btn-secondary" onclick="syncDrive()" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
+                        Sincronizar com Drive
+                    </button>
+                </div>
+                <div class="jobs-list jobs-grid" id="jobs-list">
+                    {% if jobs %}
+                        {% for job in jobs %}
+                        <div class="job-item" data-job-id="{{ job.job_id }}">
+                            <div class="job-info">
+                                <span class="job-name">{{ job.title }}</span>
+                                <span class="job-id">#{{ job.job_id }}</span>
+                                <span class="job-type-badge">{{ job.video_type }}</span>
+                                <span class="job-status-badge {{ job.status }}" style="margin-left: 10px; font-size: 11px;">{{ job.status }}</span>
+                            </div>
+                            <div class="job-actions">
+                                <a href="/video/{{ job.job_id }}" class="btn btn-detail">🔍 Detalhes</a>
+                                <button class="btn btn-delete" onclick="deleteJob('{{ job.job_id }}')">🗑️</button>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="jobs-empty">
+                            <span class="empty-icon">🎞️</span>
+                            <p>Nenhum vídeo gerado ainda</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+    <script>
+        async function deleteJob(jobId) {
+            if (!confirm('Remover este job do histórico local?')) return;
+            const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+            if (res.ok) {
+                document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
+                showToast('🗑️ Job removido', 'info');
+            } else {
+                showToast('❌ Erro ao remover job', 'error');
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        function syncDrive() {
+            const btn = event.currentTarget;
+            btn.disabled = true;
+            btn.innerHTML = 'Sincronizando...';
+            fetch('/api/sync', { method: 'POST' })
+                .then(res => {
+                    if(res.ok) window.location.reload();
+                    else alert('Erro ao sincronizar');
+                })
+                .catch(e => alert('Erro de rede ao sincronizar'))
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg> Sincronizar com Drive';
+                });
+        }
+    </script>
+</body>
+</html>
