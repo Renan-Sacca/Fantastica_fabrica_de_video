@@ -103,9 +103,7 @@ const form = document.getElementById('render-form');
 if (form) {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const btn = document.getElementById('btn-generate');
-        const btnText = btn.querySelector('.btn-text');
-
+        
         // Validação básica
         const title = document.getElementById('title').value.trim();
         if (!title) {
@@ -116,6 +114,7 @@ if (form) {
         const convText = document.getElementById('conversation_text')?.value.trim();
         const convFile = document.getElementById('conversation_file')?.files[0];
         const activeTab = document.querySelector('.tab.active')?.dataset.tab;
+        
         if (activeTab === 'text' && !convText) {
             showToast('❌ Por favor, cole a conversa no campo de texto', 'error');
             return;
@@ -125,39 +124,118 @@ if (form) {
             return;
         }
 
-        // UI: loading
-        btn.disabled = true;
-        btnText.textContent = 'Enviando para o Drive...';
-        btn.querySelector('.btn-icon').textContent = '⏳';
-
-        try {
-            const formData = new FormData(form);
-
-            // Remover campo da aba inativa
-            if (activeTab === 'text') formData.delete('conversation_file');
-            if (activeTab === 'file') formData.delete('conversation_text');
-
-            const res = await fetch('/render', { method: 'POST', body: formData });
-            const data = await res.json();
-
-            if (!res.ok || data.error) {
-                showToast('❌ ' + (data.error || 'Erro ao criar job'), 'error');
-                return;
-            }
-
-            // Sucesso: mostrar progresso
-            const jobId = data.job_id;
-            showToast(`✅ Job #${jobId} criado! Aguardando worker...`, 'success');
-            startProgressTracking(jobId, title);
-
-        } catch (err) {
-            showToast('❌ Erro de rede: ' + err.message, 'error');
-        } finally {
-            btn.disabled = false;
-            btnText.textContent = 'Gerar Vídeo';
-            btn.querySelector('.btn-icon').textContent = '🎬';
+        // Lógica de Modal [IMAGE]
+        let textToParse = convText || "";
+        if (activeTab === 'file' && convFile) {
+            textToParse = await new Promise(resolve => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.readAsText(convFile);
+            });
         }
+
+        const imgRegex = /\[IMAGE\]\s+(.+)/gi;
+        let matches;
+        const requiredImages = [];
+        while ((matches = imgRegex.exec(textToParse)) !== null) {
+            const name = matches[1].trim();
+            if (!requiredImages.includes(name)) requiredImages.push(name);
+        }
+
+        if (requiredImages.length > 0) {
+            window._pendingFormData = new FormData(form);
+            window._pendingFormTab = activeTab;
+            showImagesModal(requiredImages);
+            return;
+        }
+
+        submitGenerateForm(new FormData(form), activeTab);
     });
+}
+
+function showImagesModal(requiredImages, existingImagesMap = {}) {
+    const list = document.getElementById('modal-images-list');
+    if (!list) return;
+    list.innerHTML = '';
+    requiredImages.forEach((name, idx) => {
+        const hasExisting = existingImagesMap[name];
+        list.innerHTML += `
+            <div class="image-upload-row">
+                <div class="image-upload-info">
+                    <span class="image-tag-name">[IMAGE] ${name}</span>
+                    ${hasExisting ? `<span class="image-status">✅ Arquivo já enviado. Selecione outro para substituir ou deixe vazio para manter.</span>` : ''}
+                </div>
+                <div>
+                    <input type="file" id="modal-img-${idx}" class="image-file-input" accept="image/*" data-name="${name}">
+                </div>
+            </div>
+        `;
+    });
+    document.getElementById('images-modal').style.display = 'flex';
+}
+
+function closeImagesModal() {
+    document.getElementById('images-modal').style.display = 'none';
+}
+
+async function confirmImagesModal() {
+    const formData = window._pendingFormData;
+    if (!formData) return;
+    
+    // Anexar imagens com o nome exato
+    const inputs = document.querySelectorAll('.image-file-input');
+    for (let input of inputs) {
+        if (input.files.length > 0) {
+            const file = input.files[0];
+            const name = input.dataset.name;
+            const renamedFile = new File([file], name, { type: file.type });
+            formData.append('conversation_images', renamedFile);
+        }
+    }
+    
+    closeImagesModal();
+    
+    if (window._submitCallback) {
+        window._submitCallback(formData);
+    } else {
+        submitGenerateForm(formData, window._pendingFormTab);
+    }
+}
+
+async function submitGenerateForm(formData, activeTab) {
+    const btn = document.getElementById('btn-generate');
+    const btnText = btn.querySelector('.btn-text');
+    
+    // Remover campo da aba inativa
+    if (activeTab === 'text') formData.delete('conversation_file');
+    if (activeTab === 'file') formData.delete('conversation_text');
+    
+    // UI: loading
+    btn.disabled = true;
+    btnText.textContent = 'Enviando para o Drive...';
+    btn.querySelector('.btn-icon').textContent = '⏳';
+
+    try {
+        const res = await fetch('/render', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+            showToast('❌ ' + (data.error || 'Erro ao criar job'), 'error');
+            return;
+        }
+
+        const jobId = data.job_id;
+        const title = formData.get('title');
+        showToast(`✅ Job #${jobId} criado! Aguardando worker...`, 'success');
+        startProgressTracking(jobId, title);
+
+    } catch (err) {
+        showToast('❌ Erro de rede: ' + err.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btnText.textContent = 'Gerar Vídeo';
+        btn.querySelector('.btn-icon').textContent = '🎬';
+    }
 }
 
 // ── SSE Global de Progresso — 1 conexão por sessão de navegador ──

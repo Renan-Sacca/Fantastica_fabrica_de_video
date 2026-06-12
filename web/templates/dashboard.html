@@ -290,6 +290,23 @@ Comandos especiais:
         </main>
     </div>
 
+    <!-- Modal de Imagens Dinâmicas -->
+    <div id="images-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📸 Imagens da Conversa</h2>
+                <p>Detectamos tags [IMAGE] no seu texto. Por favor, selecione as imagens correspondentes abaixo:</p>
+            </div>
+            <div id="modal-images-list" class="modal-body">
+                <!-- Preenchido via JS -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeImagesModal()">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="confirmImagesModal()">Confirmar e Gerar Vídeo</button>
+            </div>
+        </div>
+    </div>
+
     <div class="toast-container" id="toast-container"></div>
     <script src="/static/dashboard.js"></script>
     <script>

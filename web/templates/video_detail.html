@@ -154,9 +154,42 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <div style="margin-top: 10px; font-size: 13px; color: var(--text-muted);">
-                        <i>Arquivos de mídia (foto, wallpaper, áudio) não podem ser alterados na edição. Para usar novas mídias, crie um job novo no Dashboard.</i>
+                    <!-- Adicionar edição de mídias -->
+                    <div class="edit-grid">
+                        <div class="form-group">
+                            <label>Foto de Perfil (Opcional)</label>
+                            <div class="file-upload compact">
+                                <input type="file" name="contact_photo" accept="image/*" />
+                                <div class="file-upload-content">
+                                    <span class="upload-placeholder" style="font-size:24px;">👤</span>
+                                    <span class="file-upload-text">Substituir Foto</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Papel de Parede (Opcional)</label>
+                            <div class="file-upload compact">
+                                <input type="file" name="wallpaper" accept="image/*" />
+                                <div class="file-upload-content">
+                                    <span class="upload-placeholder" style="font-size:24px;">🖼️</span>
+                                    <span class="file-upload-text">Substituir Fundo</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Música de Fundo (Opcional)</label>
+                            <div class="file-upload compact">
+                                <input type="file" name="background_music" accept="audio/*" />
+                                <div class="file-upload-content">
+                                    <span class="upload-placeholder" style="font-size:24px;">🎵</span>
+                                    <span class="file-upload-text">Substituir Áudio</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 10px; font-size: 13px; color: var(--accent);">
+                        <i>Você agora pode editar os arquivos de mídia. Envie um novo arquivo para substituir o atual, ou deixe em branco para manter.</i>
                     </div>
 
                     <div class="action-row" style="margin-top: 20px;">
@@ -168,6 +201,23 @@
                 </form>
             </section>
         </main>
+    </div>
+
+    <!-- Modal de Imagens Dinâmicas -->
+    <div id="images-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📸 Imagens da Conversa</h2>
+                <p>Confirme ou substitua as imagens mapeadas no seu texto abaixo:</p>
+            </div>
+            <div id="modal-images-list" class="modal-body">
+                <!-- Preenchido via JS -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeImagesModal()">Cancelar</button>
+                <button type="button" class="btn-primary" onclick="confirmImagesModal()">Confirmar e Recriar Vídeo</button>
+            </div>
+        </div>
     </div>
 
     <div class="toast-container" id="toast-container"></div>
@@ -199,8 +249,92 @@
         };
     }
 
+    const JOB_IMAGES = {{ job.get('files', {}).get('imagens', {}) | tojson | safe }};
+
+    function showImagesModal(requiredImages) {
+        const list = document.getElementById('modal-images-list');
+        list.innerHTML = '';
+        requiredImages.forEach((name, idx) => {
+            const hasExisting = !!JOB_IMAGES[name];
+            list.innerHTML += `
+                <div class="image-upload-row">
+                    <div class="image-upload-info">
+                        <span class="image-tag-name">[IMAGE] ${name}</span>
+                        ${hasExisting ? `<span class="image-status">✅ Arquivo já enviado. Selecione outro para substituir ou deixe vazio para manter.</span>` : '<span class="image-status" style="color:var(--warning)">⚠️ Nova imagem. É necessário enviar o arquivo.</span>'}
+                    </div>
+                    <div>
+                        <input type="file" id="modal-img-${idx}" class="image-file-input" accept="image/*" data-name="${name}">
+                    </div>
+                </div>
+            `;
+        });
+        document.getElementById('images-modal').style.display = 'flex';
+    }
+
+    function closeImagesModal() {
+        document.getElementById('images-modal').style.display = 'none';
+        const btn = document.getElementById("btn-recreate");
+        btn.disabled = false;
+        btn.querySelector('.btn-text').textContent = "Salvar Edições e Recriar Vídeo";
+    }
+
+    async function confirmImagesModal() {
+        const formData = window._pendingFormData;
+        const requiredImages = window._requiredImages;
+        if (!formData) return;
+        
+        // Registrar imagens ativas
+        formData.append('active_image_names', JSON.stringify(requiredImages));
+        
+        const inputs = document.querySelectorAll('.image-file-input');
+        for (let input of inputs) {
+            const name = input.dataset.name;
+            if (input.files.length > 0) {
+                const file = input.files[0];
+                const renamedFile = new File([file], name, { type: file.type });
+                formData.append('conversation_images', renamedFile);
+            } else if (!JOB_IMAGES[name]) {
+                showToast(`❌ Você precisa selecionar um arquivo para [IMAGE] ${name}`, "error");
+                return;
+            }
+        }
+        
+        closeImagesModal();
+        await submitRecreate(formData);
+    }
+
     async function recriarVideo(e, jobId) {
         e.preventDefault();
+        const btn = document.getElementById("btn-recreate");
+        const btnText = btn.querySelector('.btn-text');
+        
+        btn.disabled = true;
+        btnText.textContent = "Verificando...";
+
+        const formData = new FormData(e.target);
+        const convText = formData.get('conversation_text') || "";
+        
+        const imgRegex = /\[IMAGE\]\s+(.+)/gi;
+        let matches;
+        const requiredImages = [];
+        while ((matches = imgRegex.exec(convText)) !== null) {
+            const name = matches[1].trim();
+            if (!requiredImages.includes(name)) requiredImages.push(name);
+        }
+
+        window._pendingFormData = formData;
+        window._requiredImages = requiredImages;
+        
+        if (requiredImages.length > 0) {
+            showImagesModal(requiredImages);
+            return;
+        }
+
+        formData.append('active_image_names', "[]");
+        await submitRecreate(formData);
+    }
+
+    async function submitRecreate(formData) {
         const btn = document.getElementById("btn-recreate");
         const btnText = btn.querySelector('.btn-text');
         
@@ -208,8 +342,7 @@
         btnText.textContent = "Salvando e enviando para renderização...";
         
         try {
-            const formData = new FormData(e.target);
-            const res = await fetch(`/video/${jobId}/edit`, { 
+            const res = await fetch(`/video/${JOB_ID}/edit`, { 
                 method: "POST",
                 body: formData 
             });

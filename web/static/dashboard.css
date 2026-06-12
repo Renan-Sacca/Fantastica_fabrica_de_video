@@ -802,6 +802,100 @@ input[type="range"]::-webkit-slider-thumb:hover {
     to { transform: rotate(360deg); }
 }
 
+/* ── Modal ── */
+
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(5px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.modal-content {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+
+.modal-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.modal-header h2 {
+    font-size: 18px;
+    margin-bottom: 8px;
+}
+
+.modal-header p {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.modal-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+/* Image Row inside Modal */
+.image-upload-row {
+    background: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.image-upload-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.image-tag-name {
+    font-weight: 600;
+    font-size: 14px;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.image-file-input {
+    font-size: 12px;
+    width: 100%;
+}
+
+.image-status {
+    font-size: 11px;
+    color: var(--accent);
+    margin-top: 4px;
+    display: block;
+}
+
 /* ── Title Card ── */
 .title-card { padding: 20px 24px; }
 .title-row { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end; }

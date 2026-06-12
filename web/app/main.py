@@ -553,6 +553,11 @@ async def edit_video(
     scroll_speed: float = Form(1.0),
     animation_style: str = Form("fade"),
     conversation_text: str = Form(""),
+    contact_photo: Optional[UploadFile] = File(None),
+    wallpaper: Optional[UploadFile] = File(None),
+    background_music: Optional[UploadFile] = File(None),
+    conversation_images: List[UploadFile] = File(default=[]),
+    active_image_names: str = Form("[]"),  # JSON array de nomes de imagens que devem permanecer
 ):
     """Atualiza as configs do vídeo no Drive e publica no RabbitMQ para recriar."""
     job_info = jobs_store.get_job(job_id)
@@ -612,12 +617,75 @@ async def edit_video(
                 )
                 metadata["files"]["conversa"] = new_id
 
-        # 4. Salvar metadata.json modificado
+        # 4. Processar novas mídias e atualizar metadata["files"]
+        job_folder_id = job_info["drive_folder_id"]
+
+        # 4.1 Foto de Perfil
+        if contact_photo and contact_photo.filename:
+            content = await contact_photo.read()
+            ext = Path(contact_photo.filename).suffix or ".jpg"
+            file_id = await loop.run_in_executor(
+                None, drive.upload_bytes, content, f"foto_perfil{ext}", job_folder_id, "image/jpeg"
+            )
+            metadata["files"]["foto_perfil"] = file_id
+            metadata["files"]["foto_perfil_ext"] = ext
+
+        # 4.2 Papel de Parede
+        if wallpaper and wallpaper.filename:
+            content = await wallpaper.read()
+            ext = Path(wallpaper.filename).suffix or ".jpg"
+            file_id = await loop.run_in_executor(
+                None, drive.upload_bytes, content, f"papel_parede{ext}", job_folder_id, "image/jpeg"
+            )
+            metadata["files"]["papel_parede"] = file_id
+            metadata["files"]["papel_parede_ext"] = ext
+
+        # 4.3 Música de Fundo
+        if background_music and background_music.filename:
+            content = await background_music.read()
+            ext = Path(background_music.filename).suffix or ".mp3"
+            file_id = await loop.run_in_executor(
+                None, drive.upload_bytes, content, f"musica{ext}", job_folder_id, "audio/mpeg"
+            )
+            metadata["files"]["musica"] = file_id
+            metadata["files"]["musica_ext"] = ext
+
+        # 4.4 Imagens da Conversa (Sincronização)
+        if "imagens" not in metadata["files"]:
+            metadata["files"]["imagens"] = {}
+            metadata["files"]["imagens_folder_id"] = await loop.run_in_executor(
+                None, drive.get_or_create_folder, "imagens", job_folder_id
+            )
+            
+        imagens_folder_id = metadata["files"]["imagens_folder_id"]
+        
+        # Limpar imagens removidas pelo usuário baseado nas tags
+        try:
+            active_names = json.loads(active_image_names)
+            current_images = metadata["files"]["imagens"]
+            # Manter apenas as que estão na lista de ativas
+            metadata["files"]["imagens"] = {
+                name: fid for name, fid in current_images.items() if name in active_names
+            }
+        except Exception as e:
+            logger.warning(f"Erro ao parsear active_image_names: {e}")
+
+        # Subir novas imagens da conversa
+        for img in conversation_images:
+            if img and img.filename:
+                content = await img.read()
+                file_id = await loop.run_in_executor(
+                    None, drive.upload_bytes, content, img.filename,
+                    imagens_folder_id, img.content_type or "image/jpeg",
+                )
+                metadata["files"]["imagens"][img.filename] = file_id
+
+        # 5. Salvar metadata.json modificado
         await loop.run_in_executor(
             None, drive.update_json, job_info["metadata_file_id"], metadata
         )
 
-        # 5. Publicar no RabbitMQ
+        # 6. Publicar no RabbitMQ
         await publish_job(job_id, video_type)
 
         return JSONResponse({"job_id": job_id, "status": "queued"})
