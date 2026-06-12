@@ -78,5 +78,21 @@
     "drive_folder_id": "1xS8n9jsByJJ-oB77YkNIbSu8e_9WBJm1",
     "metadata_file_id": "1rm22OfiwXyU52qx9r_vIXx3SwVIruMMX",
     "created_at": "2026-06-12T23:05:58.003031"
+  },
+  "1be7bbcf": {
+    "job_id": "1be7bbcf",
+    "title": "testea eaea",
+    "video_type": "whatsapp",
+    "drive_folder_id": "1EHLpV_6y9Cg1uEnetZ2biI5hgmK-PLAZ",
+    "metadata_file_id": "1hOthFxJCu3vuzz8P8Kh9HI7S2Hyll52K",
+    "created_at": "2026-06-12T23:32:12.090993"
+  },
+  "5b5a5e7b": {
+    "job_id": "5b5a5e7b",
+    "title": "testea eaea (Cópia)",
+    "video_type": "whatsapp",
+    "drive_folder_id": "1MB5k1YkT25EkFld-PDicaSyuT_Zu4Kqk",
+    "metadata_file_id": "10N5BVqBZYBksYuqSkIVwic9gqOnlcjPF",
+    "created_at": "2026-06-12T23:37:29.326109"
   }
 }

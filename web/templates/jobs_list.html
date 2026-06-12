@@ -36,10 +36,16 @@
                         <span class="card-icon">🗂️</span>
                         Histórico Completo
                     </h2>
-                    <button type="button" class="btn btn-secondary" onclick="syncDrive()" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
-                        Sincronizar com Drive
-                    </button>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <input type="text" id="job-search" placeholder="Buscar por título ou ID..." 
+                               onkeyup="filterJobs()" 
+                               style="padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: var(--text-primary); font-size: 0.9rem; min-width: 250px;">
+                        
+                        <button type="button" class="btn btn-secondary" onclick="syncDrive()" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
+                            Sincronizar
+                        </button>
+                    </div>
                 </div>
                 <div class="jobs-list jobs-grid" id="jobs-list">
                     {% if jobs %}
@@ -52,6 +58,7 @@
                                 <span class="job-status-badge {{ job.status }}" style="margin-left: 10px; font-size: 11px;">{{ job.status }}</span>
                             </div>
                             <div class="job-actions">
+                                <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 13px;" onclick="openDuplicateModal('{{ job.job_id }}', '{{ job.title }}')">📄 Duplicar</button>
                                 <a href="/video/{{ job.job_id }}" class="btn btn-detail">🔍 Detalhes</a>
                                 <button class="btn btn-delete" onclick="deleteJob('{{ job.job_id }}')">🗑️</button>
                             </div>
@@ -69,7 +76,109 @@
     </div>
 
     <div class="toast-container" id="toast-container"></div>
+    
+    <!-- Modal Duplicação -->
+    <div id="duplicate-modal" class="modal-overlay" style="display:none; z-index: 9999;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="margin: 0; font-size: 1.5rem; display: flex; align-items: center; gap: 8px;"><span style="font-size: 1.2em;">📄</span> Duplicar Vídeo</h2>
+                <button type="button" class="btn-close" onclick="closeDuplicateModal()" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer;">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group" style="margin-top: 15px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 14px;">Novo Título da Pasta</label>
+                    <input type="text" id="dup-new-title" class="form-control" style="width:100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: white; font-size: 15px;">
+                </div>
+                
+                <div class="form-group" style="margin-top: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 14px;">Selecione os arquivos para aproveitar:</label>
+                    <div id="dup-files-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+                        <span style="color:var(--text-muted); font-size: 13px;">Carregando arquivos...</span>
+                    </div>
+                </div>
+
+                <button id="btn-confirm-dup" class="btn-primary" style="width: 100%; margin-top: 24px; padding: 14px; font-size: 16px; border-radius: 12px;" onclick="submitDuplicate()">
+                    <span class="btn-text">Confirmar Duplicação</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    
     <script>
+        let currentDupJobId = null;
+
+        async function openDuplicateModal(jobId, oldTitle) {
+            currentDupJobId = jobId;
+            document.getElementById('duplicate-modal').style.display = 'flex';
+            document.getElementById('dup-new-title').value = oldTitle + ' (Cópia)';
+            const listContainer = document.getElementById('dup-files-list');
+            listContainer.innerHTML = '<span style="color:var(--text-muted); font-size: 13px;">Buscando arquivos no Drive... ⏳</span>';
+            document.getElementById('btn-confirm-dup').disabled = true;
+
+            try {
+                const res = await fetch(`/api/jobs/${jobId}/details`);
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                listContainer.innerHTML = '';
+                const files = data.files || {};
+                
+                if (Object.keys(files).length === 0) {
+                    listContainer.innerHTML = '<span style="color:var(--text-muted); font-size: 13px;">Nenhum arquivo encontrado.</span>';
+                } else {
+                    for (const [key, fileId] of Object.entries(files)) {
+                        if (key.endsWith('_ext')) continue;
+                        
+                        listContainer.innerHTML += `
+                            <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 6px; border: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='rgba(255,255,255,0.03)'">
+                                <input type="checkbox" class="dup-file-cb" value="${key}" checked style="width: 16px; height: 16px; accent-color: var(--accent);">
+                                <span style="font-weight: 500;">${key}</span>
+                            </label>
+                        `;
+                    }
+                }
+                document.getElementById('btn-confirm-dup').disabled = false;
+            } catch (err) {
+                listContainer.innerHTML = `<span style="color:var(--danger); font-size: 13px;">Erro: ${err.message}</span>`;
+            }
+        }
+
+        function closeDuplicateModal() {
+            document.getElementById('duplicate-modal').style.display = 'none';
+        }
+
+        async function submitDuplicate() {
+            if (!currentDupJobId) return;
+            const btn = document.getElementById('btn-confirm-dup');
+            btn.disabled = true;
+            btn.querySelector('.btn-text').textContent = "Copiando arquivos do Drive... ⏳";
+
+            const newTitle = document.getElementById('dup-new-title').value;
+            const checkboxes = document.querySelectorAll('.dup-file-cb:checked');
+            const filesToCopy = Array.from(checkboxes).map(cb => cb.value);
+
+            try {
+                const res = await fetch(`/video/${currentDupJobId}/duplicate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_title: newTitle, files_to_copy: filesToCopy })
+                });
+                const data = await res.json();
+                
+                if (data.job_id) {
+                    showToast('✅ Job duplicado com sucesso!', 'success');
+                    closeDuplicateModal();
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showToast('❌ Erro: ' + data.error, 'error');
+                }
+            } catch(e) {
+                showToast('❌ Erro de rede ao duplicar', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.querySelector('.btn-text').textContent = "Confirmar Duplicação";
+            }
+        }
         async function deleteJob(jobId) {
             if (!confirm('Remover este job do histórico local?')) return;
             const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
@@ -79,6 +188,22 @@
             } else {
                 showToast('❌ Erro ao remover job', 'error');
             }
+        }
+
+        function filterJobs() {
+            const query = document.getElementById('job-search').value.toLowerCase();
+            const items = document.querySelectorAll('.job-item');
+            
+            items.forEach(item => {
+                const name = item.querySelector('.job-name').textContent.toLowerCase();
+                const id = item.querySelector('.job-id').textContent.toLowerCase();
+                
+                if (name.includes(query) || id.includes(query)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
         }
 
         function showToast(message, type = 'info') {

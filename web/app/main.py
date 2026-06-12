@@ -724,6 +724,131 @@ async def get_drive_media(file_id: str, range: str = Header(None)):
         logger.error(f"Erro ao obter mídia {file_id}: {e}")
         return Response(content=b"Not found", status_code=404)
 
+@app.get("/api/jobs/{job_id}/details")
+async def api_job_details(job_id: str):
+    """Retorna os metadados brutos (JSON) de um job para listagem no modal de duplicação."""
+    job_info = jobs_store.get_job(job_id)
+    if not job_info:
+        return JSONResponse({"error": "Job não encontrado"}, status_code=404)
+
+    drive = get_drive(TOKEN_FILE)
+    try:
+        loop = asyncio.get_event_loop()
+        metadata = await loop.run_in_executor(None, drive.read_json, job_info["metadata_file_id"])
+        return JSONResponse(metadata)
+    except Exception as e:
+        logger.error(f"Erro ao buscar metadados do job {job_id}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/video/{job_id}/duplicate")
+async def api_duplicate_job(job_id: str, request: Request):
+    """Duplica um job e os arquivos selecionados no Drive."""
+    try:
+        data = await request.json()
+        new_title = data.get("new_title", f"Cópia de {job_id}")
+        files_to_copy = data.get("files_to_copy", [])
+
+        job_info = jobs_store.get_job(job_id)
+        if not job_info:
+            return JSONResponse({"error": "Job original não encontrado"}, status_code=404)
+
+        drive = get_drive(TOKEN_FILE)
+        loop = asyncio.get_event_loop()
+        
+        # 1. Ler metadata original
+        metadata = await loop.run_in_executor(None, drive.read_json, job_info["metadata_file_id"])
+        original_files = metadata.get("files", {})
+
+        # 2. Criar novo job
+        new_job_id = uuid.uuid4().hex[:8]
+        video_type = job_info.get("video_type", "whatsapp")
+        
+        # O tipo da pasta no Drive
+        if video_type == "whatsapp":
+            drive_type_folder = "WhatsApp"
+        elif video_type == "reddit":
+            drive_type_folder = "Reddit"
+        else:
+            drive_type_folder = "Outros"
+
+        new_folder_id = await loop.run_in_executor(
+            None, drive.create_job_folder, new_title, new_job_id, drive_type_folder
+        )
+        new_imagens_id = await loop.run_in_executor(
+            None, drive.get_or_create_folder, "imagens", new_folder_id
+        )
+
+        # 3. Copiar arquivos selecionados e suas extensões
+        new_files = {}
+        for key in files_to_copy:
+            # Ignorar tentativas manuais de cópia de extensões ou a pasta de imagens
+            if key.endswith("_ext") or key == "imagens_folder_id":
+                continue
+
+            file_data = original_files.get(key)
+            if not file_data:
+                continue
+                
+            # Tratamento especial para as imagens da conversa (que são um dicionário)
+            if key == "imagens" and isinstance(file_data, dict):
+                new_files["imagens"] = {}
+                for img_name, img_id in file_data.items():
+                    copied_img_id = await loop.run_in_executor(
+                        None, drive.copy_file, img_id, new_imagens_id
+                    )
+                    new_files["imagens"][img_name] = copied_img_id
+                continue
+
+            # Para arquivos normais (string file_id)
+            file_id = file_data
+            # Identificar se deve ir para a subpasta "imagens"
+            if key == "foto_perfil" or key == "papel_parede":
+                parent_id = new_imagens_id
+            else:
+                parent_id = new_folder_id
+                
+            # Copiar no Drive
+            copied_id = await loop.run_in_executor(
+                None, drive.copy_file, file_id, parent_id
+            )
+            new_files[key] = copied_id
+            
+            # Se esse arquivo tinha uma extensão atrelada no metadata original, trazemos a string
+            ext_key = f"{key}_ext"
+            if ext_key in original_files:
+                new_files[ext_key] = original_files[ext_key]
+
+        # Garantir que a nova pasta de imagens seja referenciada no metadata
+        new_files["imagens_folder_id"] = new_imagens_id
+
+        # 4. Criar metadata.json novo
+        new_metadata = {
+            "job_id": new_job_id,
+            "title": new_title,
+            "video_type": video_type,
+            "status": "pending",
+            "files": new_files
+        }
+        
+        new_metadata_id = await loop.run_in_executor(
+            None, drive.upload_json, new_metadata, "metadata.json", new_folder_id
+        )
+
+        # 5. Salvar no store local
+        jobs_store.add_job(
+            job_id=new_job_id,
+            title=new_title,
+            video_type=video_type,
+            drive_folder_id=new_folder_id,
+            metadata_file_id=new_metadata_id,
+        )
+
+        return JSONResponse({"job_id": new_job_id, "status": "success"})
+
+    except Exception as e:
+        logger.error(f"Erro ao duplicar job {job_id}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 
 @app.post("/api/sync")
 async def sync_drive(request: Request):

@@ -105,6 +105,19 @@ class DriveClient:
         content = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
         return self.upload_bytes(content, filename, parent_id, "application/json")
 
+    def copy_file(self, file_id: str, new_parent_id: str, new_name: Optional[str] = None) -> str:
+        """Copia um arquivo existente no Drive para uma nova pasta. Retorna o ID da cópia."""
+        body = {"parents": [new_parent_id]}
+        if new_name:
+            body["name"] = new_name
+            
+        copied_file = self.service.files().copy(
+            fileId=file_id, 
+            body=body,
+            fields="id"
+        ).execute(num_retries=5)
+        return copied_file["id"]
+
     # ── Leitura ──
 
     def read_bytes(self, file_id: str) -> bytes:
