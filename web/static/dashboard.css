@@ -98,9 +98,12 @@ body::before {
     gap: 14px;
 }
 
-.logo-icon {
-    font-size: 36px;
-    filter: drop-shadow(0 0 12px rgba(37, 211, 102, 0.3));
+.logo-img {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    object-fit: cover;
+    box-shadow: 0 0 16px rgba(37, 211, 102, 0.25);
 }
 
 .logo-text h1 {
@@ -894,6 +897,42 @@ input[type="range"]::-webkit-slider-thumb:hover {
     color: var(--accent);
     margin-top: 4px;
     display: block;
+}
+
+/* ── Uploading Modal ── */
+
+.uploading-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 10px 0;
+}
+
+.uploading-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 15px;
+    color: var(--text-secondary);
+    transition: all 0.3s ease;
+}
+
+.uploading-step.active {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.uploading-step.done {
+    color: var(--accent);
+}
+
+.uploading-icon {
+    font-size: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
 }
 
 /* ── Title Card ── */

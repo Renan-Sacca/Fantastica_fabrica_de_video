@@ -218,34 +218,149 @@ async function confirmImagesModal() {
     }
 }
 
+function showUploadingModal(files = []) {
+    let modal = document.getElementById('uploading-modal');
+    if (modal) {
+        modal.remove();
+    }
+    
+    let filesHtml = '';
+    if (files && files.length > 0) {
+        filesHtml = '<ul id="upload-files-list" style="margin: 8px 0 0 0; padding-left: 20px; font-size: 13px; color: var(--text-muted); list-style: none;">';
+        files.forEach((f, idx) => {
+            filesHtml += `<li id="file-item-${idx}" style="margin-bottom: 4px; transition: color 0.3s;"><span class="file-icon" style="margin-right: 6px;">⏳</span>${f}</li>`;
+        });
+        filesHtml += '</ul>';
+    }
+
+    modal = document.createElement('div');
+    modal.id = 'uploading-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2>🚀 Preparando Vídeo</h2>
+                <p>Por favor aguarde enquanto enviamos seus arquivos...</p>
+            </div>
+            <div class="modal-body">
+                <div class="uploading-steps">
+                    <div id="step-1" class="uploading-step active">
+                        <span class="uploading-icon"><div class="spinner" style="width:14px;height:14px;border-color:var(--accent);border-top-color:transparent;"></div></span>
+                        <span>Analisando requisição e textos...</span>
+                    </div>
+                    <div id="step-2" class="uploading-step" style="align-items: flex-start;">
+                        <span class="uploading-icon" style="flex-shrink: 0;">⚪</span>
+                        <div style="display: flex; flex-direction: column;">
+                            <span>Fazendo upload de mídias no Drive...</span>
+                            ${filesHtml}
+                        </div>
+                    </div>
+                    <div id="step-3" class="uploading-step">
+                        <span class="uploading-icon">⚪</span>
+                        <span>Colocando na fila de renderização...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    const steps = modal.querySelectorAll('.uploading-step');
+    steps.forEach(s => { s.className = 'uploading-step'; s.querySelector('.uploading-icon').textContent = '⚪'; });
+    
+    modal.querySelector('#step-1').className = 'uploading-step active';
+    modal.querySelector('#step-1 .uploading-icon').innerHTML = '<div class="spinner" style="width:14px;height:14px;border-color:var(--accent);border-top-color:transparent;"></div>';
+    modal.style.display = 'flex';
+    
+    // Lista de timeouts para cancelar no complete
+    window._fileUploadTimers = [];
+    
+    window._uploadTimer = setTimeout(() => {
+        modal.querySelector('#step-1').className = 'uploading-step done';
+        modal.querySelector('#step-1 .uploading-icon').textContent = '✅';
+        modal.querySelector('#step-2').className = 'uploading-step active';
+        modal.querySelector('#step-2 .uploading-icon').innerHTML = '<div class="spinner" style="width:14px;height:14px;border-color:var(--accent);border-top-color:transparent;"></div>';
+        
+        const fileItems = modal.querySelectorAll('#upload-files-list li');
+        if (fileItems.length > 0) {
+            let delay = 0;
+            // Anima todos exceto o último, que só conclui quando a requisição terminar de verdade
+            for (let i = 0; i < fileItems.length - 1; i++) {
+                delay += 1500; // 1.5s por arquivo
+                const timerId = setTimeout(() => {
+                    fileItems[i].style.color = 'var(--accent)';
+                    fileItems[i].querySelector('.file-icon').textContent = '✅';
+                }, delay);
+                window._fileUploadTimers.push(timerId);
+            }
+        }
+    }, 1200);
+}
+
+function completeUploadingModal(callback) {
+    const modal = document.getElementById('uploading-modal');
+    if (!modal) return;
+    clearTimeout(window._uploadTimer);
+    if (window._fileUploadTimers) {
+        window._fileUploadTimers.forEach(t => clearTimeout(t));
+    }
+    
+    const fileItems = modal.querySelectorAll('#upload-files-list li');
+    fileItems.forEach(li => {
+        li.style.color = 'var(--accent)';
+        li.querySelector('.file-icon').textContent = '✅';
+    });
+    
+    modal.querySelector('#step-2').className = 'uploading-step done';
+    modal.querySelector('#step-2 .uploading-icon').textContent = '✅';
+    modal.querySelector('#step-3').className = 'uploading-step done';
+    modal.querySelector('#step-3 .uploading-icon').textContent = '✅';
+    
+    setTimeout(() => {
+        modal.style.display = 'none';
+        if (callback) callback();
+        const ps = document.getElementById('progress-section');
+        if (ps) {
+            ps.style.display = 'block';
+            window.scrollTo({ top: ps.offsetTop - 100, behavior: 'smooth' });
+        }
+    }, 800);
+}
+
 async function submitGenerateForm(formData, activeTab) {
     const btn = document.getElementById('btn-generate');
     const btnText = btn.querySelector('.btn-text');
     
-    // Remover campo da aba inativa
     if (activeTab === 'text') formData.delete('conversation_file');
     if (activeTab === 'file') formData.delete('conversation_text');
     
-    // UI: loading
+    const uploadedFiles = [];
+    for (let [key, value] of formData.entries()) {
+        if (value instanceof File && value.size > 0 && value.name) {
+            uploadedFiles.push(value.name);
+        }
+    }
+    
     btn.disabled = true;
-    btnText.textContent = 'Enviando para o Drive...';
-    btn.querySelector('.btn-icon').textContent = '⏳';
+    showUploadingModal(uploadedFiles);
 
     try {
         const res = await fetch('/render', { method: 'POST', body: formData });
         const data = await res.json();
 
-        if (!res.ok || data.error) {
-            showToast('❌ ' + (data.error || 'Erro ao criar job'), 'error');
-            return;
-        }
-
-        const jobId = data.job_id;
-        const title = formData.get('title');
-        showToast(`✅ Job #${jobId} criado! Aguardando worker...`, 'success');
-        startProgressTracking(jobId, title);
+        completeUploadingModal(() => {
+            if (!res.ok || data.error) {
+                showToast('❌ ' + (data.error || 'Erro ao criar job'), 'error');
+                return;
+            }
+            const jobId = data.job_id;
+            const title = formData.get('title');
+            showToast(`✅ Job #${jobId} criado! Aguardando worker...`, 'success');
+            startProgressTracking(jobId, title);
+        });
 
     } catch (err) {
+        completeUploadingModal();
         showToast('❌ Erro de rede: ' + err.message, 'error');
     } finally {
         btn.disabled = false;

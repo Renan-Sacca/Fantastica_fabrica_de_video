@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ job.title }} — Fábrica de Vídeo</title>
+    <link rel="icon" type="image/jpeg" href="/static/icon.jpg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/dashboard.css">
@@ -28,7 +29,7 @@
         <header class="app-header">
             <div class="header-content">
                 <div class="logo">
-                    <span class="logo-icon">🎬</span>
+                    <img src="/static/icon.jpg" alt="Logo" class="logo-img">
                     <div class="logo-text">
                         <h1>Fantástica Fábrica de Vídeo</h1>
                         <p class="tagline">Detalhes e Edição do Vídeo</p>
@@ -405,12 +406,123 @@
         await submitRecreate(formData);
     }
 
+    function showUploadingModal(files = []) {
+        let modal = document.getElementById('uploading-modal');
+        if (modal) {
+            modal.remove();
+        }
+        
+        let filesHtml = '';
+        if (files && files.length > 0) {
+            filesHtml = '<ul id="upload-files-list" style="margin: 8px 0 0 0; padding-left: 20px; font-size: 13px; color: var(--text-muted); list-style: none;">';
+            files.forEach((f, idx) => {
+                filesHtml += `<li id="file-item-${idx}" style="margin-bottom: 4px; transition: color 0.3s;"><span class="file-icon" style="margin-right: 6px;">⏳</span>${f}</li>`;
+            });
+            filesHtml += '</ul>';
+        }
+
+        modal = document.createElement('div');
+        modal.id = 'uploading-modal';
+        modal.className = 'modal-overlay';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h2>🚀 Preparando Edição</h2>
+                    <p>Por favor aguarde enquanto atualizamos seus arquivos...</p>
+                </div>
+                <div class="modal-body">
+                    <div class="uploading-steps" style="display: flex; flex-direction: column; gap: 16px; padding: 10px 0;">
+                        <div id="step-1" class="uploading-step" style="display:flex;align-items:center;gap:12px;font-size:15px;">
+                            <span class="uploading-icon" style="font-size:20px;width:28px;">⏳</span>
+                            <span>Verificando alterações...</span>
+                        </div>
+                        <div id="step-2" class="uploading-step" style="display:flex;align-items:flex-start;gap:12px;font-size:15px;">
+                            <span class="uploading-icon" style="font-size:20px;width:28px;flex-shrink:0;">⚪</span>
+                            <div style="display: flex; flex-direction: column;">
+                                <span>Substituindo mídias no Drive...</span>
+                                ${filesHtml}
+                            </div>
+                        </div>
+                        <div id="step-3" class="uploading-step" style="display:flex;align-items:center;gap:12px;font-size:15px;">
+                            <span class="uploading-icon" style="font-size:20px;width:28px;">⚪</span>
+                            <span>Colocando na fila de renderização...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        
+        const steps = modal.querySelectorAll('.uploading-step');
+        steps.forEach(s => { s.style.fontWeight = 'normal'; s.style.color = 'var(--text-secondary)'; s.querySelector('.uploading-icon').textContent = '⚪'; });
+        
+        modal.querySelector('#step-1').style.fontWeight = '600';
+        modal.querySelector('#step-1').style.color = 'var(--text-primary)';
+        modal.querySelector('#step-1 .uploading-icon').innerHTML = '<div class="spinner" style="width:14px;height:14px;border-color:var(--accent);border-top-color:transparent;"></div>';
+        modal.style.display = 'flex';
+        
+        window._fileUploadTimers = [];
+        
+        window._uploadTimer = setTimeout(() => {
+            modal.querySelector('#step-1').style.color = 'var(--accent)';
+            modal.querySelector('#step-1 .uploading-icon').textContent = '✅';
+            modal.querySelector('#step-2').style.fontWeight = '600';
+            modal.querySelector('#step-2').style.color = 'var(--text-primary)';
+            modal.querySelector('#step-2 .uploading-icon').innerHTML = '<div class="spinner" style="width:14px;height:14px;border-color:var(--accent);border-top-color:transparent;"></div>';
+            
+            const fileItems = modal.querySelectorAll('#upload-files-list li');
+            if (fileItems.length > 0) {
+                let delay = 0;
+                for (let i = 0; i < fileItems.length - 1; i++) {
+                    delay += 1500;
+                    const timerId = setTimeout(() => {
+                        fileItems[i].style.color = 'var(--accent)';
+                        fileItems[i].querySelector('.file-icon').textContent = '✅';
+                    }, delay);
+                    window._fileUploadTimers.push(timerId);
+                }
+            }
+        }, 1200);
+    }
+
+    function completeUploadingModal(callback) {
+        const modal = document.getElementById('uploading-modal');
+        if (!modal) return;
+        clearTimeout(window._uploadTimer);
+        if (window._fileUploadTimers) {
+            window._fileUploadTimers.forEach(t => clearTimeout(t));
+        }
+        
+        const fileItems = modal.querySelectorAll('#upload-files-list li');
+        fileItems.forEach(li => {
+            li.style.color = 'var(--accent)';
+            li.querySelector('.file-icon').textContent = '✅';
+        });
+        
+        modal.querySelector('#step-2').style.color = 'var(--accent)';
+        modal.querySelector('#step-2 .uploading-icon').textContent = '✅';
+        modal.querySelector('#step-3').style.color = 'var(--accent)';
+        modal.querySelector('#step-3 .uploading-icon').textContent = '✅';
+        
+        setTimeout(() => {
+            modal.style.display = 'none';
+            if (callback) callback();
+        }, 800);
+    }
+
     async function submitRecreate(formData) {
         const btn = document.getElementById("btn-recreate");
         const btnText = btn.querySelector('.btn-text');
         
+        const uploadedFiles = [];
+        for (let [key, value] of formData.entries()) {
+            if (value instanceof File && value.size > 0 && value.name) {
+                uploadedFiles.push(value.name);
+            }
+        }
+        
         btn.disabled = true;
-        btnText.textContent = "Fazendo upload dos arquivos... Aguarde.";
+        showUploadingModal(uploadedFiles);
         
         try {
             const res = await fetch(`/video/${JOB_ID}/edit`, { 
@@ -419,15 +531,18 @@
             });
             const data = await res.json();
             
-            if (data.job_id) {
-                showToast("✅ Edições salvas! Iniciando nova renderização...", "success");
-                setTimeout(() => location.reload(), 1500);
-            } else {
-                showToast("❌ " + (data.error || "Erro ao recriar"), "error");
-                btn.disabled = false;
-                btnText.textContent = "Salvar Edições e Recriar Vídeo";
-            }
+            completeUploadingModal(() => {
+                if (data.job_id) {
+                    showToast("✅ Edições salvas! Iniciando nova renderização...", "success");
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    showToast("❌ " + (data.error || "Erro ao recriar"), "error");
+                    btn.disabled = false;
+                    btnText.textContent = "Salvar Edições e Recriar Vídeo";
+                }
+            });
         } catch (err) {
+            completeUploadingModal();
             showToast("❌ Erro de rede: " + err.message, "error");
             btn.disabled = false;
             btnText.textContent = "Salvar Edições e Recriar Vídeo";

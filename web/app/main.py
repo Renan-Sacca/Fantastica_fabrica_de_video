@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import aio_pika
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile, Header
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -695,14 +695,31 @@ async def edit_video(
 
 
 @app.get("/api/drive/media/{file_id}")
-async def get_drive_media(file_id: str):
+async def get_drive_media(file_id: str, range: str = Header(None)):
     """Retorna o conteúdo binário de um arquivo do Drive (usado para preview)."""
     drive = get_drive(TOKEN_FILE)
     loop = asyncio.get_event_loop()
     try:
         content = await loop.run_in_executor(None, drive.read_bytes, file_id)
-        # Como o mimetype não é estrito para exibição em img/audio tags, o browser infere.
-        return Response(content=content)
+        file_size = len(content)
+        
+        if range:
+            start_str, end_str = range.replace("bytes=", "").split("-")
+            start = int(start_str) if start_str else 0
+            end = int(end_str) if end_str else file_size - 1
+            chunk = content[start:end+1]
+            headers = {
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(chunk)),
+            }
+            return Response(content=chunk, status_code=206, headers=headers)
+            
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size)
+        }
+        return Response(content=content, headers=headers)
     except Exception as e:
         logger.error(f"Erro ao obter mídia {file_id}: {e}")
         return Response(content=b"Not found", status_code=404)

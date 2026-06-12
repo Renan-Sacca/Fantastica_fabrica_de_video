@@ -6,7 +6,7 @@
 [10:32] João: Lembra daquela viagem que a gente planejou?
 [10:33] Maria: Claro! Para a praia, né?
 [10:33] João: Isso! Olha que foto linda que achei do lugar:
-[IMAGE] assets/imagens/praia.jpg
+[IMAGE] ae
 [10:34] Maria: Nossa, que lugar lindo!! 😍
 [10:34] Maria: Quando vamos?
 [10:35] João: Que tal no próximo feriado?
