@@ -303,6 +303,26 @@ async def job_status(job_id: str):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.delete("/api/jobs/{job_id}")
+async def api_delete_job(job_id: str, delete_drive: bool = False):
+    """Remove um job. Opcionalmente remove a pasta do Drive também."""
+    job_info = jobs_store.get_job(job_id)
+    if not job_info:
+        return JSONResponse({"error": "Job não encontrado"}, status_code=404)
+        
+    try:
+        if delete_drive:
+            drive = get_drive(TOKEN_FILE)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, drive.delete_file, job_info["drive_folder_id"])
+            
+        jobs_store.delete_job(job_id)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Erro ao remover job {job_id}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ──────────────────────────────────────────────────────────────
 # SSE: helpers
 # ──────────────────────────────────────────────────────────────
@@ -822,13 +842,20 @@ async def api_duplicate_job(job_id: str, request: Request):
         new_files["imagens_folder_id"] = new_imagens_id
 
         # 4. Criar metadata.json novo
-        new_metadata = {
+        new_metadata = metadata.copy()
+        new_metadata.update({
             "job_id": new_job_id,
             "title": new_title,
-            "video_type": video_type,
             "status": "pending",
+            "progress": 0,
+            "detail": "Aguardando worker (Duplicação)...",
+            "error": None,
+            "created_at": datetime.now().isoformat(),
+            "video_drive_id": None,
+            "video_url": None,
+            "drive_folder_id": new_folder_id,
             "files": new_files
-        }
+        })
         
         new_metadata_id = await loop.run_in_executor(
             None, drive.upload_json, new_metadata, "metadata.json", new_folder_id

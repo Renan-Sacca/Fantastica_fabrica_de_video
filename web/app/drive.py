@@ -144,6 +144,10 @@ class DriveClient:
         files = results.get("files", [])
         return files[0]["id"] if files else None
 
+    def delete_file(self, file_id: str) -> None:
+        """Exclui permanentemente um arquivo ou pasta do Drive."""
+        self.service.files().delete(fileId=file_id).execute(num_retries=5)
+
     def get_folder_link(self, folder_id: str) -> str:
         """Retorna o link web da pasta no Drive."""
         return f"https://drive.google.com/drive/folders/{folder_id}"

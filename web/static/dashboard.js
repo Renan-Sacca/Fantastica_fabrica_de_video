@@ -488,6 +488,7 @@ function addJobToList(jobId, title, videoType) {
             <span class="job-type-badge">${videoType}</span>
         </div>
         <div class="job-actions">
+            <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 13px;" onclick="openDuplicateModal('${jobId}', '${title}')">📄 Duplicar</button>
             <a href="/video/${jobId}" class="btn btn-detail">🔍 Detalhes</a>
             <button class="btn btn-delete" onclick="deleteJob('${jobId}')">🗑️</button>
         </div>
@@ -496,14 +497,36 @@ function addJobToList(jobId, title, videoType) {
 }
 
 // ── Deletar Job ──
-async function deleteJob(jobId) {
-    if (!confirm('Remover este job do histórico local?')) return;
-    const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-    if (res.ok) {
-        document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
-        showToast('🗑️ Job removido', 'info');
-    } else {
-        showToast('❌ Erro ao remover job', 'error');
+let currentDeleteJobId = null;
+
+function deleteJob(jobId) {
+    currentDeleteJobId = jobId;
+    document.getElementById('delete-modal').style.display = 'flex';
+}
+
+function closeDeleteModal() {
+    document.getElementById('delete-modal').style.display = 'none';
+    currentDeleteJobId = null;
+}
+
+async function submitDelete(deleteFromDrive) {
+    if (!currentDeleteJobId) return;
+    const jobId = currentDeleteJobId;
+    closeDeleteModal();
+    
+    showToast('Processando exclusão...', 'info');
+    
+    try {
+        const res = await fetch(`/api/jobs/${jobId}?delete_drive=${deleteFromDrive}`, { method: 'DELETE' });
+        if (res.ok) {
+            document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
+            showToast('🗑️ Job removido com sucesso!', 'success');
+        } else {
+            const data = await res.json();
+            showToast('❌ Erro ao remover job: ' + (data.error || ''), 'error');
+        }
+    } catch(e) {
+        showToast('❌ Erro de rede ao remover', 'error');
     }
 }
 
@@ -515,4 +538,97 @@ function showToast(message, type = 'info') {
     toast.textContent = message;
     container.appendChild(toast);
     setTimeout(() => toast.remove(), 5000);
+}
+
+// ── Duplicação de Job ──
+let currentDupJobId = null;
+
+async function openDuplicateModal(jobId, oldTitle) {
+    currentDupJobId = jobId;
+    document.getElementById('duplicate-modal').style.display = 'flex';
+    document.getElementById('dup-new-title').value = oldTitle + ' (Cópia)';
+    const listContainer = document.getElementById('dup-files-list');
+    listContainer.innerHTML = '<span style="color:var(--text-muted); font-size: 13px;">Buscando arquivos no Drive... ⏳</span>';
+    document.getElementById('btn-confirm-dup').disabled = true;
+
+    try {
+        const res = await fetch(`/api/jobs/${jobId}/details`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        listContainer.innerHTML = '';
+        const files = data.files || {};
+        
+        if (Object.keys(files).length === 0) {
+            listContainer.innerHTML = '<span style="color:var(--text-muted); font-size: 13px;">Nenhum arquivo encontrado.</span>';
+        } else {
+            for (const [key, fileId] of Object.entries(files)) {
+                if (key.endsWith('_ext')) continue;
+                
+                listContainer.innerHTML += `
+                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 6px; border: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='rgba(255,255,255,0.03)'">
+                        <input type="checkbox" class="dup-file-cb" value="${key}" checked style="width: 16px; height: 16px; accent-color: var(--accent);">
+                        <span style="font-weight: 500;">${key}</span>
+                    </label>
+                `;
+            }
+        }
+        document.getElementById('btn-confirm-dup').disabled = false;
+    } catch (err) {
+        listContainer.innerHTML = `<span style="color:var(--danger); font-size: 13px;">Erro: ${err.message}</span>`;
+    }
+}
+
+function closeDuplicateModal() {
+    document.getElementById('duplicate-modal').style.display = 'none';
+}
+
+async function submitDuplicate() {
+    if (!currentDupJobId) return;
+    const btn = document.getElementById('btn-confirm-dup');
+    btn.disabled = true;
+
+    const newTitle = document.getElementById('dup-new-title').value;
+    const checkboxes = document.querySelectorAll('.dup-file-cb:checked');
+    const filesToCopy = Array.from(checkboxes).map(cb => cb.value);
+
+    closeDuplicateModal();
+    
+    showUploadingModal([]);
+    const modal = document.getElementById('uploading-modal');
+    if (modal) {
+        modal.querySelector('h2').textContent = "🚀 Duplicando Vídeo";
+        modal.querySelector('p').textContent = "Copiando arquivos no Google Drive...";
+        const steps = modal.querySelectorAll('.uploading-step');
+        if (steps.length >= 3) {
+            steps[0].querySelector('span:nth-child(2)').textContent = "Lendo projeto original...";
+            steps[1].querySelector('div span:nth-child(1)').textContent = "Copiando arquivos selecionados...";
+            steps[2].querySelector('span:nth-child(2)').textContent = "Finalizando duplicação...";
+        }
+    }
+
+    try {
+        const res = await fetch(`/video/${currentDupJobId}/duplicate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_title: newTitle, files_to_copy: filesToCopy })
+        });
+        const data = await res.json();
+        
+        completeUploadingModal(() => {
+            if (data.job_id) {
+                showToast('✅ Job duplicado com sucesso!', 'success');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast('❌ Erro: ' + data.error, 'error');
+            }
+        });
+    } catch(e) {
+        completeUploadingModal(() => {
+            showToast('❌ Erro de rede ao duplicar', 'error');
+        });
+    } finally {
+        btn.disabled = false;
+        btn.querySelector('.btn-text').textContent = "Confirmar Duplicação";
+    }
 }
