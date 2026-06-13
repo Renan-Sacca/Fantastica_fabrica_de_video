@@ -151,7 +151,7 @@ class Timeline:
             appear_time = current_time
             fully_visible_time = current_time + anim_dur
             accumulated_height += self._estimate_msg_height(msg)
-            target_scroll = max(0, accumulated_height - self.usable_height + 100)
+            target_scroll = max(0, accumulated_height - self.usable_height + 15)
             scroll_dur = self._get_scroll_duration()
             self.events.append(MessageEvent(
                 index=i, message=msg, appear_time=appear_time,

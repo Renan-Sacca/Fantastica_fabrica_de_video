@@ -48,6 +48,11 @@ def render_video(
 
     report(status="preparing", progress=2.0, detail="Preparando conversa...")
 
+    # Calcular viewport lógico CSS para que os elementos fiquem maiores na tela
+    css_scale = 2.5
+    logical_width = int(config.width / css_scale)
+    logical_height = int(config.height / css_scale)
+
     # ── Fase 1: Timeline ──
     timeline = Timeline(
         messages=messages,
@@ -56,7 +61,7 @@ def render_video(
         reading_speed=config.reading_speed,
         scroll_speed=config.scroll_speed,
         animation_style=config.animation_style.value,
-        viewport_height=float(config.height),
+        viewport_height=float(logical_height),
     )
     total_frames = timeline.total_frames
     report(
@@ -79,8 +84,9 @@ def render_video(
             conversation_data=conversation_data,
             timeline=timeline,
             frames_dir=frames_dir,
-            width=config.width,
-            height=config.height,
+            width=logical_width,
+            height=logical_height,
+            css_scale=css_scale,
             total_frames=total_frames,
             progress_callback=report,
         )
@@ -192,6 +198,7 @@ async def _render_frames_async(
     frames_dir: Path,
     width: int,
     height: int,
+    css_scale: float,
     total_frames: int,
     progress_callback: Optional[Callable] = None,
 ) -> None:
@@ -254,7 +261,7 @@ async def _render_frames_async(
         )
         context = await browser.new_context(
             viewport={"width": width, "height": height},
-            device_scale_factor=2,
+            device_scale_factor=css_scale,
         )
         
         progress_queue = asyncio.Queue()
@@ -290,10 +297,11 @@ def _render_frames(
     frames_dir: Path,
     width: int,
     height: int,
+    css_scale: float,
     total_frames: int,
     progress_callback: Optional[Callable] = None,
 ) -> None:
     """Renderiza os frames delegando para o loop assíncrono."""
     asyncio.run(_render_frames_async(
-        job_id, conversation_data, timeline, frames_dir, width, height, total_frames, progress_callback
+        job_id, conversation_data, timeline, frames_dir, width, height, css_scale, total_frames, progress_callback
     ))

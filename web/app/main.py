@@ -821,11 +821,7 @@ async def api_duplicate_job(job_id: str, request: Request):
 
             # Para arquivos normais (string file_id)
             file_id = file_data
-            # Identificar se deve ir para a subpasta "imagens"
-            if key == "foto_perfil" or key == "papel_parede":
-                parent_id = new_imagens_id
-            else:
-                parent_id = new_folder_id
+            parent_id = new_folder_id
                 
             # Copiar no Drive
             copied_id = await loop.run_in_executor(
@@ -846,9 +842,9 @@ async def api_duplicate_job(job_id: str, request: Request):
         new_metadata.update({
             "job_id": new_job_id,
             "title": new_title,
-            "status": "pending",
-            "progress": 0,
-            "detail": "Aguardando worker (Duplicação)...",
+            "status": "done",
+            "progress": 100,
+            "detail": "Vídeo duplicado. Edite para recriar.",
             "error": None,
             "created_at": datetime.now().isoformat(),
             "video_drive_id": None,

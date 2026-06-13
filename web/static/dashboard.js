@@ -563,7 +563,7 @@ async function openDuplicateModal(jobId, oldTitle) {
             listContainer.innerHTML = '<span style="color:var(--text-muted); font-size: 13px;">Nenhum arquivo encontrado.</span>';
         } else {
             for (const [key, fileId] of Object.entries(files)) {
-                if (key.endsWith('_ext')) continue;
+                if (key.endsWith('_ext') || key === 'imagens_folder_id') continue;
                 
                 listContainer.innerHTML += `
                     <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 6px; border: 1px solid transparent; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='rgba(255,255,255,0.03)'">
@@ -594,7 +594,7 @@ async function submitDuplicate() {
 
     closeDuplicateModal();
     
-    showUploadingModal([]);
+    showUploadingModal(filesToCopy);
     const modal = document.getElementById('uploading-modal');
     if (modal) {
         modal.querySelector('h2').textContent = "🚀 Duplicando Vídeo";
