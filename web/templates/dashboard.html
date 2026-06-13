@@ -254,11 +254,15 @@ Comandos especiais:
                         <span class="card-icon">🗂️</span>
                         Vídeos Gerados
                     </h2>
-                    <!-- Botão de Sincronizar FORA do form principal e usando button type=button pra não dar conflito, ativando via JS -->
-                    <button type="button" class="btn btn-secondary" onclick="syncDrive()" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
-                        Sincronizar com Drive
-                    </button>
+                    <div style="display: flex; gap: 10px;">
+                        <a href="/jobs" class="btn btn-secondary" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+                            📋 Ver todos
+                        </a>
+                        <button type="button" class="btn btn-secondary" onclick="syncDrive()" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
+                            Sincronizar com Drive
+                        </button>
+                    </div>
                 </div>
                 <div class="jobs-list" id="jobs-list">
                     {% if jobs %}
@@ -276,11 +280,6 @@ Comandos especiais:
                             </div>
                         </div>
                         {% endfor %}
-                        {% if jobs|length > 5 %}
-                        <div style="text-align: center; margin-top: 1rem;">
-                            <a href="/jobs" class="btn btn-secondary" style="width: 100%; justify-content: center;">Ver todos os vídeos ({{ jobs|length }})</a>
-                        </div>
-                        {% endif %}
                     {% else %}
                         <div class="jobs-empty">
                             <span class="empty-icon">🎞️</span>
@@ -360,7 +359,7 @@ Comandos especiais:
     </div>
 
     <div class="toast-container" id="toast-container"></div>
-    <script src="/static/dashboard.js"></script>
+    <script src="/static/dashboard.js?v=2"></script>
     <script>
         function syncDrive() {
             const btn = event.currentTarget;
