@@ -135,6 +135,11 @@ class DriveClient:
         media = MediaIoBaseUpload(BytesIO(content), mimetype="application/json")
         self.service.files().update(fileId=file_id, media_body=media).execute(num_retries=5)
 
+    def update_file(self, file_id: str, content: bytes, mime_type: Optional[str] = None) -> None:
+        """Atualiza o conteúdo de um arquivo existente (bytes)."""
+        media = MediaIoBaseUpload(BytesIO(content), mimetype=mime_type or "application/octet-stream")
+        self.service.files().update(fileId=file_id, media_body=media).execute(num_retries=5)
+
     def find_file_in_folder(self, folder_id: str, filename: str) -> Optional[str]:
         """Busca um arquivo por nome dentro de uma pasta. Retorna o ID."""
         query = (

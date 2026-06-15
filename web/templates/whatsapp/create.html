@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+
+{% block title %}Fantástica Fábrica - WhatsApp{% endblock %}
+
+{% block content %}
+<form id="render-form" class="config-form" enctype="multipart/form-data">
+    <!-- ── Linha 1: Título + Tipo ── -->
+    <section class="card title-card">
+        <div class="title-row">
+            <div class="form-group title-group">
+                <label for="title">🎯 Título do Vídeo</label>
+                <input type="text" id="title" name="title"
+                       placeholder="Ex: Conversa do casal, Surpresa de aniversário..."
+                       required autocomplete="off" />
+            </div>
+            <input type="hidden" id="video_type" name="video_type" value="whatsapp">
+        </div>
+    </section>
+
+    <!-- ── Grade principal ── -->
+    <div class="form-grid">
+        <!-- Coluna esquerda: Configurações -->
+        <div class="form-column">
+            <section class="card">
+                <h2 class="card-title">
+                    <span class="card-icon">👤</span>
+                    Perfil do Contato
+                </h2>
+                <div class="form-group">
+                    <label for="contact_name">Nome do Contato</label>
+                    <input type="text" id="contact_name" name="contact_name"
+                           value="Maria" placeholder="Nome que aparece no chat"
+                           required />
+                </div>
+                <div class="form-group">
+                    <label for="contact_status">Status</label>
+                    <input type="text" id="contact_status" name="contact_status"
+                           value="online" placeholder="online, digitando..." />
+                </div>
+                <div class="form-group">
+                    <label for="contact_photo">Foto de Perfil</label>
+                    <div class="file-upload" id="photo-upload-area">
+                        <input type="file" id="contact_photo" name="contact_photo"
+                               accept="image/*" />
+                        <div class="file-upload-content">
+                            <div class="file-upload-preview" id="photo-preview">
+                                <span class="upload-placeholder">📷</span>
+                            </div>
+                            <span class="file-upload-text">Clique ou arraste a foto</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2 class="card-title">
+                    <span class="card-icon">🎨</span>
+                    Aparência
+                </h2>
+                <div class="form-group">
+                    <label for="wallpaper">Papel de Parede</label>
+                    <div class="file-upload" id="wallpaper-upload-area">
+                        <input type="file" id="wallpaper" name="wallpaper"
+                               accept="image/*" />
+                        <div class="file-upload-content">
+                            <div class="file-upload-preview wallpaper-preview" id="wallpaper-preview">
+                                <span class="upload-placeholder">🖼️</span>
+                            </div>
+                            <span class="file-upload-text">Papel de parede (opcional)</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2 class="card-title">
+                    <span class="card-icon">⚙️</span>
+                    Configurações do Vídeo
+                </h2>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="video_format">Formato</label>
+                        <select id="video_format" name="video_format">
+                            <option value="vertical" selected>📱 Vertical (1080×1920)</option>
+                            <option value="horizontal">🖥️ Horizontal (1920×1080)</option>
+                            <option value="square">⬜ Quadrado (1080×1080)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="fps">FPS</label>
+                        <select id="fps" name="fps">
+                            <option value="24">24 FPS</option>
+                            <option value="30" selected>30 FPS</option>
+                            <option value="60">60 FPS</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="speed">Velocidade</label>
+                        <div class="range-group">
+                            <input type="range" id="speed" name="speed"
+                                   min="0.5" max="3.0" step="0.1" value="1.0" />
+                            <span class="range-value" id="speed-value">1.0x</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="reading_speed">Vel. Leitura</label>
+                        <div class="range-group">
+                            <input type="range" id="reading_speed" name="reading_speed"
+                                   min="0.5" max="3.0" step="0.1" value="1.0" />
+                            <span class="range-value" id="reading_speed-value">1.0x</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="scroll_speed">Vel. Scroll</label>
+                        <div class="range-group">
+                            <input type="range" id="scroll_speed" name="scroll_speed"
+                                   min="0.5" max="3.0" step="0.1" value="1.0" />
+                            <span class="range-value" id="scroll_speed-value">1.0x</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="animation_style">Animação</label>
+                        <select id="animation_style" name="animation_style">
+                            <option value="fade" selected>✨ Fade In</option>
+                            <option value="slide">📤 Slide Up</option>
+                            <option value="typing">⌨️ Digitando...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="background_music">Música de Fundo (opcional)</label>
+                    <div class="file-upload compact">
+                        <input type="file" id="background_music" name="background_music"
+                               accept="audio/*" />
+                        <div class="file-upload-content">
+                            <span class="upload-placeholder">🎵</span>
+                            <span class="file-upload-text" id="music-filename">Selecionar arquivo de áudio</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Coluna direita: Conversa -->
+        <div class="form-column conversation-column">
+            <section class="card conversation-card">
+                <h2 class="card-title">
+                    <span class="card-icon">💬</span>
+                    Conversa
+                </h2>
+                <div class="conversation-input-tabs">
+                    <button type="button" class="tab active" data-tab="text">✍️ Digitar</button>
+                    <button type="button" class="tab" data-tab="file">📁 Carregar Arquivo</button>
+                </div>
+
+                <div class="tab-content active" id="tab-text">
+                    <div class="form-group">
+                        <label for="conversation_text">Cole a conversa abaixo:</label>
+                        <textarea id="conversation_text" name="conversation_text"
+                                  rows="20"
+                                  placeholder="[10:30] João: Olá, tudo bem?
+[10:31] Maria: Tudo sim! E você?
+[10:32] João: Tudo ótimo! Veja esta foto:
+[IMAGE] imagens/foto1.jpg
+[10:33] Maria: Que linda! 😍
+[EMOJI] ❤️
+[10:34] João: Obrigado! 😊
+
+Dica: O primeiro nome que aparecer será o contato,
+o segundo será você (mensagens enviadas).
+
+Comandos especiais:
+[IMAGE] caminho/da/imagem.jpg
+[EMOJI] 😀
+[AUDIO] caminho/do/audio.mp3
+[DATE] 10 de Junho de 2024"></textarea>
+                    </div>
+                </div>
+
+                <div class="tab-content" id="tab-file">
+                    <div class="form-group">
+                        <div class="file-upload large">
+                            <input type="file" id="conversation_file" name="conversation_file"
+                                   accept=".txt,.json,.csv" />
+                            <div class="file-upload-content">
+                                <span class="upload-placeholder large">📄</span>
+                                <span class="file-upload-text">Arraste um arquivo .txt, .json ou .csv</span>
+                                <span class="file-upload-hint">ou clique para selecionar</span>
+                            </div>
+                        </div>
+                        <span class="file-selected" id="conv-file-name"></span>
+                    </div>
+                    <div style="text-align: center; margin-top: 10px;">
+                        <a href="/conversations/exemplo.txt" target="_blank" class="btn" style="color: var(--accent); border-color: var(--accent);">
+                            📄 Ver arquivo de exemplo
+                        </a>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Botão Gerar -->
+            <button type="submit" class="btn-generate" id="btn-generate">
+                <span class="btn-icon">🎬</span>
+                <span class="btn-text">Gerar Vídeo</span>
+            </button>
+        </div>
+    </div>
+</form>
+
+<!-- Seção de Progresso e Jobs -->
+<section class="card progress-section" id="progress-section" style="display:none;">
+    <h2 class="card-title">
+        <span class="card-icon">📊</span>
+        Progresso da Renderização
+    </h2>
+    <div class="progress-container" id="progress-container">
+        <!-- Será preenchido dinamicamente -->
+    </div>
+</section>
+
+<!-- Histórico de Jobs (Apenas WhatsApp) -->
+<section class="card" id="jobs-section">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 class="card-title" style="margin-bottom: 0;">
+            <span class="card-icon">🗂️</span>
+            Vídeos Gerados - WhatsApp
+        </h2>
+        <div style="display: flex; gap: 10px;">
+            <a href="/whatsapp/jobs" class="btn btn-secondary" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+                📋 Ver todos
+            </a>
+            <button type="button" class="btn btn-secondary" onclick="syncDrive()" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
+                Sincronizar
+            </button>
+        </div>
+    </div>
+    <div class="jobs-list" id="jobs-list">
+        {% if jobs %}
+            {% for job in jobs[:5] %}
+            <div class="job-item" data-job-id="{{ job.job_id }}">
+                <div class="job-info">
+                    <span class="job-name">{{ job.title }}</span>
+                    <span class="job-id">#{{ job.job_id }}</span>
+                    <span class="job-type-badge">{{ job.video_type }}</span>
+                </div>
+                <div class="job-actions">
+                    <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 13px;" onclick="openDuplicateModal('{{ job.job_id }}', '{{ job.title }}')">📄 Duplicar</button>
+                    <a href="/whatsapp/video/{{ job.job_id }}" class="btn btn-detail">🔍 Detalhes</a>
+                    <button class="btn btn-delete" onclick="deleteJob('{{ job.job_id }}')">🗑️</button>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="jobs-empty">
+                <span class="empty-icon">🎞️</span>
+                <p>Nenhum vídeo de WhatsApp gerado ainda</p>
+            </div>
+        {% endif %}
+    </div>
+</section>
+
+<!-- Modal de Imagens Dinâmicas -->
+<div id="images-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>📸 Imagens da Conversa</h2>
+            <p>Detectamos tags [IMAGE] no seu texto. Por favor, selecione as imagens correspondentes abaixo:</p>
+        </div>
+        <div id="modal-images-list" class="modal-body">
+            <!-- Preenchido via JS -->
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeImagesModal()">Cancelar</button>
+            <button type="button" class="btn btn-primary" onclick="confirmImagesModal()">Confirmar e Gerar Vídeo</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Duplicação -->
+<div id="duplicate-modal" class="modal-overlay" style="display:none; z-index: 9999;">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <h2 style="margin: 0; font-size: 1.5rem; display: flex; align-items: center; gap: 8px;"><span style="font-size: 1.2em;">📄</span> Duplicar Vídeo</h2>
+            <button type="button" class="btn-close" onclick="closeDuplicateModal()" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer;">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group" style="margin-top: 15px;">
+                <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 14px;">Novo Título da Pasta</label>
+                <input type="text" id="dup-new-title" class="form-control" style="width:100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: white; font-size: 15px;">
+            </div>
+            
+            <div class="form-group" style="margin-top: 20px;">
+                <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 14px;">Selecione os arquivos para aproveitar:</label>
+                <div id="dup-files-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+                    <span style="color:var(--text-muted); font-size: 13px;">Carregando arquivos...</span>
+                </div>
+            </div>
+
+            <button id="btn-confirm-dup" class="btn-primary" style="width: 100%; margin-top: 24px; padding: 14px; font-size: 16px; border-radius: 12px;" onclick="submitDuplicate()">
+                <span class="btn-text">Confirmar Duplicação</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Deleção -->
+<div id="delete-modal" class="modal-overlay" style="display:none; z-index: 9999;">
+    <div class="modal-content" style="max-width: 400px; text-align: center;">
+        <div class="modal-header" style="justify-content: center; border-bottom: none;">
+            <h2 style="margin: 0; font-size: 1.5rem;">🗑️ Excluir Vídeo</h2>
+        </div>
+        <div class="modal-body" style="padding-top: 0;">
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Como você deseja excluir este vídeo?</p>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px;" onclick="submitDelete(false)">
+                    Remover apenas do Histórico Local
+                </button>
+                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete(true)">
+                    ⚠️ Excluir também do Google Drive
+                </button>
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 8px; background: transparent; border: none;" onclick="closeDeleteModal()">
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/whatsapp/create.js?v=4"></script>
+<script>
+    function syncDrive() {
+        const btn = event.currentTarget;
+        btn.disabled = true;
+        btn.innerHTML = 'Sincronizando...';
+        fetch('/api/sync', { method: 'POST' })
+            .then(res => {
+                if(res.ok) window.location.reload();
+                else alert('Erro ao sincronizar');
+            })
+            .catch(e => alert('Erro de rede ao sincronizar'))
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg> Sincronizar';
+            });
+    }
+</script>
+{% endblock %}

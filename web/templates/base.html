@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Fantástica Fábrica de Vídeo{% endblock %}</title>
+    <meta name="description" content="Gere vídeos automatizados para TikTok, Reels e Shorts">
+    <link rel="icon" type="image/jpeg" href="/static/icon.jpg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <style>
+        .nav-link:hover {
+            color: var(--accent) !important;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="app">
+        {% include "components/navbar.html" %}
+
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+    {% block scripts %}
+    <script src="/static/dashboard.js?v=3"></script>
+    {% endblock %}
+</body>
+</html>
