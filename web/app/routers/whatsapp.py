@@ -403,9 +403,9 @@ async def duplicate_whatsapp_video(request: Request, job_id: str):
         new_metadata.update({
             "job_id": new_job_id,
             "title": new_title,
-            "status": "pending",
+            "status": "draft",
             "progress": 0,
-            "detail": "Aguardando worker...",
+            "detail": "Projeto duplicado, pronto para edição.",
             "error": None,
             "created_at": datetime.now().isoformat(),
             "video_drive_id": None,
@@ -464,8 +464,6 @@ async def duplicate_whatsapp_video(request: Request, job_id: str):
             drive_folder_id=new_folder_id,
             metadata_file_id=new_metadata_id
         )
-
-        await publish_job(new_job_id, video_type)
 
         return JSONResponse({"job_id": new_job_id})
 

@@ -20,7 +20,9 @@ from renderers import get_renderer
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://financepowder:rgs050601@rabbitmq.financepowder.cloud/")
+RABBITMQ_URL = os.getenv("RABBITMQ_URL")
+if not RABBITMQ_URL:
+    raise ValueError("RABBITMQ_URL não encontrada no .env")
 RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "video_jobs")
 TOKEN_FILE = os.getenv("TOKEN_FILE", str(BASE_DIR.parent / "token.json"))
 

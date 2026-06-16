@@ -284,7 +284,7 @@ function showToast(msg, type = "info") {
 
 document.addEventListener("DOMContentLoaded", () => {
     if (typeof JOB_STATUS !== 'undefined' && typeof JOB_ID !== 'undefined') {
-        if (!["done", "error"].includes(JOB_STATUS)) {
+        if (!["done", "error", "draft"].includes(JOB_STATUS)) {
             const btn = document.getElementById("btn-recreate");
             if (btn) btn.disabled = true;
             
