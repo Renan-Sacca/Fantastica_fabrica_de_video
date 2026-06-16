@@ -62,6 +62,8 @@ def render_video(
         scroll_speed=config.scroll_speed,
         animation_style=config.animation_style.value,
         viewport_height=float(logical_height),
+        header_height=104.0,
+        input_bar_height=76.0,
     )
     total_frames = timeline.total_frames
     report(

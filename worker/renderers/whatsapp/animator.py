@@ -125,14 +125,25 @@ class Timeline:
 
     def _estimate_msg_height(self, msg: Message) -> float:
         if msg.type == MessageType.DATE_SEPARATOR:
-            return 40
+            return 44.0
         if msg.type == MessageType.IMAGE:
-            return 280
+            if msg.media_path:
+                try:
+                    from PIL import Image
+                    with Image.open(msg.media_path) as img:
+                        w, h = img.size
+                        # A imagem no CSS tem max-width: 300px e max-height: 350px
+                        # E ela ocupa 100% do container (que é até 300px)
+                        img_height = min(350.0, 300.0 * (h / max(1, w)))
+                        return img_height + 10.0 # margin/padding bounds
+                except Exception:
+                    pass
+            return 300.0
         if msg.type == MessageType.AUDIO:
-            return 70
+            return 60.0
         text_len = len(msg.text or "")
-        lines = max(1, math.ceil(text_len / 35))
-        return 40 + lines * 22
+        lines = max(1, math.ceil(text_len / 42.0))
+        return 28.0 + lines * 21.0
 
     def _build_timeline(self) -> None:
         current_time = 500.0
@@ -151,7 +162,7 @@ class Timeline:
             appear_time = current_time
             fully_visible_time = current_time + anim_dur
             accumulated_height += self._estimate_msg_height(msg)
-            target_scroll = max(0, accumulated_height - self.usable_height + 15)
+            target_scroll = max(0.0, accumulated_height - self.usable_height + 25.0)
             scroll_dur = self._get_scroll_duration()
             self.events.append(MessageEvent(
                 index=i, message=msg, appear_time=appear_time,
@@ -161,7 +172,7 @@ class Timeline:
                 target_scroll_y=target_scroll,
             ))
             current_time = fully_visible_time + self._get_reading_pause(msg)
-        self.total_duration_ms = current_time + 1500
+        self.total_duration_ms = current_time + 4000.0
         self.total_frames = max(1, int(math.ceil(self.total_duration_ms / 1000.0 * self.fps)))
 
     def get_frame_state(self, frame_index: int) -> FrameState:
