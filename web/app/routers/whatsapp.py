@@ -470,3 +470,99 @@ async def duplicate_whatsapp_video(request: Request, job_id: str):
     except Exception as e:
         logger.exception(f"Erro ao duplicar job {job_id}: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.get("/extract", response_class=HTMLResponse)
+async def whatsapp_extract_page(request: Request):
+    """Página separada para extração de conversas e listagem dos jobs extraídos."""
+    jobs = [j for j in jobs_store.get_all_jobs() if j.get("video_type") == "whatsapp_extract"]
+    drive = get_drive(TOKEN_FILE)
+    
+    async def fetch_job_metadata(j):
+        loop = asyncio.get_event_loop()
+        try:
+            def _fetch():
+                from app.drive import get_drive
+                local_drive = get_drive(TOKEN_FILE)
+                metadata = local_drive.read_json(j["metadata_file_id"])
+                j["status"] = metadata.get("status", "unknown")
+                j["progress"] = metadata.get("progress", 0)
+                j["detail"] = metadata.get("detail", "")
+                
+                if j["status"] == "completed" and "conversa_txt" in metadata.get("files", {}):
+                    txt_id = metadata["files"]["conversa_txt"]
+                    content_bytes = local_drive.read_bytes(txt_id)
+                    j["conversa_text"] = content_bytes.decode("utf-8", errors="replace")
+                return j
+
+            j = await loop.run_in_executor(None, _fetch)
+        except Exception as e:
+            j["status"] = "error"
+            j["error"] = str(e)
+        return j
+
+    # Executa de forma concorrente para carregar mais rápido
+    # (Totalmente seguro agora que usamos threading.local() no drive.py)
+    enriched_jobs = await asyncio.gather(*(fetch_job_metadata(j) for j in jobs))
+
+    return templates.TemplateResponse(
+        "whatsapp/extract.html",
+        {"request": request, "jobs": enriched_jobs},
+    )
+
+@router.post("/extract")
+async def extract_whatsapp_from_video(
+    title: str = Form(...),
+    video_original: UploadFile = File(...),
+):
+    """Cria um job para extrair as conversas de um vídeo existente."""
+    try:
+        if not video_original or not video_original.filename:
+            return JSONResponse({"error": "Vídeo não fornecido."}, status_code=400)
+
+        job_id = uuid.uuid4().hex[:8]
+        drive = get_drive(TOKEN_FILE)
+        
+        video_type = "whatsapp_extract"
+        vt = get_video_type(video_type)
+
+        job_folder_id = await asyncio.get_event_loop().run_in_executor(
+            None, drive.create_job_folder, title, job_id, vt.drive_folder_name
+        )
+
+        metadata = {
+            "job_id": job_id,
+            "title": title,
+            "video_type": video_type,
+            "status": "pending",
+            "progress": 0,
+            "detail": "Aguardando worker para extração...",
+            "error": None,
+            "created_at": datetime.now().isoformat(),
+            "drive_folder_id": job_folder_id,
+            "files": {},
+        }
+
+        content = await video_original.read()
+        ext = Path(video_original.filename).suffix or ".mp4"
+        file_id = await asyncio.get_event_loop().run_in_executor(
+            None, drive.upload_bytes, content, f"video_original{ext}", job_folder_id, video_original.content_type or "video/mp4"
+        )
+        metadata["files"]["video_original"] = file_id
+
+        metadata_file_id = await asyncio.get_event_loop().run_in_executor(
+            None, drive.upload_json, metadata, "metadata.json", job_folder_id
+        )
+
+        jobs_store.add_job(
+            job_id=job_id, title=title, video_type=video_type,
+            drive_folder_id=job_folder_id, metadata_file_id=metadata_file_id,
+        )
+
+        await publish_job(job_id, video_type)
+
+        logger.info(f"[{job_id}] Job de Extração criado → Drive: {job_folder_id}")
+        return JSONResponse({"job_id": job_id, "status": "queued"})
+
+    except Exception as e:
+        logger.exception(f"Erro ao criar job de extração: {e}")
+        return JSONResponse({"error": f"Erro interno: {e}"}, status_code=500)

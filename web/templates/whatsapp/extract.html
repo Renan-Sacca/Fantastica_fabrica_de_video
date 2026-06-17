@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+
+{% block title %}Extração de Conversas - WhatsApp{% endblock %}
+
+{% block content %}
+<div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <h1>🎥 Extração de Vídeo para Texto</h1>
+    <a href="/whatsapp" class="btn btn-secondary" style="padding: 0.5rem 1rem;">
+        Voltar para Gerador 🎬
+    </a>
+</div>
+
+<div class="form-grid">
+    <!-- Coluna esquerda: Upload do Vídeo -->
+    <div class="form-column">
+        <section class="card">
+            <h2 class="card-title">
+                <span class="card-icon">📹</span>
+                Nova Extração
+            </h2>
+            <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                Faça upload de um vídeo do TikTok, Reels ou Shorts que mostre uma conversa de WhatsApp. A inteligência artificial irá extrair o texto para você.
+            </p>
+            <form id="extract-form">
+                <div class="form-group">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 14px;">Título da Extração</label>
+                    <input type="text" id="extract-title" name="title" class="form-control" required style="width:100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: white; font-size: 15px;" placeholder="Ex: Extração Reel 01">
+                </div>
+                
+                <div class="form-group" style="margin-top: 20px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 14px;">Arquivo de Vídeo (.mp4, .mov)</label>
+                    <div class="file-upload" style="height: 120px;">
+                        <input type="file" id="extract-video" name="video_original" accept="video/mp4,video/quicktime" required />
+                        <div class="file-upload-content">
+                            <span class="upload-placeholder">📹</span>
+                            <span class="file-upload-text" id="extract-filename">Clique ou arraste o vídeo</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="button" id="btn-submit-extract" class="btn-primary" style="width: 100%; margin-top: 24px; padding: 14px; font-size: 16px; border-radius: 12px;" onclick="submitExtract()">
+                    <span class="btn-text">Iniciar Extração</span>
+                </button>
+            </form>
+        </section>
+
+        <section class="card progress-section" id="progress-section" style="display:none; margin-top: 20px;">
+            <h2 class="card-title">
+                <span class="card-icon">📊</span>
+                Progresso
+            </h2>
+            <div class="progress-container" id="progress-container">
+            </div>
+        </section>
+    </div>
+
+    <!-- Coluna direita: Histórico de Extrações -->
+    <div class="form-column">
+        <section class="card">
+            <h2 class="card-title">
+                <span class="card-icon">🗂️</span>
+                Histórico de Extrações
+            </h2>
+            <div class="jobs-list" style="max-height: 700px; overflow-y: auto;">
+                {% if jobs %}
+                    {% for job in jobs %}
+                    <div class="job-item" data-job-id="{{ job.job_id }}" style="flex-direction: column; align-items: stretch; margin-bottom: 15px;">
+                        <div class="job-info" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <span class="job-name" style="font-weight: bold; font-size: 16px;">{{ job.title }}</span>
+                            <span class="job-type-badge">{{ job.status }}</span>
+                        </div>
+                        
+                        {% if job.status == 'processing' or job.status == 'pending' %}
+                            <div style="font-size: 13px; color: var(--text-secondary);">
+                                Progresso: {{ job.progress }}%<br/>
+                                <i>{{ job.detail }}</i>
+                            </div>
+                        {% elif job.status == 'completed' %}
+                            <div class="extracted-text-area" style="margin-top: 10px;">
+                                <label style="font-size: 13px; color: var(--text-secondary); margin-bottom: 5px; display: block;">Texto Extraído:</label>
+                                <textarea readonly style="width: 100%; height: 150px; padding: 10px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-subtle); color: white; font-family: monospace; font-size: 13px; resize: vertical;">{{ job.conversa_text }}</textarea>
+                                <button class="btn btn-secondary" style="margin-top: 8px; width: 100%; font-size: 13px;" onclick="copyToClipboard(this)">Copiar Texto</button>
+                            </div>
+                        {% elif job.status == 'error' %}
+                            <div style="font-size: 13px; color: #ef4444; background: rgba(239, 68, 68, 0.1); padding: 8px; border-radius: 4px; border: 1px solid rgba(239, 68, 68, 0.3);">
+                                <strong>Erro:</strong> {{ job.error }}
+                            </div>
+                        {% endif %}
+                        <div class="job-actions" style="margin-top: 10px; justify-content: flex-end;">
+                            <button class="btn btn-delete" onclick="deleteJob('{{ job.job_id }}')" title="Excluir Extração">🗑️</button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="jobs-empty" style="text-align: center; padding: 40px 0;">
+                        <span class="empty-icon" style="font-size: 40px; display: block; margin-bottom: 10px;">📄</span>
+                        <p style="color: var(--text-secondary);">Nenhum vídeo extraído ainda</p>
+                    </div>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+</div>
+
+<!-- Modal Deleção -->
+<div id="delete-modal" class="modal-overlay" style="display:none; z-index: 9999;">
+    <div class="modal-content" style="max-width: 400px; text-align: center;">
+        <div class="modal-header" style="justify-content: center; border-bottom: none;">
+            <h2 style="margin: 0; font-size: 1.5rem;">🗑️ Excluir Extração</h2>
+        </div>
+        <div class="modal-body" style="padding-top: 0;">
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Como você deseja excluir este item?</p>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px;" onclick="submitDelete(false)">
+                    Remover apenas do Histórico Local
+                </button>
+                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete(true)">
+                    ⚠️ Excluir também do Google Drive
+                </button>
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 8px; background: transparent; border: none;" onclick="closeDeleteModal()">
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.getElementById('extract-video').addEventListener('change', function(e) {
+        const filename = e.target.files[0] ? e.target.files[0].name : "Clique ou arraste o vídeo";
+        document.getElementById('extract-filename').textContent = filename;
+    });
+
+    // ── SSE Global de Progresso (mesma lógica do gerador de vídeos) ──
+    const _trackedJobs = {};   // { [jobId]: { title } }
+    let _progressSSE = null;
+    let _sseRetryTimeout = null;
+
+    function initProgressStream() {
+        if (_progressSSE && _progressSSE.readyState !== EventSource.CLOSED) return;
+
+        _progressSSE = new EventSource('/api/progress/stream');
+
+        _progressSSE.onopen = () => {
+            if (_sseRetryTimeout) { clearTimeout(_sseRetryTimeout); _sseRetryTimeout = null; }
+        };
+
+        _progressSSE.onmessage = (e) => {
+            let data;
+            try { data = JSON.parse(e.data); } catch { return; }
+            const jobId = data.job_id;
+            if (!jobId || !_trackedJobs[jobId]) return;
+            updateProgressCard(jobId, data);
+        };
+
+        _progressSSE.onerror = () => {
+            _progressSSE.close();
+            _progressSSE = null;
+            if (Object.keys(_trackedJobs).length > 0) {
+                _sseRetryTimeout = setTimeout(initProgressStream, 4000);
+            }
+        };
+    }
+
+    function trackExtraction(jobId, title) {
+        const section = document.getElementById('progress-section');
+        const container = document.getElementById('progress-container');
+        section.style.display = 'block';
+
+        if (!document.getElementById(`progress-${jobId}`)) {
+            const card = document.createElement('div');
+            card.className = 'progress-item';
+            card.id = `progress-${jobId}`;
+            card.innerHTML = `
+                <div class="progress-header">
+                    <span class="progress-title">🎥 ${title} <span style="color:var(--text-muted);font-weight:400;font-size:12px;">#${jobId}</span></span>
+                    <span class="progress-percent" id="pct-${jobId}">0%</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="bar-${jobId}" style="width:0%"></div>
+                </div>
+                <div class="progress-detail" id="det-${jobId}">Aguardando worker...</div>
+            `;
+            container.prepend(card);
+        }
+
+        _trackedJobs[jobId] = { title };
+        initProgressStream();
+    }
+
+    function updateProgressCard(jobId, data) {
+        const pct = Math.round(data.progress || 0);
+        const pctEl = document.getElementById(`pct-${jobId}`);
+        if (!pctEl) return;
+
+        pctEl.textContent = pct + '%';
+        document.getElementById(`bar-${jobId}`).style.width = pct + '%';
+        const detEl = document.getElementById(`det-${jobId}`);
+        if (detEl && data.detail) detEl.textContent = data.detail;
+
+        const status = data.status;
+        if (status === 'completed' || status === 'done') {
+            detEl && (detEl.textContent = '✅ Extração concluída! Atualizando...');
+            delete _trackedJobs[jobId];
+            closeSSEifIdle();
+            // Recarrega para exibir o texto extraído no histórico
+            setTimeout(() => window.location.reload(), 1200);
+        } else if (status === 'error') {
+            const card = document.getElementById(`progress-${jobId}`);
+            if (card) card.innerHTML += `<div class="progress-error">❌ ${data.detail || data.error || 'Erro na extração'}</div>`;
+            const sbtn = document.getElementById('btn-submit-extract');
+            if (sbtn) { sbtn.disabled = false; sbtn.innerHTML = 'Iniciar Extração'; }
+            delete _trackedJobs[jobId];
+            closeSSEifIdle();
+        }
+    }
+
+    function closeSSEifIdle() {
+        if (Object.keys(_trackedJobs).length === 0 && _progressSSE) {
+            _progressSSE.close();
+            _progressSSE = null;
+        }
+    }
+
+    // Registra jobs que já estavam em andamento ao abrir a página
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.job-item').forEach(item => {
+            const jobId = item.dataset.jobId;
+            const badge = item.querySelector('.job-type-badge');
+            const status = badge ? badge.textContent.trim() : '';
+            const nameEl = item.querySelector('.job-name');
+            const title = nameEl ? nameEl.textContent.trim() : 'Extração';
+            if (jobId && (status === 'pending' || status === 'processing')) {
+                trackExtraction(jobId, title);
+            }
+        });
+    });
+
+    async function submitExtract() {
+        const title = document.getElementById('extract-title').value;
+        const video = document.getElementById('extract-video').files[0];
+
+        if(!title || !video) {
+            alert('Por favor, preencha o título e selecione um vídeo.');
+            return;
+        }
+
+        const btn = document.getElementById('btn-submit-extract');
+        btn.disabled = true;
+        btn.innerHTML = 'Enviando...';
+
+        const formData = new FormData();
+        formData.append('title', title);
+        formData.append('video_original', video);
+
+        try {
+            const res = await fetch('/whatsapp/extract', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+
+            if(res.ok) {
+                btn.innerHTML = 'Extração em andamento...';
+                trackExtraction(data.job_id, title);
+                document.getElementById('progress-section').scrollIntoView({ behavior: 'smooth' });
+            } else {
+                alert('Erro: ' + (data.error || 'Erro desconhecido'));
+                btn.disabled = false;
+                btn.innerHTML = 'Iniciar Extração';
+            }
+        } catch (e) {
+            alert('Erro de conexão.');
+            btn.disabled = false;
+            btn.innerHTML = 'Iniciar Extração';
+        }
+    }
+
+    function copyToClipboard(btn) {
+        const textarea = btn.previousElementSibling;
+        textarea.select();
+        document.execCommand('copy');
+        
+        const originalText = btn.textContent;
+        btn.textContent = 'Copiado!';
+        setTimeout(() => {
+            btn.textContent = originalText;
+        }, 2000);
+    }
+    
+    // Logica de Delete reutilizada
+    let jobToDelete = null;
+
+    function deleteJob(jobId) {
+        jobToDelete = jobId;
+        document.getElementById('delete-modal').style.display = 'flex';
+    }
+
+    function closeDeleteModal() {
+        document.getElementById('delete-modal').style.display = 'none';
+        jobToDelete = null;
+    }
+
+    function submitDelete(deleteFromDrive) {
+        if (!jobToDelete) return;
+        
+        const btn = event.currentTarget;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '⏳ Excluindo...';
+        btn.disabled = true;
+
+        fetch(`/api/jobs/${jobToDelete}?delete_drive=${deleteFromDrive}`, {
+            method: 'DELETE'
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                window.location.reload();
+            } else {
+                alert('Erro ao excluir: ' + (data.error || 'Desconhecido'));
+            }
+        })
+        .catch(err => {
+            alert('Erro de rede ao tentar excluir.');
+        })
+        .finally(() => {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            closeDeleteModal();
+        });
+    }
+</script>
+{% endblock %}

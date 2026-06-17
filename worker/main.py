@@ -109,6 +109,10 @@ class VideoWorker:
                 from renderers.whatsapp.processor import WhatsAppProcessor
                 processor = WhatsAppProcessor(job_id, self.drive, self._publish_progress)
                 await processor.process()
+            elif video_type == "whatsapp_extract":
+                from extractors.whatsapp_extractor.processor import WhatsAppExtractProcessor
+                processor = WhatsAppExtractProcessor(payload, self.drive, self._publish_progress)
+                await processor.process()
             else:
                 logger.error(f"Video type '{video_type}' não suportado ou sem processador específico.")
 

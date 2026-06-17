@@ -58,8 +58,14 @@ class DriveClient:
 
     def read_json(self, file_id: str) -> dict:
         """Lê e parseia um arquivo JSON."""
-        content = self.service.files().get_media(fileId=file_id).execute(num_retries=5)
-        return json.loads(content.decode("utf-8"))
+        from googleapiclient.http import MediaIoBaseDownload
+        request = self.service.files().get_media(fileId=file_id)
+        fh = BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk(num_retries=5)
+        return json.loads(fh.getvalue().decode("utf-8"))
 
     def update_json(self, file_id: str, data: dict) -> None:
         """Atualiza um arquivo JSON existente no Drive."""

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from io import BytesIO
 from typing import Optional
 
@@ -14,14 +15,14 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-
 class DriveClient:
     """Cliente Drive via OAuth2 (token.json)."""
 
     def __init__(self, token_file: str):
         try:
             creds = Credentials.from_authorized_user_file(token_file, SCOPES)
-            self.service = build("drive", "v3", credentials=creds)
+            # cache_discovery=False previne erros de concorrência no file_cache
+            self.service = build("drive", "v3", credentials=creds, cache_discovery=False)
             logger.info("Autenticado no Google Drive com sucesso (OAuth2)!")
         except Exception as e:
             logger.error(f"Erro ao carregar token.json: {e}")
@@ -69,8 +70,7 @@ class DriveClient:
         self, title: str, job_id: str, drive_type_folder: str
     ) -> str:
         """
-        Cria a hierarquia de pastas para um job:
-        FantasticaFabricaDeVideo/<Tipo>/Criados/<Titulo>-<job_id>/
+        Cria a hierarquia de pastas para um job.
         Retorna o ID da pasta do job.
         """
         root = self.get_or_create_folder("FantasticaFabricaDeVideo")
@@ -122,7 +122,14 @@ class DriveClient:
 
     def read_bytes(self, file_id: str) -> bytes:
         """Lê o conteúdo binário de um arquivo do Drive."""
-        return self.service.files().get_media(fileId=file_id).execute(num_retries=5)
+        from googleapiclient.http import MediaIoBaseDownload
+        request = self.service.files().get_media(fileId=file_id)
+        fh = BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk(num_retries=5)
+        return fh.getvalue()
 
     def read_json(self, file_id: str) -> dict:
         """Lê e parseia um arquivo JSON do Drive."""
@@ -158,6 +165,10 @@ class DriveClient:
         return f"https://drive.google.com/drive/folders/{folder_id}"
 
 
+_thread_local = threading.local()
+
 def get_drive(token_file: str) -> DriveClient:
-    """Retorna uma nova instância para evitar stale connections (WRONG_VERSION_NUMBER)."""
-    return DriveClient(token_file)
+    """Retorna uma instância única de DriveClient por thread. Garante thread-safety absoluto sem locks."""
+    if not hasattr(_thread_local, "drive"):
+        _thread_local.drive = DriveClient(token_file)
+    return _thread_local.drive

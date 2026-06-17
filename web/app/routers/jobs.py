@@ -19,17 +19,19 @@ async def list_jobs():
     all_jobs = jobs_store.get_all_jobs()
     drive = get_drive(TOKEN_FILE)
     result = []
-    for job_info in all_jobs:
+    
+    async def fetch_meta(j_info):
         try:
-            metadata = await asyncio.get_event_loop().run_in_executor(
-                None, drive.read_json, job_info["metadata_file_id"]
+            return await asyncio.get_event_loop().run_in_executor(
+                None, drive.read_json, j_info["metadata_file_id"]
             )
-            result.append(metadata)
         except Exception:
-            result.append({
-                **job_info, "status": "unknown", "progress": 0,
+            return {
+                **j_info, "status": "unknown", "progress": 0,
                 "detail": "Não foi possível ler status do Drive",
-            })
+            }
+
+    result = await asyncio.gather(*(fetch_meta(ji) for ji in all_jobs))
     return result
 
 @router.get("/{job_id}")
