@@ -109,13 +109,10 @@
             <h2 style="margin: 0; font-size: 1.5rem;">🗑️ Excluir Extração</h2>
         </div>
         <div class="modal-body" style="padding-top: 0;">
-            <p style="color: var(--text-secondary); margin-bottom: 24px;">Como você deseja excluir este item?</p>
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Tem certeza? A extração e todos os seus arquivos serão <strong>excluídos permanentemente</strong> do Google Drive. Esta ação não pode ser desfeita.</p>
             <div style="display: flex; flex-direction: column; gap: 12px;">
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px;" onclick="submitDelete(false)">
-                    Remover apenas do Histórico Local
-                </button>
-                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete(true)">
-                    ⚠️ Excluir também do Google Drive
+                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete()">
+                    ⚠️ Excluir permanentemente
                 </button>
                 <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 8px; background: transparent; border: none;" onclick="closeDeleteModal()">
                     Cancelar
@@ -303,23 +300,26 @@
         jobToDelete = null;
     }
 
-    function submitDelete(deleteFromDrive) {
+    function submitDelete() {
         if (!jobToDelete) return;
+        const jobId = jobToDelete;
         
         const btn = event.currentTarget;
         const originalText = btn.innerHTML;
         btn.innerHTML = '⏳ Excluindo...';
         btn.disabled = true;
 
-        fetch(`/api/jobs/${jobToDelete}?delete_drive=${deleteFromDrive}`, {
+        fetch(`/api/jobs/${jobId}?delete_drive=true`, {
             method: 'DELETE'
         })
-        .then(res => res.json())
-        .then(data => {
-            if (data.status === 'success') {
-                window.location.reload();
+        .then(res => {
+            if (res.ok) {
+                document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
+                closeDeleteModal();
             } else {
-                alert('Erro ao excluir: ' + (data.error || 'Desconhecido'));
+                return res.json().then(data => {
+                    alert('Erro ao excluir: ' + (data.error || 'Desconhecido'));
+                });
             }
         })
         .catch(err => {
@@ -328,7 +328,6 @@
         .finally(() => {
             btn.innerHTML = originalText;
             btn.disabled = false;
-            closeDeleteModal();
         });
     }
 </script>

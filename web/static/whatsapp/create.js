@@ -509,7 +509,7 @@ function closeDeleteModal() {
     currentDeleteJobId = null;
 }
 
-async function submitDelete(deleteFromDrive) {
+async function submitDelete() {
     if (!currentDeleteJobId) return;
     const jobId = currentDeleteJobId;
     closeDeleteModal();
@@ -517,16 +517,16 @@ async function submitDelete(deleteFromDrive) {
     showToast('Processando exclusão...', 'info');
     
     try {
-        const res = await fetch(`/api/jobs/${jobId}?delete_drive=${deleteFromDrive}`, { method: 'DELETE' });
+        const res = await fetch(`/api/jobs/${jobId}?delete_drive=true`, { method: 'DELETE' });
         if (res.ok) {
             document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
-            showToast('🗑️ Job removido com sucesso!', 'success');
+            showToast('🗑️ Vídeo excluído permanentemente!', 'success');
         } else {
             const data = await res.json();
-            showToast('❌ Erro ao remover job: ' + (data.error || ''), 'error');
+            showToast('❌ Erro ao excluir: ' + (data.error || ''), 'error');
         }
     } catch(e) {
-        showToast('❌ Erro de rede ao remover', 'error');
+        showToast('❌ Erro de rede ao excluir', 'error');
     }
 }
 

@@ -6,16 +6,16 @@
 <form id="render-form" class="config-form" enctype="multipart/form-data">
     <!-- ── Linha 1: Título + Tipo ── -->
     <section class="card title-card">
-        <div class="title-row" style="display: flex; justify-content: space-between; align-items: center;">
-            <div class="form-group title-group" style="flex: 1;">
+        <div class="title-row" style="display: flex; justify-content: space-between; align-items: flex-end; gap: 16px;">
+            <div class="form-group title-group" style="flex: 1; margin-bottom: 0;">
                 <label for="title">🎯 Título do Vídeo</label>
                 <input type="text" id="title" name="title"
                        placeholder="Ex: Conversa do casal, Surpresa de aniversário..."
                        required autocomplete="off" />
             </div>
-            <div style="margin-left: 20px;">
-                <a href="/whatsapp/extract" class="btn btn-secondary" style="display: flex; align-items: center; gap: 8px; text-decoration: none;">
-                    <span>🎥</span> Extrair de Vídeo
+            <div>
+                <a href="/whatsapp/extract" class="btn btn-secondary" style="white-space: nowrap; padding: 12px 18px; font-size: 15px; border-radius: var(--radius-sm);">
+                    🎥 Extrair de Vídeo
                 </a>
             </div>
             <input type="hidden" id="video_type" name="video_type" value="whatsapp">
@@ -238,10 +238,6 @@ Comandos especiais:
             <a href="/whatsapp/jobs" class="btn btn-secondary" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
                 📋 Ver todos
             </a>
-            <button type="button" class="btn btn-secondary" onclick="syncDrive()" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
-                Sincronizar
-            </button>
         </div>
     </div>
     <div class="jobs-list" id="jobs-list">
@@ -320,13 +316,10 @@ Comandos especiais:
             <h2 style="margin: 0; font-size: 1.5rem;">🗑️ Excluir Vídeo</h2>
         </div>
         <div class="modal-body" style="padding-top: 0;">
-            <p style="color: var(--text-secondary); margin-bottom: 24px;">Como você deseja excluir este vídeo?</p>
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Tem certeza? O vídeo e todos os seus arquivos serão <strong>excluídos permanentemente</strong> do Google Drive. Esta ação não pode ser desfeita.</p>
             <div style="display: flex; flex-direction: column; gap: 12px;">
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px;" onclick="submitDelete(false)">
-                    Remover apenas do Histórico Local
-                </button>
-                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete(true)">
-                    ⚠️ Excluir também do Google Drive
+                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete()">
+                    ⚠️ Excluir permanentemente
                 </button>
                 <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 8px; background: transparent; border: none;" onclick="closeDeleteModal()">
                     Cancelar
@@ -339,23 +332,5 @@ Comandos especiais:
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/whatsapp/create.js?v=4"></script>
-<script>
-    function syncDrive() {
-        const btn = event.currentTarget;
-        btn.disabled = true;
-        btn.innerHTML = 'Sincronizando...';
-        fetch('/api/sync', { method: 'POST' })
-            .then(res => {
-                if(res.ok) window.location.reload();
-                else alert('Erro ao sincronizar');
-            })
-            .catch(e => alert('Erro de rede ao sincronizar'))
-            .finally(() => {
-                btn.disabled = false;
-                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg> Sincronizar';
-            });
-    }
-
-</script>
+<script src="/static/whatsapp/create.js?v=5"></script>
 {% endblock %}

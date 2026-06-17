@@ -23,11 +23,6 @@
             <input type="text" id="job-search" placeholder="Buscar por título ou ID..." 
                    onkeyup="filterJobs()" 
                    style="padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: var(--text-primary); font-size: 0.9rem; min-width: 250px;">
-            
-            <button type="button" class="btn btn-secondary" onclick="syncDrive()" style="padding: 0.5rem 1rem; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg>
-                Sincronizar
-            </button>
         </div>
     </div>
     <div class="jobs-list jobs-grid" id="jobs-list">
@@ -90,15 +85,12 @@
             <h2 style="margin: 0; font-size: 1.5rem;">🗑️ Excluir Vídeo</h2>
         </div>
         <div class="modal-body" style="padding-top: 0;">
-            <p style="color: var(--text-secondary); margin-bottom: 24px;">Como você deseja excluir este vídeo?</p>
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Tem certeza? O vídeo e todos os seus arquivos serão <strong>excluídos permanentemente</strong> do Google Drive. Esta ação não pode ser desfeita.</p>
             <div style="display: flex; flex-direction: column; gap: 12px;">
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px;" onclick="submitDelete(false)">
-                    Remover apenas do Histórico Local
+                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete()">
+                    ⚠️ Excluir permanentemente
                 </button>
-                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete(true)">
-                    ⚠️ Excluir também do Google Drive
-                </button>
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 8px; background: transparent; border: none;" onclick="closeDeleteModal()">
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; background: transparent; border: none;" onclick="closeDeleteModal()">
                     Cancelar
                 </button>
             </div>
@@ -108,5 +100,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/whatsapp/jobs.js?v=2"></script>
+<script src="/static/whatsapp/jobs.js?v=3"></script>
 {% endblock %}

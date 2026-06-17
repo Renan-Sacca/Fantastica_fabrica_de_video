@@ -204,7 +204,7 @@ function closeDeleteModal() {
     currentDeleteJobId = null;
 }
 
-async function submitDelete(deleteFromDrive) {
+async function submitDelete() {
     if (!currentDeleteJobId) return;
     const jobId = currentDeleteJobId;
     closeDeleteModal();
@@ -212,16 +212,16 @@ async function submitDelete(deleteFromDrive) {
     showToast('Processando exclusão...', 'info');
     
     try {
-        const res = await fetch(`/api/jobs/${jobId}?delete_drive=${deleteFromDrive}`, { method: 'DELETE' });
+        const res = await fetch(`/api/jobs/${jobId}?delete_drive=true`, { method: 'DELETE' });
         if (res.ok) {
             document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
-            showToast('🗑️ Job removido com sucesso!', 'success');
+            showToast('🗑️ Vídeo excluído permanentemente!', 'success');
         } else {
             const data = await res.json();
-            showToast('❌ Erro ao remover job: ' + (data.error || ''), 'error');
+            showToast('❌ Erro ao excluir: ' + (data.error || ''), 'error');
         }
     } catch(e) {
-        showToast('❌ Erro de rede ao remover', 'error');
+        showToast('❌ Erro de rede ao excluir', 'error');
     }
 }
 
@@ -248,20 +248,4 @@ function showToast(message, type = 'info') {
     toast.textContent = message;
     container.appendChild(toast);
     setTimeout(() => toast.remove(), 5000);
-}
-
-function syncDrive() {
-    const btn = event.currentTarget;
-    btn.disabled = true;
-    btn.innerHTML = 'Sincronizando...';
-    fetch('/api/sync', { method: 'POST' })
-        .then(res => {
-            if(res.ok) window.location.reload();
-            else alert('Erro ao sincronizar');
-        })
-        .catch(e => alert('Erro de rede ao sincronizar'))
-        .finally(() => {
-            btn.disabled = false;
-            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-10.26l5.08 5.08"/></svg> Sincronizar';
-        });
 }
