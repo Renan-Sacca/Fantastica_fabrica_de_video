@@ -252,6 +252,18 @@
     "video_type": "whatsapp_extract",
     "drive_folder_id": "1QaHCq6rUUzpL9k5F9QGgTuObXlcZ5UFj",
     "metadata_file_id": "1IoTQgH0p1pl-hN1rSxfxHkaiAEt4QHuL",
-    "created_at": "2026-06-17T01:43:52.776756"
+    "created_at": "2026-06-17T01:43:52.776756",
+    "status": "completed",
+    "progress": 100,
+    "detail": "Extração concluída com sucesso.",
+    "conversa_text": "USER_1: Oi Guilherme\nUSER_1: Soube que conseguiu uma casa näo é?\nUSER_1: Finalmente\nUSER_2: MaeC Entao vamos logo conversar aqui\nUSER_2: Oi mäe\nUSER_2: Sim, consegui com bastante esforco\nUSER_2: Ai meu pai.. o que ja me aguarda\nUSER_1: Seu irmäo Carlos vai se mudar pra ai\nUSER_1: Sera a casa dele\nUSER_1: Ele é o mais velho e merece\nUSER_1: E isso é uma compensacao por fazer ele se estressar a cada ano\nUSER_2: Ele praticamente que me inferniz4va e näo fa nada em casa\nUSER_2: Mas a senhora näo vé ne?\nUSER_2: Seu filho favorito\nUSER_2: Oi? Estressar ele?\nUSER_1: Näo comece, ele me ajuda sempre\nUSER_1: Você desde que foi embora daqui Tá uma paz\nUSER_2: Kkkkkkk otimo ne\nUSER_2: Entao que ele fique ai g\nUSER_2: E consiga outra casa pra ele\nUSER_1: A mais Você vai dar a casa querido filho\nUSER_1: E vou obrigar Você\nUSER_1: Pois amanhä estou indo ai\nUSER_1: Näo vai gostar de virar assunto ne?\nUSER_2: Vocés säo uns sanguessugas ne,g\nUSER_2: Primeiro que so eu trabalhava ai\nUSER_2: E so eu me esforcava, e vocés tomavam tudo mim\nUSER_2: Mas agora eu tenho meu canto e näo darei n\nUSER_2: Podem bater perna e o que quiserem\nUSER_2: Eu náo to nem ai\nUSER_2: Tchau!\nUSER_1: A garoto Você näo sabe com guem Tá mexendo\nUSER_1: Você nos aguarde\n"
+  },
+  "e452191f": {
+    "job_id": "e452191f",
+    "title": "teste final",
+    "video_type": "whatsapp_extract",
+    "drive_folder_id": "1TuaotA1VpbQ-Yg7uWsrz1E9gx2HBTcgO",
+    "metadata_file_id": "1OELUYPbM-oJpjFVM94LBTNOIXagszay7",
+    "created_at": "2026-06-17T02:13:36.767381"
   }
 }

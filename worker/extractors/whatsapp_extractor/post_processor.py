@@ -102,6 +102,8 @@ class PostProcessor:
         # Limpezas finais: pontuação solta sobrando de horários, espaços, etc.
         text = re.sub(r"\s+([?!.,])", r"\1", text)   # espaço antes de pontuação
         text = re.sub(r"[:;]+(?=\s|$)", "", text)      # dois-pontos solto
+        # Lixo de OCR dos tiques de leitura (✓✓) no fim: "ne,g", "ai g", "favorito l"
+        text = re.sub(r"[\s,]+[bcdfghjklmnpqrstvwxyz]\s*$", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s+", " ", text).strip(" :;-@.,")
         return text
 

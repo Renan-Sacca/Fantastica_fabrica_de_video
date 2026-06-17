@@ -58,25 +58,31 @@ class Deduplicator:
                 partial_sim = fuzz.partial_ratio(norm_text, existing_norm)
                 token_sim = fuzz.token_set_ratio(norm_text, existing_norm)
 
+                la, lb = len(norm_text), len(existing_norm)
+                length_ratio = min(la, lb) / max(la, lb) if max(la, lb) else 0.0
+
                 same_author = existing['author'] == msg['author']
 
-                # Mesmo autor: critério normal de duplicata
+                # Mesmo autor: critério normal (sem guarda de tamanho — uma
+                # mensagem cortada na borda da tela aparece truncada num frame
+                # e completa em outro; queremos juntá-las).
                 strong = (similarity >= self.similarity_threshold or partial_sim >= 85 or token_sim >= 85)
-                # Autores diferentes: só conta como duplicata se for texto razoável
-                # e muito parecido (caso de autor lido errado num frame). Sem
-                # partial_ratio aqui, p/ não casar fragmentos distantes.
-                cross = (not same_author) and len(norm_text) >= 12 and (similarity >= 90 or token_sim >= 92)
+                # Autores diferentes: exige tamanhos parecidos. Senão uma frase
+                # curta ("Estressar ele?") casaria com uma longa que contém suas
+                # palavras ("...por fazer ele se estressar a cada ano") e seria
+                # descartada por engano (bagunçando a ordem).
+                cross = (not same_author) and la >= 12 and length_ratio >= 0.6 and (similarity >= 90 or token_sim >= 92)
 
                 if (same_author and strong) or cross:
                     is_duplicate = True
-                    # A leitura mais COMPLETA (mais longa) vence em texto E autor,
-                    # pois costuma ter o alinhamento/autor corretos.
-                    if len(msg['text'].strip()) > len(existing['text'].strip()):
+                    # Só substituímos pela leitura mais longa quando é o MESMO
+                    # autor. Em match entre autores diferentes (ex: citação/reply
+                    # que repete a mensagem do outro), mantemos a primeira (real)
+                    # e descartamos a nova — senão a citação sobrescreve o autor.
+                    if same_author and len(msg['text'].strip()) > len(existing['text'].strip()):
                         real_idx = len(unique_messages) - len(window) + idx
                         unique_messages[real_idx]['text'] = msg['text']
-                        unique_messages[real_idx]['author'] = msg['author']
                         existing['text'] = msg['text']
-                        existing['author'] = msg['author']
                     break
             
             if not is_duplicate:
