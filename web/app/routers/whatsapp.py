@@ -10,11 +10,11 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from app import jobs_store
 from app.config import BASE_DIR, TEMPLATES_DIR
 from app.drive import get_drive
 from app.parser import parse_conversation
 from app.publisher import publish_job
+from app.repositories import jobs as jobs_repo
 from app.video_types import get_video_type
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ TOKEN_FILE = os.getenv("TOKEN_FILE", str(BASE_DIR.parent / "token.json"))
 async def whatsapp_dashboard(request: Request):
     """Página principal de criação de vídeo de WhatsApp."""
     # Listar apenas os jobs de whatsapp para o histórico
-    jobs = [j for j in jobs_store.get_all_jobs() if j.get("video_type") == "whatsapp"]
+    jobs = jobs_repo.get_all_jobs("whatsapp")
     return templates.TemplateResponse(
         "whatsapp/create.html",
         {"request": request, "jobs": jobs},
@@ -36,7 +36,7 @@ async def whatsapp_dashboard(request: Request):
 @router.get("/jobs", response_class=HTMLResponse)
 async def whatsapp_jobs(request: Request):
     """Página com a lista de jobs de WhatsApp."""
-    jobs = [j for j in jobs_store.get_all_jobs() if j.get("video_type") == "whatsapp"]
+    jobs = jobs_repo.get_all_jobs("whatsapp")
     return templates.TemplateResponse(
         "whatsapp/jobs_list.html",
         {"request": request, "jobs": jobs},
@@ -45,7 +45,7 @@ async def whatsapp_jobs(request: Request):
 @router.get("/video/{job_id}", response_class=HTMLResponse)
 async def whatsapp_video_detail(request: Request, job_id: str):
     """Tela de detalhes de um vídeo específico."""
-    job_info = jobs_store.get_job(job_id)
+    job_info = jobs_repo.get_job(job_id)
     if not job_info:
         return HTMLResponse("<h1>Job não encontrado</h1>", status_code=404)
 
@@ -215,10 +215,7 @@ async def render_whatsapp_video(
             None, drive.upload_json, metadata, "metadata.json", job_folder_id
         )
 
-        jobs_store.add_job(
-            job_id=job_id, title=title, video_type=video_type,
-            drive_folder_id=job_folder_id, metadata_file_id=metadata_file_id,
-        )
+        jobs_repo.save_job(metadata, job_folder_id, metadata_file_id)
 
         await publish_job(job_id, video_type)
 
@@ -251,7 +248,7 @@ async def edit_whatsapp_video(
 ):
     """Atualiza as configs do vídeo no Drive e publica no RabbitMQ para recriar."""
     import json
-    job_info = jobs_store.get_job(job_id)
+    job_info = jobs_repo.get_job(job_id)
     if not job_info:
         return JSONResponse({"error": "Job não encontrado"}, status_code=404)
 
@@ -360,7 +357,7 @@ async def edit_whatsapp_video(
             None, drive.update_json, job_info["metadata_file_id"], metadata
         )
 
-        jobs_store.update_job(job_id, {"title": title, "video_type": video_type})
+        jobs_repo.save_job(metadata, job_info["drive_folder_id"], job_info["metadata_file_id"])
 
         await publish_job(job_id, video_type)
 
@@ -381,7 +378,7 @@ async def duplicate_whatsapp_video(request: Request, job_id: str):
     new_title = data.get("new_title", "Cópia")
     files_to_copy = data.get("files_to_copy", [])
 
-    job_info = jobs_store.get_job(job_id)
+    job_info = jobs_repo.get_job(job_id)
     if not job_info:
         return JSONResponse({"error": "Job original não encontrado"}, status_code=404)
 
@@ -457,13 +454,7 @@ async def duplicate_whatsapp_video(request: Request, job_id: str):
             None, drive.upload_json, new_metadata, "metadata.json", new_folder_id
         )
 
-        jobs_store.add_job(
-            job_id=new_job_id,
-            title=new_title,
-            video_type=video_type,
-            drive_folder_id=new_folder_id,
-            metadata_file_id=new_metadata_id
-        )
+        jobs_repo.save_job(new_metadata, new_folder_id, new_metadata_id)
 
         return JSONResponse({"job_id": new_job_id})
 
@@ -474,39 +465,11 @@ async def duplicate_whatsapp_video(request: Request, job_id: str):
 @router.get("/extract", response_class=HTMLResponse)
 async def whatsapp_extract_page(request: Request):
     """Página separada para extração de conversas e listagem dos jobs extraídos."""
-    jobs = [j for j in jobs_store.get_all_jobs() if j.get("video_type") == "whatsapp_extract"]
-    drive = get_drive(TOKEN_FILE)
-    
-    async def fetch_job_metadata(j):
-        loop = asyncio.get_event_loop()
-        try:
-            def _fetch():
-                from app.drive import get_drive
-                local_drive = get_drive(TOKEN_FILE)
-                metadata = local_drive.read_json(j["metadata_file_id"])
-                j["status"] = metadata.get("status", "unknown")
-                j["progress"] = metadata.get("progress", 0)
-                j["detail"] = metadata.get("detail", "")
-                
-                if j["status"] == "completed" and "conversa_txt" in metadata.get("files", {}):
-                    txt_id = metadata["files"]["conversa_txt"]
-                    content_bytes = local_drive.read_bytes(txt_id)
-                    j["conversa_text"] = content_bytes.decode("utf-8", errors="replace")
-                return j
-
-            j = await loop.run_in_executor(None, _fetch)
-        except Exception as e:
-            j["status"] = "error"
-            j["error"] = str(e)
-        return j
-
-    # Executa de forma concorrente para carregar mais rápido
-    # (Totalmente seguro agora que usamos threading.local() no drive.py)
-    enriched_jobs = await asyncio.gather(*(fetch_job_metadata(j) for j in jobs))
-
+    # Tudo vem do MySQL (status, progresso e texto extraído em cache) — sem tocar no Drive.
+    jobs = jobs_repo.get_all_jobs("whatsapp_extract")
     return templates.TemplateResponse(
         "whatsapp/extract.html",
-        {"request": request, "jobs": enriched_jobs},
+        {"request": request, "jobs": jobs},
     )
 
 @router.post("/extract")
@@ -553,10 +516,7 @@ async def extract_whatsapp_from_video(
             None, drive.upload_json, metadata, "metadata.json", job_folder_id
         )
 
-        jobs_store.add_job(
-            job_id=job_id, title=title, video_type=video_type,
-            drive_folder_id=job_folder_id, metadata_file_id=metadata_file_id,
-        )
+        jobs_repo.save_job(metadata, job_folder_id, metadata_file_id)
 
         await publish_job(job_id, video_type)
 

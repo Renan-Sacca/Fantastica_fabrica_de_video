@@ -5,7 +5,8 @@ services:
     volumes:
       - ../credentials.json:/app/credentials.json:ro
       - ../token.json:/app/token.json:ro
+    env_file:
+      - .env
     environment:
-      - RABBITMQ_URL=amqp://financepowder:rgs050601@rabbitmq.financepowder.cloud/
       - TOKEN_FILE=/app/token.json
     restart: unless-stopped

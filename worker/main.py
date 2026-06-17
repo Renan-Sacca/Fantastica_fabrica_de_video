@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from drive import DriveClient
 from renderers import get_renderer
+from database import init_db
 
 # ── Configuração ──
 BASE_DIR = Path(__file__).resolve().parent
@@ -42,6 +43,7 @@ class VideoWorker:
 
     async def start(self):
         """Inicia a conexão e começa a consumir a fila."""
+        init_db()
         logger.info(f"Conectando ao RabbitMQ: {RABBITMQ_URL.split('@')[-1]}")
         self.connection = await aio_pika.connect_robust(RABBITMQ_URL)
 

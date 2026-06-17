@@ -23,14 +23,6 @@
     "metadata_file_id": "1X1F1LVXZxhjN6gSzesmS84iHwji4NMjn",
     "created_at": "2026-06-16T00:07:44.410917"
   },
-  "906e57ce": {
-    "job_id": "906e57ce",
-    "title": "teste (Cópia)aaa",
-    "video_type": "whatsapp",
-    "drive_folder_id": "1ubnnVKPdAARVN1Svkp3dfe6YUusn0_qR",
-    "metadata_file_id": "1x-9RwprFauX570FpWjyHGTPwRwmVrCIl",
-    "created_at": "2026-06-16T00:08:11.490996"
-  },
   "93bc54b8": {
     "job_id": "93bc54b8",
     "title": "dwad",
@@ -264,6 +256,18 @@
     "video_type": "whatsapp_extract",
     "drive_folder_id": "1TuaotA1VpbQ-Yg7uWsrz1E9gx2HBTcgO",
     "metadata_file_id": "1OELUYPbM-oJpjFVM94LBTNOIXagszay7",
-    "created_at": "2026-06-17T02:13:36.767381"
+    "created_at": "2026-06-17T02:13:36.767381",
+    "status": "completed",
+    "progress": 100,
+    "detail": "Extração concluída com sucesso.",
+    "conversa_text": "USER_1: Oi Guilherme\nUSER_1: Soube que conseguiu uma casa näo é?\nUSER_1: Finalmente\nUSER_1: Entäo vamos logo conversar aqui\nUSER_2: Oi mäe\nUSER_2: Sim, consegui com bastante esforco\nUSER_2: Ai meu pai.. o que ja me aguarda\nUSER_1: Seu irmäo Carlos vai se mudar pra ai\nUSER_1: Sera a casa dele\nUSER_1: Ele é o mais velho e merece\nUSER_1: E isso é uma compensacao por fazer ele se estressar a cada ano\nUSER_2: Oi? Estressar ele?\nUSER_2: Ele praticamente que me inferniz4va e näo fa nada em casa\nUSER_2: Mas a senhora näo vé ne?\nUSER_2: Seu filho favorito\nUSER_1: Näo comece, ele me ajuda sempre\nUSER_1: Você desde que foi embora daqui Tá uma paz\nUSER_2: Kkkkkkk otimo ne\nUSER_2: Entao que ele fique ai\nUSER_2: E consiga outra casa pra ele\nUSER_1: A mais Você vai dar a casa querido filho\nUSER_1: E vou obrigar Você\nUSER_1: Pois amanhä estou indo ai\nUSER_1: Näo vai gostar de virar assunto ne?\nUSER_2: Vocés säo uns sanguessugas ne\nUSER_2: Primeiro que so eu trabalhava ai\nUSER_2: E so eu me esforcava, e vocés tomavam tudo mim\nUSER_2: Mas agora eu tenho meu canto e näo darei\nUSER_2: Podem bater perna e o que quiserem\nUSER_2: Eu náo to nem ai\nUSER_2: Tchau!\nUSER_1: A garoto Você näo sabe com guem Tá mexendo\nUSER_1: Você nos aguarde\n"
+  },
+  "dc1ab4c5": {
+    "job_id": "dc1ab4c5",
+    "title": "faaaaaaaaaa",
+    "video_type": "whatsapp_extract",
+    "drive_folder_id": "1uIQFqHO9RI0VZq6U-96VgY7pHKW8Zw7h",
+    "metadata_file_id": "1r52tdIcN2F_GQ3FS7hivp418cadeyjOE",
+    "created_at": "2026-06-17T02:25:02.862860"
   }
 }

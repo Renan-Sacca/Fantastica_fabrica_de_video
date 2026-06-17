@@ -5,8 +5,8 @@ import logging
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app import jobs_store
 from app.config import STATIC_DIR
+from app.database import init_db
 from app.routers import dashboard, drive, jobs, progress, whatsapp
 
 logging.basicConfig(level=logging.INFO)
@@ -29,5 +29,5 @@ app.include_router(progress.router)
 
 @app.on_event("startup")
 async def startup():
-    jobs_store.init()
+    init_db()
     logger.info("Serviço web iniciado.")

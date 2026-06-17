@@ -6,6 +6,7 @@ import traceback
 from typing import Callable, Coroutine
 from drive import DriveClient
 from .pipeline import WhatsAppVideoExtractor
+import jobs_repository
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +17,16 @@ class WhatsAppExtractProcessor:
         self.drive = drive
         self.publish_progress = publish_progress
 
+    async def _progress(self, status: str, progress: float, detail: str, error: str = None):
+        """Publica progresso no RabbitMQ e espelha o estado no MySQL."""
+        jobs_repository.update_status(
+            self.job_id, status=status, progress=progress, detail=detail, error=error
+        )
+        await self.publish_progress(self.job_id, status, progress, detail)
+
     async def process(self):
         try:
-            await self.publish_progress(self.job_id, "processing", 10.0, "Baixando vídeo do Drive...")
+            await self._progress("processing", 10.0, "Baixando vídeo do Drive...")
             
             loop = asyncio.get_event_loop()
             
@@ -48,7 +56,7 @@ class WhatsAppExtractProcessor:
                     None, self.drive.download_file, video_file_id, Path(video_path)
                 )
                 
-                await self.publish_progress(self.job_id, "processing", 30.0, "Extraindo frames e lendo mensagens (Isso pode demorar bastante)...")
+                await self._progress("processing", 30.0, "Extraindo frames e lendo mensagens (Isso pode demorar bastante)...")
                 
                 extractor = WhatsAppVideoExtractor(
                     sample_interval_sec=2.0,
@@ -59,6 +67,7 @@ class WhatsAppExtractProcessor:
                 
                 main_loop = asyncio.get_event_loop()
                 def progress_wrapper(pct: float, detail: str):
+                    jobs_repository.update_status(self.job_id, status="processing", progress=pct, detail=detail)
                     asyncio.run_coroutine_threadsafe(
                         self.publish_progress(self.job_id, "processing", pct, detail),
                         main_loop
@@ -71,7 +80,7 @@ class WhatsAppExtractProcessor:
                 if not success:
                     raise RuntimeError(f"Erro na extração: {error_msg}")
                     
-                await self.publish_progress(self.job_id, "processing", 85.0, "Extração concluída, enviando resultados...")
+                await self._progress("processing", 85.0, "Extração concluída, enviando resultados...")
                 
                 with open(json_path, "r", encoding="utf-8") as f:
                     conversa_json = f.read()
@@ -98,13 +107,21 @@ class WhatsAppExtractProcessor:
                 await asyncio.get_event_loop().run_in_executor(
                     None, self.drive.update_json, metadata_file_id, metadata
                 )
-                
-                await self.publish_progress(self.job_id, "completed", 100.0, "Processo finalizado")
+
+                # Cacheia ids e texto extraído no MySQL para listagem rápida
+                jobs_repository.update_extract_result(
+                    self.job_id,
+                    conversa_txt_id=txt_id,
+                    conversa_json_id=json_id,
+                    conversa_text=conversa_txt,
+                )
+
+                await self._progress("completed", 100.0, "Processo finalizado")
                 
         except Exception as e:
             error_str = traceback.format_exc()
             logger.error(f"[{self.job_id}] Erro na extração:\n{error_str}")
-            await self.publish_progress(self.job_id, "error", 0, f"Erro: {str(e)}")
+            await self._progress("error", 0, f"Erro: {str(e)}", error=str(e))
             
             try:
                 folder_id = self.drive.find_folder_by_job_id(self.job_id)

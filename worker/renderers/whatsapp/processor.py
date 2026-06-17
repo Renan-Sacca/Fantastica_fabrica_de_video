@@ -7,6 +7,7 @@ from typing import Callable, Coroutine, Any
 
 from drive import DriveClient
 from renderers import get_renderer
+import jobs_repository
 
 logger = logging.getLogger("WhatsAppProcessor")
 
@@ -115,7 +116,7 @@ class WhatsAppProcessor:
                 shutil.rmtree(work_dir, ignore_errors=True)
 
     def _update_progress(self, file_id: str, metadata: dict, status: str = None, progress: float = None, detail: str = None):
-        """Atualiza o arquivo metadata.json no Drive."""
+        """Atualiza o arquivo metadata.json no Drive e espelha o estado no MySQL."""
         if status: metadata["status"] = status
         if progress is not None: metadata["progress"] = progress
         if detail is not None: metadata["detail"] = detail
@@ -124,6 +125,17 @@ class WhatsAppProcessor:
             self.drive.update_json(file_id, metadata)
         except Exception as e:
             logger.warning(f"Erro ao atualizar progresso no Drive: {e}")
+
+        # Espelha o estado no MySQL (índice rápido para a listagem)
+        jobs_repository.update_status(
+            metadata.get("job_id", self.job_id),
+            status=metadata.get("status"),
+            progress=metadata.get("progress"),
+            detail=metadata.get("detail"),
+            error=metadata.get("error"),
+            video_drive_id=metadata.get("video_drive_id"),
+            video_url=metadata.get("video_url"),
+        )
 
     async def _download_files(self, metadata: dict, folder_id: str, work_dir: Path):
         """Baixa todos os arquivos registrados no metadata sequencialmente."""

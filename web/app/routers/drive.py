@@ -3,9 +3,9 @@ import logging
 import os
 from fastapi import APIRouter, Header, Request, Response
 
-from app import jobs_store
 from app.config import BASE_DIR
 from app.drive import get_drive
+from app.repositories import jobs as jobs_repo
 
 router = APIRouter(prefix="/api", tags=["drive"])
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ async def get_drive_media(file_id: str, range: str = Header(None)):
 
 @router.post("/sync")
 async def sync_drive(request: Request):
-    """Sincroniza os jobs com o Drive manualmente."""
+    """Sincroniza os jobs com o Drive manualmente (importa para o MySQL)."""
     drive = get_drive(TOKEN_FILE)
-    await asyncio.get_event_loop().run_in_executor(None, jobs_store.sync_with_drive, drive)
+    await asyncio.get_event_loop().run_in_executor(None, jobs_repo.sync_with_drive, drive)
     return {"status": "ok"}

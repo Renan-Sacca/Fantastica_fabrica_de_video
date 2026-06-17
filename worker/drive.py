@@ -20,12 +20,18 @@ class DriveClient:
 
     def __init__(self, token_file: str):
         try:
-            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
-            self.service = build("drive", "v3", credentials=creds)
+            self.creds = Credentials.from_authorized_user_file(token_file, SCOPES)
+            self.service = build("drive", "v3", credentials=self.creds)
             logger.info("Worker autenticado no Google Drive com sucesso (OAuth2)!")
         except Exception as e:
             logger.error(f"Erro ao carregar token.json: {e}")
             raise RuntimeError(f"Falha na autenticação do Drive no Worker: {e}")
+
+    def _fresh_http(self):
+        """Conexão HTTP autorizada nova e isolada por download (evita erro SSL)."""
+        import httplib2
+        from google_auth_httplib2 import AuthorizedHttp
+        return AuthorizedHttp(self.creds, http=httplib2.Http())
 
     def find_folder_by_job_id(self, job_id: str) -> Optional[str]:
         """
@@ -73,19 +79,32 @@ class DriveClient:
         media = MediaIoBaseUpload(BytesIO(content), mimetype="application/json")
         self.service.files().update(fileId=file_id, media_body=media).execute(num_retries=5)
 
-    def download_file(self, file_id: str, dest_path: Path) -> None:
-        """Baixa um arquivo do Drive para o disco de forma robusta e em chunks."""
+    def download_file(self, file_id: str, dest_path: Path, max_attempts: int = 3) -> None:
+        """Baixa um arquivo do Drive para o disco, em chunks e com conexão isolada.
+
+        Cada tentativa usa uma conexão HTTP nova, evitando o erro de SSL
+        (DECRYPTION_FAILED_OR_BAD_RECORD_MAC) por reuso de conexão corrompida.
+        """
         from googleapiclient.http import MediaIoBaseDownload
-        
-        request = self.service.files().get_media(fileId=file_id, acknowledgeAbuse=True)
-        fh = BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        
-        done = False
-        while done is False:
-            status, done = downloader.next_chunk(num_retries=3)
-            
-        dest_path.write_bytes(fh.getvalue())
+
+        last_err = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                request = self.service.files().get_media(fileId=file_id, acknowledgeAbuse=True)
+                request.http = self._fresh_http()
+                fh = BytesIO()
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while done is False:
+                    _, done = downloader.next_chunk(num_retries=3)
+                dest_path.write_bytes(fh.getvalue())
+                return
+            except Exception as e:
+                last_err = e
+                logger.warning(
+                    f"download_file({file_id}) tentativa {attempt}/{max_attempts} falhou: {e}"
+                )
+        raise last_err
 
     def upload_bytes(
         self,

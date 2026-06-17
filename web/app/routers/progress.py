@@ -8,9 +8,9 @@ import aio_pika
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from app import jobs_store
 from app.config import BASE_DIR, RABBITMQ_URL
 from app.drive import get_drive
+from app.repositories import jobs as jobs_repo
 
 router = APIRouter(prefix="/api", tags=["progress"])
 logger = logging.getLogger(__name__)
@@ -129,7 +129,7 @@ async def progress_stream(request: Request):
 @router.get("/jobs/{job_id}/stream")
 async def job_stream(request: Request, job_id: str):
     """SSE por job especifico."""
-    job_info = jobs_store.get_job(job_id)
+    job_info = jobs_repo.get_job(job_id)
 
     async def event_generator():
         connection = None
@@ -197,7 +197,7 @@ async def _stream_from_drive(job_id: str, job_info: dict):
                     None, drive.find_file_in_folder, job_info["drive_folder_id"], "metadata.json"
                 )
                 if metadata_file_id:
-                    jobs_store.update_job(job_id, {"metadata_file_id": metadata_file_id})
+                    jobs_repo.update_basic(job_id, metadata_file_id=metadata_file_id)
                 else:
                     yield f"data: {json.dumps({'status': 'error', 'error': 'metadata.json não encontrado'})}\n\n"
                     break

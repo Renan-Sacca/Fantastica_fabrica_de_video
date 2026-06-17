@@ -7,7 +7,9 @@ import threading
 from io import BytesIO
 from typing import Optional
 
+import httplib2
 from google.oauth2.credentials import Credentials
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
@@ -20,14 +22,23 @@ class DriveClient:
 
     def __init__(self, token_file: str):
         try:
-            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
+            self.creds = Credentials.from_authorized_user_file(token_file, SCOPES)
             # cache_discovery=False previne erros de concorrência no file_cache
-            self.service = build("drive", "v3", credentials=creds, cache_discovery=False)
+            self.service = build("drive", "v3", credentials=self.creds, cache_discovery=False)
             logger.info("Autenticado no Google Drive com sucesso (OAuth2)!")
         except Exception as e:
             logger.error(f"Erro ao carregar token.json: {e}")
             raise RuntimeError(f"Falha na autenticação do Drive: {e}")
         self._folder_cache: dict[str, str] = {}
+
+    def _fresh_http(self) -> AuthorizedHttp:
+        """Cria uma conexão HTTP autorizada nova e isolada.
+
+        Downloads paralelos não podem compartilhar a mesma conexão do
+        ``self.service`` (httplib2 não é thread-safe) — isso causa erros de
+        SSL (DECRYPTION_FAILED_OR_BAD_RECORD_MAC). Cada download usa a sua.
+        """
+        return AuthorizedHttp(self.creds, http=httplib2.Http())
 
     # ── Pastas ──
 
@@ -120,16 +131,31 @@ class DriveClient:
 
     # ── Leitura ──
 
-    def read_bytes(self, file_id: str) -> bytes:
-        """Lê o conteúdo binário de um arquivo do Drive."""
+    def read_bytes(self, file_id: str, max_attempts: int = 3) -> bytes:
+        """Lê o conteúdo binário de um arquivo do Drive.
+
+        Cada tentativa usa uma conexão HTTP nova e isolada, evitando o erro de
+        SSL que ocorre quando downloads paralelos compartilham a mesma conexão.
+        """
         from googleapiclient.http import MediaIoBaseDownload
-        request = self.service.files().get_media(fileId=file_id)
-        fh = BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while done is False:
-            status, done = downloader.next_chunk(num_retries=5)
-        return fh.getvalue()
+
+        last_err: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                request = self.service.files().get_media(fileId=file_id)
+                request.http = self._fresh_http()
+                fh = BytesIO()
+                downloader = MediaIoBaseDownload(fh, request)
+                done = False
+                while done is False:
+                    _, done = downloader.next_chunk(num_retries=3)
+                return fh.getvalue()
+            except Exception as e:
+                last_err = e
+                logger.warning(
+                    f"read_bytes({file_id}) tentativa {attempt}/{max_attempts} falhou: {e}"
+                )
+        raise last_err  # type: ignore[misc]
 
     def read_json(self, file_id: str) -> dict:
         """Lê e parseia um arquivo JSON do Drive."""
