@@ -14,7 +14,9 @@ from app.config import BASE_DIR, TEMPLATES_DIR
 from app.drive import get_drive
 from app.parser import parse_conversation
 from app.publisher import publish_job
+from app.publisher_agent import publish_correction_job
 from app.repositories import jobs as jobs_repo
+from app.repositories import text_corrections as corrections_repo
 from app.video_types import get_video_type
 
 logger = logging.getLogger(__name__)
@@ -526,3 +528,56 @@ async def extract_whatsapp_from_video(
     except Exception as e:
         logger.exception(f"Erro ao criar job de extração: {e}")
         return JSONResponse({"error": f"Erro interno: {e}"}, status_code=500)
+
+# ── Correção de Texto via IA ──
+
+@router.post("/correct-text")
+async def correct_text(
+    raw_text: str = Form(...),
+    provider: str = Form("chatgpt"),
+):
+    """Submete um texto para correção via agente IA (ChatGPT/Gemini).
+
+    Cria um registro no MySQL, publica na fila do agente e retorna o job_id.
+    O frontend pode acompanhar o progresso via SSE em /api/correction/{job_id}/stream.
+    """
+    try:
+        if not raw_text.strip():
+            return JSONResponse(
+                {"error": "Texto vazio. Forneça o texto para correção."},
+                status_code=400,
+            )
+
+        if provider not in ("chatgpt", "gemini"):
+            return JSONResponse(
+                {"error": f"Provider inválido: '{provider}'. Use 'chatgpt' ou 'gemini'."},
+                status_code=400,
+            )
+
+        job_id = uuid.uuid4().hex[:8]
+
+        # Salvar no MySQL
+        corrections_repo.create_job(job_id, raw_text.strip(), provider)
+
+        # Publicar na fila do agente
+        await publish_correction_job(job_id, raw_text.strip(), provider)
+
+        logger.info(f"[{job_id}] Job de correção criado → provider={provider}")
+        return JSONResponse({"job_id": job_id, "status": "queued"})
+
+    except Exception as e:
+        logger.exception(f"Erro ao criar job de correção: {e}")
+        return JSONResponse({"error": f"Erro interno: {e}"}, status_code=500)
+
+
+@router.get("/correct-text/{job_id}")
+async def get_correction_result(job_id: str):
+    """Consulta o resultado de uma correção de texto.
+
+    Retorna o status atual e, se concluído, o texto corrigido.
+    """
+    job = corrections_repo.get_job(job_id)
+    if not job:
+        return JSONResponse({"error": "Job não encontrado"}, status_code=404)
+    return JSONResponse(job)
+

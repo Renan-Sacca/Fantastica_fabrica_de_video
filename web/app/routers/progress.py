@@ -214,3 +214,101 @@ async def _stream_from_drive(job_id: str, job_info: dict):
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'error': str(e)})}\n\n"
             break
+
+
+# ── SSE para Correção de Texto (agente IA) ──
+
+async def _create_sse_connection_correction(routing_key: str):
+    """Cria conexão SSE para o exchange de correção de texto."""
+    msg_queue: asyncio.Queue = asyncio.Queue()
+
+    connection = await aio_pika.connect(RABBITMQ_URL)
+    channel = await connection.channel()
+
+    exchange = await channel.declare_exchange(
+        "text_correction_progress",
+        aio_pika.ExchangeType.TOPIC,
+        durable=True,
+        auto_delete=False,
+    )
+
+    rabbit_queue = await channel.declare_queue(
+        "",
+        exclusive=True,
+        auto_delete=True,
+        durable=False,
+        arguments={"x-expires": 30_000},
+    )
+    await rabbit_queue.bind(exchange, routing_key=routing_key)
+
+    async def on_message(message: aio_pika.IncomingMessage):
+        async with message.process():
+            await msg_queue.put(message.body)
+
+    await rabbit_queue.consume(on_message)
+    return connection, msg_queue, rabbit_queue.name
+
+
+@router.get("/correction/{job_id}/stream")
+async def correction_stream(request: Request, job_id: str):
+    """SSE para acompanhar o progresso de um job de correção de texto."""
+
+    async def event_generator():
+        connection = None
+        stop_event = asyncio.Event()
+        watcher: Optional[asyncio.Task] = None
+
+        try:
+            connection, msg_queue, qname = await _create_sse_connection_correction(
+                routing_key=job_id
+            )
+            logger.info(f"[{job_id}] SSE correção: fila criada → {qname}")
+
+            watcher = asyncio.create_task(
+                _watch_disconnect(request, stop_event),
+                name=f"sse-correction-{job_id}",
+            )
+
+            while not stop_event.is_set():
+                try:
+                    body = await asyncio.wait_for(msg_queue.get(), timeout=1.0)
+                    if stop_event.is_set():
+                        break
+                    data = json.loads(body.decode())
+                    yield f"data: {json.dumps(data, default=str)}\n\n"
+                    if data.get("status") in ("done", "error"):
+                        logger.info(
+                            f"[{job_id}] SSE correção encerrado — status: {data.get('status')}"
+                        )
+                        break
+                except asyncio.TimeoutError:
+                    if stop_event.is_set():
+                        break
+                    yield ": keepalive\n\n"
+
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.info(f"[{job_id}] SSE correção: gerador cancelado")
+        except Exception as e:
+            logger.warning(f"[{job_id}] SSE correção erro: {e}")
+            # Fallback: retorna status do MySQL
+            from app.repositories import text_corrections as corrections_repo
+
+            job_data = corrections_repo.get_job(job_id)
+            if job_data:
+                yield f"data: {json.dumps(job_data, default=str)}\n\n"
+            else:
+                yield f"data: {json.dumps({'status': 'error', 'error': str(e)})}\n\n"
+        finally:
+            stop_event.set()
+            if watcher and not watcher.done():
+                watcher.cancel()
+                try:
+                    await watcher
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if connection and not connection.is_closed:
+                await connection.close()
+                logger.info(f"[{job_id}] SSE correção: conexão fechada")
+
+    return _sse_response(event_generator())
+

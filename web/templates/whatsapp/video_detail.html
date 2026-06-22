@@ -132,8 +132,31 @@
 
             <div class="form-column">
                 <div class="form-group" style="height: 100%;">
-                    <label>Conversa (pode ser editada)</label>
-                    <textarea name="conversation_text" rows="15" style="height: calc(100% - 30px);">{{ conversa_text }}</textarea>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label style="margin-bottom: 0;">Conversa (pode ser editada)</label>
+                        <div style="display: inline-flex; align-items: center; gap: 8px;">
+                            <select id="ai-provider" style="padding: 6px 10px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border-subtle); color: white; font-size: 13px;">
+                                <option value="chatgpt">ChatGPT</option>
+                                <option value="gemini">Gemini</option>
+                            </select>
+                            <button type="button" id="btn-correct-text" class="btn-secondary" style="padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; height: 32px; display: inline-flex; align-items: center; gap: 4px;" onclick="corrigirConversaComIA()">
+                                <span>🪄</span> <span id="btn-correct-text-label">Corrigir com IA</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Barra de progresso para a correção com IA -->
+                    <div id="ai-progress-container" style="display: none; margin-bottom: 12px; padding: 10px; border-radius: 8px; background: rgba(37, 211, 102, 0.05); border: 1px solid rgba(37, 211, 102, 0.15);">
+                        <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px;">
+                            <span id="ai-progress-status" style="font-weight: 600; color: #25d366;">Iniciando correção...</span>
+                            <span id="ai-progress-dots">⏳</span>
+                        </div>
+                        <div style="width: 100%; height: 4px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden;">
+                            <div id="ai-progress-bar" style="width: 0%; height: 100%; background: #25d366; transition: width 0.3s;"></div>
+                        </div>
+                    </div>
+                    
+                    <textarea name="conversation_text" id="conversation_text" rows="15" style="height: calc(100% - 44px);">{{ conversa_text }}</textarea>
                 </div>
             </div>
         </div>

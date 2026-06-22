@@ -1,0 +1,11 @@
+services:
+  agente:
+    build: .
+    container_name: fabrica-agente
+    ports:
+      - "6080:6080"
+    volumes:
+      - ./chrome_data:/app/chrome_data
+    env_file:
+      - .env
+    restart: unless-stopped

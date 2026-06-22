@@ -317,3 +317,139 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 });
+
+// ── Correção de Texto com IA ──
+async function corrigirConversaComIA() {
+    const rawText = document.getElementById("conversation_text").value;
+    if (!rawText.trim()) {
+        showToast("❌ Digite ou cole uma conversa antes de corrigir.", "error");
+        return;
+    }
+    
+    const provider = document.getElementById("ai-provider").value;
+    const btn = document.getElementById("btn-correct-text");
+    const btnLabel = document.getElementById("btn-correct-text-label");
+    const progContainer = document.getElementById("ai-progress-container");
+    const progStatus = document.getElementById("ai-progress-status");
+    const progBar = document.getElementById("ai-progress-bar");
+    
+    // Desabilitar UI
+    btn.disabled = true;
+    btnLabel.textContent = "Corrigindo...";
+    progContainer.style.display = "block";
+    progStatus.textContent = "Iniciando correção (" + provider + ")...";
+    progBar.style.width = "10%";
+    
+    try {
+        const formData = new FormData();
+        formData.append("raw_text", rawText);
+        formData.append("provider", provider);
+        
+        const res = await fetch("/whatsapp/correct-text", {
+            method: "POST",
+            body: formData
+        });
+        
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || "Erro ao solicitar correção");
+        }
+        
+        const jobId = data.job_id;
+        progBar.style.width = "30%";
+        progStatus.textContent = "Job enviado para a fila do agente...";
+        
+        // Conectar ao stream SSE
+        const eventSource = new EventSource(`/api/correction/${jobId}/stream`);
+        let progressVal = 30;
+        
+        eventSource.onmessage = async (e) => {
+            try {
+                const sseData = JSON.parse(e.data);
+                
+                if (sseData.status === "processing") {
+                    progressVal = Math.min(progressVal + 15, 80);
+                    progBar.style.width = progressVal + "%";
+                    progStatus.textContent = sseData.detail || "Corrigindo texto...";
+                } else if (sseData.status === "done") {
+                    eventSource.close();
+                    progBar.style.width = "100%";
+                    progStatus.textContent = "Correção finalizada!";
+                    
+                    // Buscar o resultado corrigido
+                    const resultRes = await fetch(`/whatsapp/correct-text/${jobId}`);
+                    const resultData = await resultRes.json();
+                    
+                    if (resultData.corrected_text) {
+                        document.getElementById("conversation_text").value = resultData.corrected_text;
+                        showToast("✅ Conversa corrigida com sucesso!", "success");
+                    } else {
+                        showToast("❌ Erro ao buscar texto corrigido.", "error");
+                    }
+                    
+                    // Resetar UI após 3 segundos
+                    setTimeout(() => {
+                        progContainer.style.display = "none";
+                        btn.disabled = false;
+                        btnLabel.textContent = "Corrigir com IA";
+                    }, 3000);
+                    
+                } else if (sseData.status === "error") {
+                    eventSource.close();
+                    throw new Error(sseData.detail || sseData.error || "Erro no processamento da IA");
+                }
+            } catch (err) {
+                eventSource.close();
+                handleCorrectionError(err.message, btn, btnLabel, progContainer);
+            }
+        };
+        
+        eventSource.onerror = () => {
+            eventSource.close();
+            // Tentar buscar direto do endpoint como fallback
+            fallbackFetchCorrection(jobId, btn, btnLabel, progContainer, progStatus, progBar);
+        };
+        
+    } catch (err) {
+        handleCorrectionError(err.message, btn, btnLabel, progContainer);
+    }
+}
+
+function handleCorrectionError(msg, btn, btnLabel, progContainer) {
+    showToast("❌ " + msg, "error");
+    progContainer.style.display = "none";
+    btn.disabled = false;
+    btnLabel.textContent = "Corrigir com IA";
+}
+
+async function fallbackFetchCorrection(jobId, btn, btnLabel, progContainer, progStatus, progBar) {
+    progStatus.textContent = "SSE desconectado. Monitorando status via banco...";
+    progBar.style.width = "50%";
+    
+    // Polling simples de fallback
+    for (let i = 0; i < 30; i++) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        try {
+            const res = await fetch(`/whatsapp/correct-text/${jobId}`);
+            if (!res.ok) continue;
+            const data = await res.json();
+            
+            if (data.status === "done") {
+                progBar.style.width = "100%";
+                progStatus.textContent = "Correção finalizada!";
+                if (data.corrected_text) {
+                    document.getElementById("conversation_text").value = data.corrected_text;
+                    showToast("✅ Conversa corrigida com sucesso!", "success");
+                }
+                break;
+            } else if (data.status === "error") {
+                handleCorrectionError(data.error || "Erro na correção de texto.", btn, btnLabel, progContainer);
+                return;
+            }
+        } catch (e) {}
+    }
+    
+    progContainer.style.display = "none";
+    btn.disabled = false;
+    btnLabel.textContent = "Corrigir com IA";
+}

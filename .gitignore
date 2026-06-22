@@ -10,3 +10,4 @@ build/
 .progress_*.json
 token.json
 credentials.json
+agente/chrome_data/

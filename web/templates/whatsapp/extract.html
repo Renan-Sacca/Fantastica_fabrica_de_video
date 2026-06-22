@@ -76,9 +76,31 @@
                                 <i>{{ job.detail }}</i>
                             </div>
                         {% elif job.status == 'completed' %}
-                            <div class="extracted-text-area" style="margin-top: 10px;">
-                                <label style="font-size: 13px; color: var(--text-secondary); margin-bottom: 5px; display: block;">Texto Extraído:</label>
-                                <textarea readonly style="width: 100%; height: 150px; padding: 10px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-subtle); color: white; font-family: monospace; font-size: 13px; resize: vertical;">{{ job.conversa_text }}</textarea>
+                            <div class="extracted-text-area" style="margin-top: 10px;" id="extract-area-{{ job.job_id }}">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                    <label style="font-size: 13px; color: var(--text-secondary); margin-bottom: 0; display: block;">Texto Extraído:</label>
+                                    <div style="display: inline-flex; align-items: center; gap: 6px;">
+                                        <select id="ai-provider-{{ job.job_id }}" style="padding: 2px 6px; border-radius: 4px; background: var(--bg-input); border: 1px solid var(--border-subtle); color: white; font-size: 12px; height: 26px;">
+                                            <option value="chatgpt">ChatGPT</option>
+                                            <option value="gemini">Gemini</option>
+                                        </select>
+                                        <button class="btn btn-secondary" id="btn-correct-{{ job.job_id }}" style="padding: 4px 8px; font-size: 12px; height: 26px; display: inline-flex; align-items: center; gap: 4px;" onclick="corrigirExtracaoComIA('{{ job.job_id }}')">
+                                            <span>🪄</span> <span id="btn-label-{{ job.job_id }}">Corrigir com IA</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Barra de progresso para a correção -->
+                                <div id="ai-progress-{{ job.job_id }}" style="display: none; margin-bottom: 8px; padding: 8px; border-radius: 6px; background: rgba(37, 211, 102, 0.05); border: 1px solid rgba(37, 211, 102, 0.15);">
+                                    <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                        <span id="ai-status-{{ job.job_id }}" style="font-weight: 600; color: #25d366;">Iniciando...</span>
+                                    </div>
+                                    <div style="width: 100%; height: 3px; background: rgba(255, 255, 255, 0.06); border-radius: 2px; overflow: hidden;">
+                                        <div id="ai-bar-{{ job.job_id }}" style="width: 0%; height: 100%; background: #25d366; transition: width 0.3s;"></div>
+                                    </div>
+                                </div>
+
+                                <textarea readonly id="extracted-text-{{ job.job_id }}" style="width: 100%; height: 150px; padding: 10px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-subtle); color: white; font-family: monospace; font-size: 13px; resize: vertical;">{{ job.conversa_text }}</textarea>
                                 <button class="btn btn-secondary" style="margin-top: 8px; width: 100%; font-size: 13px;" onclick="copyToClipboard(this)">Copiar Texto</button>
                             </div>
                         {% elif job.status == 'error' %}
@@ -329,6 +351,141 @@
             btn.innerHTML = originalText;
             btn.disabled = false;
         });
+    }
+
+    // ── Correção de Texto com IA para Extrações ──
+    async function corrigirExtracaoComIA(jobId) {
+        const textEl = document.getElementById(`extracted-text-${jobId}`);
+        const rawText = textEl.value;
+        if (!rawText.trim()) {
+            alert('Texto vazio para correção.');
+            return;
+        }
+        
+        const provider = document.getElementById(`ai-provider-${jobId}`).value;
+        const btn = document.getElementById(`btn-correct-${jobId}`);
+        const btnLabel = document.getElementById(`btn-label-${jobId}`);
+        const progContainer = document.getElementById(`ai-progress-${jobId}`);
+        const progStatus = document.getElementById(`ai-status-${jobId}`);
+        const progBar = document.getElementById(`ai-bar-${jobId}`);
+        
+        // Desabilitar UI
+        btn.disabled = true;
+        btnLabel.textContent = "Corrigindo...";
+        progContainer.style.display = "block";
+        progStatus.textContent = "Iniciando correção (" + provider + ")...";
+        progBar.style.width = "10%";
+        
+        try {
+            const formData = new FormData();
+            formData.append("raw_text", rawText);
+            formData.append("provider", provider);
+            
+            const res = await fetch("/whatsapp/correct-text", {
+                method: "POST",
+                body: formData
+            });
+            
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || "Erro ao solicitar correção");
+            }
+            
+            const aiJobId = data.job_id;
+            progBar.style.width = "30%";
+            progStatus.textContent = "Na fila do agente...";
+            
+            // Conectar ao stream SSE
+            const eventSource = new EventSource(`/api/correction/${aiJobId}/stream`);
+            let progressVal = 30;
+            
+            eventSource.onmessage = async (e) => {
+                try {
+                    const sseData = JSON.parse(e.data);
+                    
+                    if (sseData.status === "processing") {
+                        progressVal = Math.min(progressVal + 15, 80);
+                        progBar.style.width = progressVal + "%";
+                        progStatus.textContent = sseData.detail || "Corrigindo texto...";
+                    } else if (sseData.status === "done") {
+                        eventSource.close();
+                        progBar.style.width = "100%";
+                        progStatus.textContent = "Correção finalizada!";
+                        
+                        // Buscar o resultado corrigido
+                        const resultRes = await fetch(`/whatsapp/correct-text/${aiJobId}`);
+                        const resultData = await resultRes.json();
+                        
+                        if (resultData.corrected_text) {
+                            textEl.value = resultData.corrected_text;
+                            alert("✅ Texto corrigido com sucesso pela IA!");
+                        } else {
+                            alert("❌ Erro ao buscar texto corrigido.");
+                        }
+                        
+                        // Resetar UI
+                        setTimeout(() => {
+                            progContainer.style.display = "none";
+                            btn.disabled = false;
+                            btnLabel.textContent = "Corrigir com IA";
+                        }, 3000);
+                        
+                    } else if (sseData.status === "error") {
+                        eventSource.close();
+                        throw new Error(sseData.detail || sseData.error || "Erro no processamento");
+                    }
+                } catch (err) {
+                    eventSource.close();
+                    handleExtError(err.message, btn, btnLabel, progContainer);
+                }
+            };
+            
+            eventSource.onerror = () => {
+                eventSource.close();
+                fallbackExtCorrection(aiJobId, textEl, btn, btnLabel, progContainer, progStatus, progBar);
+            };
+            
+        } catch (err) {
+            handleExtError(err.message, btn, btnLabel, progContainer);
+        }
+    }
+
+    function handleExtError(msg, btn, btnLabel, progContainer) {
+        alert("❌ Erro: " + msg);
+        progContainer.style.display = "none";
+        btn.disabled = false;
+        btnLabel.textContent = "Corrigir com IA";
+    }
+
+    async function fallbackExtCorrection(aiJobId, textEl, btn, btnLabel, progContainer, progStatus, progBar) {
+        progStatus.textContent = "Monitorando via banco (fallback)...";
+        progBar.style.width = "50%";
+        
+        for (let i = 0; i < 30; i++) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            try {
+                const res = await fetch(`/whatsapp/correct-text/${aiJobId}`);
+                if (!res.ok) continue;
+                const data = await res.json();
+                
+                if (data.status === "done") {
+                    progBar.style.width = "100%";
+                    progStatus.textContent = "Correção finalizada!";
+                    if (data.corrected_text) {
+                        textEl.value = data.corrected_text;
+                        alert("✅ Texto corrigido com sucesso!");
+                    }
+                    break;
+                } else if (data.status === "error") {
+                    handleExtError(data.error || "Erro na correção.", btn, btnLabel, progContainer);
+                    return;
+                }
+            } catch (e) {}
+        }
+        
+        progContainer.style.display = "none";
+        btn.disabled = false;
+        btnLabel.textContent = "Corrigir com IA";
     }
 </script>
 {% endblock %}
