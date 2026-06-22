@@ -345,15 +345,19 @@ Comandos especiais:
             if (el) el.value = titulo;
         }
         if (conversa) {
-            // Tentar preencher o textarea de conversa (id pode variar)
             const ta = document.getElementById('conversation_text')
                     || document.querySelector('textarea[name="conversation_text"]');
             if (ta) ta.value = conversa;
         }
+        const contactName = sessionStorage.getItem('prefill_contact_name');
+        if (contactName) {
+            const el = document.getElementById('contact_name');
+            if (el) el.value = contactName;
+        }
 
-        // Limpar após usar para não repreencher em próximas visitas
         sessionStorage.removeItem('prefill_title');
         sessionStorage.removeItem('prefill_conversa');
+        sessionStorage.removeItem('prefill_contact_name');
 
         // Scroll suave até o textarea
         const ta2 = document.querySelector('textarea[name="conversation_text"]');

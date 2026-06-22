@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from app.database import SessionLocal
@@ -77,21 +77,27 @@ def get_all_users() -> list[dict]:
 
 
 def set_permissions(user_id: int, permissions: list[str]) -> bool:
-    """Define as permissões de um usuário (substitui todas as existentes)."""
+    """Define as permissões de um usuário (substitui todas as existentes).
+
+    Usa DELETE direto + flush antes de inserir para evitar violação
+    de unique key quando o ORM ainda tem objetos antigos em memória.
+    """
     with SessionLocal() as session:
         user = session.scalar(select(User).where(User.id == user_id))
         if not user:
             return False
-        # Remover as antigas
-        existing = session.scalars(
-            select(Permission).where(Permission.user_id == user_id)
-        ).all()
-        for p in existing:
-            session.delete(p)
-        # Adicionar as novas
+
+        # DELETE direto — sem passar pelo ORM de objetos para evitar duplicatas
+        session.execute(
+            delete(Permission).where(Permission.user_id == user_id)
+        )
+        session.flush()  # garante que o DELETE foi para o banco antes dos INSERTs
+
+        # Inserir apenas permissões válidas
         for perm in permissions:
             if perm in Permission.ALL:
                 session.add(Permission(user_id=user_id, permission=perm))
+
         session.commit()
         logger.info(f"Permissões atualizadas para user {user_id}: {permissions}")
         return True

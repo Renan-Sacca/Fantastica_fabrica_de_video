@@ -43,6 +43,7 @@ Os serviços (web, worker, agente) já criam as tabelas automaticamente via `ini
 |-----------|-----------|
 | `whatsapp_videos` | Pode criar e visualizar vídeos de WhatsApp |
 | `whatsapp_extract` | Pode usar a extração de conversas por vídeo |
+| `use_ai` | Pode usar a correção de texto via IA (Gemini) |
 
 Permissões são gerenciadas em `/auth/admin/users` (acessível a qualquer usuário logado).
 

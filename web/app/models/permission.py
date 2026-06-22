@@ -25,4 +25,5 @@ class Permission(Base):
     ALL = [
         "whatsapp_videos",
         "whatsapp_extract",
+        "use_ai",
     ]

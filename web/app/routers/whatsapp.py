@@ -652,6 +652,8 @@ async def correct_text(
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
     if "whatsapp_extract" not in user.get("permissions", []):
         return JSONResponse({"error": "Sem permissão"}, status_code=403)
+    if "use_ai" not in user.get("permissions", []):
+        return JSONResponse({"error": "Sem permissão para usar a IA"}, status_code=403)
 
     try:
         if not raw_text.strip():
