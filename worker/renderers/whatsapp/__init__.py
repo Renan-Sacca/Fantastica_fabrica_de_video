@@ -84,6 +84,7 @@ class WhatsAppRenderer(BaseRenderer):
             job_id=job_data["job_id"],
             config=config,
             messages=messages,
+            bg_color=job_data.get("bg_color") or None,
         )
 
         # Arquivos opcionais

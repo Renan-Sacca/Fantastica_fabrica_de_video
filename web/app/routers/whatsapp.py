@@ -132,6 +132,7 @@ async def render_whatsapp_video(
     wallpaper: Optional[UploadFile] = File(None),
     background_music: Optional[UploadFile] = File(None),
     conversation_images: List[UploadFile] = File(default=[]),
+    bg_color: str = Form(default=""),
 ):
     """Recebe o formulário, sobe tudo no Drive e publica no RabbitMQ."""
     user = get_current_user(request)
@@ -191,6 +192,7 @@ async def render_whatsapp_video(
             "reading_speed": reading_speed,
             "scroll_speed": scroll_speed,
             "animation_style": animation_style,
+            "bg_color": bg_color.strip() if bg_color else "",
             "status": "pending",
             "progress": 0,
             "detail": "Aguardando worker...",

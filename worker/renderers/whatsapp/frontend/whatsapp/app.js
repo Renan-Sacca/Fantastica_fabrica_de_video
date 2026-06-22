@@ -172,13 +172,16 @@
             avatarEl.src = data.contact_photo || generateDefaultAvatar();
         }
 
-        // Wallpaper
+        // Wallpaper ou cor de fundo
         if (data.wallpaper) {
             messagesContainer.classList.add('has-wallpaper');
             const wpBg = document.createElement('div');
             wpBg.className = 'wallpaper-bg';
             wpBg.style.backgroundImage = `url(${data.wallpaper})`;
             messagesContainer.insertBefore(wpBg, messagesContainer.firstChild);
+        } else if (data.bg_color) {
+            messagesContainer.style.backgroundImage = 'none';
+            messagesContainer.style.backgroundColor = data.bg_color;
         }
 
         // Cores customizadas

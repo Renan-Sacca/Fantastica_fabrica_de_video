@@ -21,6 +21,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (input && valueEl) {
         input.addEventListener('input', () => {
             valueEl.textContent = parseFloat(input.value).toFixed(1) + 'x';
+            estimateDuration(); // atualiza estimativa ao mudar velocidade
         });
     }
 });
@@ -45,7 +46,13 @@ const wallpaperInput = document.getElementById('wallpaper');
 if (wallpaperInput) {
     wallpaperInput.addEventListener('change', () => {
         const file = wallpaperInput.files[0];
-        if (!file) return;
+        const bgColorGroup = document.getElementById('bg-color-group');
+        if (!file) {
+            if (bgColorGroup) bgColorGroup.style.display = 'block';
+            return;
+        }
+        // Esconde o color picker quando há wallpaper
+        if (bgColorGroup) bgColorGroup.style.display = 'none';
         const preview = document.getElementById('wallpaper-preview');
         const reader = new FileReader();
         reader.onload = e => {
@@ -54,6 +61,44 @@ if (wallpaperInput) {
         reader.readAsDataURL(file);
     });
 }
+
+// ── Color picker de fundo ──
+(function () {
+    const presets = document.querySelectorAll('.bg-color-btn');
+    const hiddenInput = document.getElementById('bg_color');
+    const customInput = document.getElementById('bg-color-custom');
+
+    function selectColor(color) {
+        if (hiddenInput) hiddenInput.value = color;
+        presets.forEach(b => {
+            b.style.border = b.dataset.color === color
+                ? '2px solid var(--accent)'
+                : '2px solid transparent';
+        });
+    }
+
+    presets.forEach(btn => {
+        btn.addEventListener('click', () => selectColor(btn.dataset.color));
+    });
+
+    if (customInput) {
+        customInput.addEventListener('input', () => {
+            if (hiddenInput) hiddenInput.value = customInput.value;
+            presets.forEach(b => b.style.border = '2px solid transparent');
+        });
+        // Abre o color picker ao clicar no emoji 🎨
+        customInput.parentElement.addEventListener('click', () => customInput.click());
+    }
+
+    // Quando wallpaper é limpo (usuário remove arquivo), mostra color picker
+    const wallInput = document.getElementById('wallpaper');
+    if (wallInput) {
+        wallInput.addEventListener('change', () => {
+            const group = document.getElementById('bg-color-group');
+            if (group) group.style.display = wallInput.files.length ? 'none' : 'block';
+        });
+    }
+})();
 
 // ── File: Música ──
 const musicInput = document.getElementById('background_music');
@@ -69,7 +114,16 @@ const convFileInput = document.getElementById('conversation_file');
 if (convFileInput) {
     convFileInput.addEventListener('change', () => {
         const file = convFileInput.files[0];
-        if (file) document.getElementById('conv-file-name').textContent = '📄 ' + file.name;
+        if (file) {
+            document.getElementById('conv-file-name').textContent = '📄 ' + file.name;
+            // Lê o arquivo e estima duração
+            const reader = new FileReader();
+            reader.onload = e => {
+                _lastConvText = e.target.result;
+                estimateDuration();
+            };
+            reader.readAsText(file);
+        }
     });
 }
 
@@ -631,4 +685,141 @@ async function submitDuplicate() {
         btn.disabled = false;
         btn.querySelector('.btn-text').textContent = "Confirmar Duplicação";
     }
+}
+
+// ── Simulador de Duração ──
+let _lastConvText = '';
+let _estimateTimer = null;
+
+// Conecta o textarea ao estimador
+(function () {
+    const ta = document.getElementById('conversation_text');
+    if (ta) {
+        ta.addEventListener('input', () => {
+            _lastConvText = ta.value;
+            clearTimeout(_estimateTimer);
+            _estimateTimer = setTimeout(estimateDuration, 400); // debounce 400ms
+        });
+    }
+})();
+
+/**
+ * Estima a duração do vídeo com base na conversa e nas configurações atuais.
+ * Espelha a lógica do animator.py (Timeline._build_timeline) em JS.
+ */
+function estimateDuration() {
+    const text = _lastConvText.trim();
+    const estimatorEl = document.getElementById('duration-estimator');
+    if (!estimatorEl) return;
+
+    if (!text) {
+        estimatorEl.style.display = 'none';
+        return;
+    }
+
+    // Ler configurações atuais
+    const speed        = parseFloat(document.getElementById('speed')?.value || 1.0);
+    const readingSpeed = parseFloat(document.getElementById('reading_speed')?.value || 1.0);
+    const scrollSpeed  = parseFloat(document.getElementById('scroll_speed')?.value || 1.0);
+    const animStyle    = document.getElementById('animation_style')?.value || 'fade';
+
+    // Parsear mensagens (mesmo padrão do parser.py)
+    const msgPattern  = /^\[(\d{1,2}:\d{2})\]\s+(.+?):\s+(.+)$/;
+    const cmdPattern  = /^\[(IMAGE|EMOJI|AUDIO|DATE)\]\s+(.+)$/i;
+
+    const lines = text.split('\n');
+    const messages = [];
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+
+        const cmd = line.match(cmdPattern);
+        if (cmd) {
+            const t = cmd[1].toUpperCase();
+            if (t === 'IMAGE')  messages.push({ type: 'image',          text: '' });
+            if (t === 'EMOJI')  messages.push({ type: 'emoji',          text: cmd[2] });
+            if (t === 'AUDIO')  messages.push({ type: 'audio',          text: '' });
+            if (t === 'DATE')   messages.push({ type: 'date_separator', text: cmd[2] });
+            continue;
+        }
+
+        const msg = line.match(msgPattern);
+        if (msg) {
+            messages.push({ type: 'text', text: msg[3], sender: msg[2] });
+        }
+    }
+
+    if (messages.length === 0) {
+        estimatorEl.style.display = 'none';
+        return;
+    }
+
+    // Contar tipos
+    let imgCount  = messages.filter(m => m.type === 'image').length;
+    let dateCount = messages.filter(m => m.type === 'date_separator').length;
+    let textCount = messages.filter(m => m.type === 'text' || m.type === 'emoji').length;
+
+    // ── Simulação da timeline (simplificada) ──
+    // Valores médios usados no Python (sem humanize):
+    const TYPING_DUR   = 600;  // média de min(500+len*15, 2000) para texto médio
+    let currentTime = 500;
+
+    for (const msg of messages) {
+        // Delay de chegada
+        let delay;
+        if (msg.type === 'date_separator') delay = 300;
+        else if (msg.type === 'image')     delay = 2000;
+        else if (msg.type === 'audio')     delay = 1800;
+        else if (msg.type === 'emoji')     delay = 600;
+        else {
+            const len = (msg.text || '').length;
+            if (len > 100) delay = 2200;
+            else if (len > 50) delay = 1600;
+            else delay = 1000;
+        }
+        currentTime += delay / speed;
+
+        // Animação de digitação (apenas para mensagens recebidas em modo typing)
+        if (animStyle === 'typing' && msg.type === 'text' && msg.sender !== 'me') {
+            const len = (msg.text || '').length;
+            const typingDur = Math.min(500 + len * 15, 2000);
+            currentTime += typingDur / speed;
+        }
+
+        // Aparecer (350ms de animação)
+        currentTime += 350;
+
+        // Pausa de leitura
+        let readPause;
+        if (msg.type === 'date_separator') readPause = 200;
+        else if (msg.type === 'image')     readPause = 2500;
+        else if (msg.type === 'audio')     readPause = 2000;
+        else {
+            const len = (msg.text || '').length;
+            if (len > 100) readPause = 2000;
+            else if (len > 50) readPause = 1500;
+            else readPause = 800;
+        }
+        currentTime += readPause / readingSpeed;
+    }
+
+    // Buffer final de 5s
+    const totalMs = currentTime + 5000;
+    const totalSec = Math.ceil(totalMs / 1000);
+
+    // Formatar
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    const formatted = mins > 0
+        ? `${mins}m ${secs.toString().padStart(2, '0')}s`
+        : `${secs}s`;
+
+    // Atualizar UI
+    document.getElementById('duration-value').textContent = formatted;
+    document.getElementById('est-msg-count').textContent = messages.length;
+    document.getElementById('est-img-count').textContent = imgCount;
+    document.getElementById('est-date-count').textContent = dateCount;
+    document.getElementById('est-speed-val').textContent = speed.toFixed(1) + 'x';
+    estimatorEl.style.display = 'block';
 }

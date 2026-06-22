@@ -145,6 +145,7 @@ def _build_conversation_data(job: RenderJob) -> dict:
         "contact_status": config.contact_status,
         "contact_photo": contact_photo_uri,
         "wallpaper": wallpaper_uri,
+        "bg_color": job.bg_color if not wallpaper_uri else None,
         "sent_color": None,
         "received_color": None,
         "messages": messages_data,

@@ -77,3 +77,4 @@ class RenderJob(BaseModel):
     contact_photo_path: Optional[str] = None
     wallpaper_path: Optional[str] = None
     background_music_path: Optional[str] = None
+    bg_color: Optional[str] = None  # cor de fundo quando não há wallpaper (ex: "#128c7e")
