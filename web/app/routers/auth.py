@@ -114,6 +114,16 @@ async def admin_users(request: Request):
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/auth/login", status_code=302)
+    # Somente administradores podem acessar
+    if not user.get("is_admin"):
+        from fastapi.templating import Jinja2Templates
+        from app.config import TEMPLATES_DIR
+        tpl = Jinja2Templates(directory=str(TEMPLATES_DIR))
+        return tpl.TemplateResponse(
+            "403.html",
+            {"request": request, "user": user, "required_permission": "admin"},
+            status_code=403,
+        )
     users = users_repo.get_all_users()
     from app.models.permission import Permission
     return templates.TemplateResponse(
@@ -131,6 +141,8 @@ async def update_permissions(
     current_user = get_current_user(request)
     if not current_user:
         return JSONResponse({"error": "Não autenticado"}, status_code=401)
+    if not current_user.get("is_admin"):
+        return JSONResponse({"error": "Apenas administradores podem alterar permissões"}, status_code=403)
 
     perm_list = [p.strip() for p in permissions.split(",") if p.strip()] if permissions else []
     success = users_repo.set_permissions(user_id, perm_list)

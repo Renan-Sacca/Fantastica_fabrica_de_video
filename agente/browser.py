@@ -213,14 +213,16 @@ class BrowserEngine:
         logger.info(f"Browser iniciado — provider: {self.provider}, headless: {self.headless}")
 
     async def navigate_to_chat(self) -> None:
-        """Navega até a URL do provider e verifica se precisa de login.
-        
-        Para Gemini, tenta usar nova conversa para não poluir histórico.
+        """Navega até a URL do provider.
+
+        Para Gemini abre sempre uma conversa nova (/app/new) para que cada
+        job fique numa thread isolada e possa ser deletada após o uso.
         """
-        url = self.selectors["url"]
-        # Para Gemini, inicia sempre uma nova conversa para não salvar no histórico
         if self.provider == "gemini":
             url = "https://gemini.google.com/app/new"
+        else:
+            url = self.selectors["url"]
+
         logger.info(f"Navegando para {url}")
         await self._page.goto(url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(3)
@@ -236,25 +238,126 @@ class BrowserEngine:
 
         logger.info("Navegação concluída — pronto para enviar mensagens.")
 
+    async def _delete_current_gemini_conversation(self) -> None:
+        """Deleta a conversa atual do Gemini para não ficar no histórico.
+
+        Tenta clicar no menu de opções da conversa e depois em 'Excluir'.
+        Falha silenciosa — se não conseguir deletar, apenas loga warning.
+        """
+        try:
+            # Aguarda um momento para a conversa ser registrada
+            await asyncio.sleep(1)
+
+            # Seletores para o menu de opções da conversa ativa na sidebar
+            menu_selectors = [
+                'button[aria-label*="Mais opções"]',
+                'button[aria-label*="More options"]',
+                'button[aria-label*="Options"]',
+                'button[data-test-id="conversation-options-button"]',
+                'mat-icon[fonticon="more_vert"]',
+            ]
+
+            menu_clicked = False
+            for sel in menu_selectors:
+                try:
+                    btn = self._page.locator(sel).first
+                    if await btn.is_visible(timeout=2000):
+                        await btn.click()
+                        menu_clicked = True
+                        logger.debug(f"Menu de conversa aberto via: {sel}")
+                        break
+                except Exception:
+                    continue
+
+            if not menu_clicked:
+                logger.debug("Menu de opções da conversa não encontrado — pulando deleção")
+                return
+
+            await asyncio.sleep(0.5)
+
+            # Seletores para o botão de deletar no menu
+            delete_selectors = [
+                'button:has-text("Excluir")',
+                'button:has-text("Delete")',
+                '[data-mat-icon-name="delete"]',
+                'mat-icon[fonticon="delete"]',
+            ]
+
+            delete_clicked = False
+            for sel in delete_selectors:
+                try:
+                    btn = self._page.locator(sel).first
+                    if await btn.is_visible(timeout=2000):
+                        await btn.click()
+                        delete_clicked = True
+                        logger.debug(f"Botão excluir clicado via: {sel}")
+                        break
+                except Exception:
+                    continue
+
+            if not delete_clicked:
+                # Fechar menu sem deletar (pressiona Escape)
+                await self._page.keyboard.press("Escape")
+                logger.debug("Botão excluir não encontrado — menu fechado")
+                return
+
+            await asyncio.sleep(0.5)
+
+            # Confirmar exclusão (dialog de confirmação)
+            confirm_selectors = [
+                'button:has-text("Excluir")',
+                'button:has-text("Delete")',
+                'button:has-text("Confirmar")',
+                'button:has-text("Confirm")',
+            ]
+            for sel in confirm_selectors:
+                try:
+                    btn = self._page.locator(sel).last
+                    if await btn.is_visible(timeout=2000):
+                        await btn.click()
+                        logger.info("Conversa Gemini deletada com sucesso.")
+                        return
+                except Exception:
+                    continue
+
+            logger.debug("Dialog de confirmação não encontrado.")
+        except Exception as e:
+            logger.warning(f"Não foi possível deletar conversa do Gemini: {e}")
+
     async def switch_provider(self, provider: str) -> None:
-        """Troca o provider dinamicamente (para jobs com provider diferente).
-        
-        Para Gemini, sempre abre nova conversa para não salvar histórico.
+        """Troca o provider dinamicamente.
+
+        Para Gemini a navegação acontece em cada send_message (nova conversa).
+        Para ChatGPT navega normalmente.
         """
         self.provider = provider
         self.selectors = PROVIDERS.get(provider, CHATGPT)
-        await self.navigate_to_chat()
+        if provider != "gemini":
+            await self.navigate_to_chat()
         logger.info(f"Provider trocado para: {provider}")
 
     async def send_message(self, text: str) -> str:
-        """Envia uma mensagem e aguarda a resposta completa da IA."""
+        """Envia uma mensagem e aguarda a resposta completa da IA.
+
+        Para Gemini, navega para uma nova conversa antes de enviar e deleta
+        a conversa após receber a resposta (modo anônimo — sem histórico).
+        """
+        if self.provider == "gemini":
+            await self.navigate_to_chat()
+
         await self._fill_input(text)
         await asyncio.sleep(0.5)
         await self._click_submit()
         await asyncio.sleep(1)
         await self._wait_response_done()
         response = await self._extract_response()
-        return self._clean(response)
+        cleaned = self._clean(response)
+
+        # Deletar a conversa do histórico do Gemini
+        if self.provider == "gemini":
+            await self._delete_current_gemini_conversation()
+
+        return cleaned
 
     async def _fill_input(self, text: str) -> None:
         """Localiza o campo de input e preenche com o texto."""

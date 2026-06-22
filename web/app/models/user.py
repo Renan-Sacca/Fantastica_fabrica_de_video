@@ -17,6 +17,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -35,6 +36,7 @@ class User(Base):
             "id": self.id,
             "email": self.email,
             "is_active": self.is_active,
+            "is_admin": self.is_admin,
             "permissions": [p.permission for p in self.permissions],
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

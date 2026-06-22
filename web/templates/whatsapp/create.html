@@ -333,4 +333,31 @@ Comandos especiais:
 
 {% block scripts %}
 <script src="/static/whatsapp/create.js?v=5"></script>
+<script>
+    // Pré-preencher formulário a partir de uma extração (sessionStorage)
+    (function () {
+        const titulo   = sessionStorage.getItem('prefill_title');
+        const conversa = sessionStorage.getItem('prefill_conversa');
+        if (!titulo && !conversa) return;
+
+        if (titulo) {
+            const el = document.getElementById('title');
+            if (el) el.value = titulo;
+        }
+        if (conversa) {
+            // Tentar preencher o textarea de conversa (id pode variar)
+            const ta = document.getElementById('conversation_text')
+                    || document.querySelector('textarea[name="conversation_text"]');
+            if (ta) ta.value = conversa;
+        }
+
+        // Limpar após usar para não repreencher em próximas visitas
+        sessionStorage.removeItem('prefill_title');
+        sessionStorage.removeItem('prefill_conversa');
+
+        // Scroll suave até o textarea
+        const ta2 = document.querySelector('textarea[name="conversation_text"]');
+        if (ta2) setTimeout(() => ta2.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+    })();
+</script>
 {% endblock %}
