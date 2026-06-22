@@ -148,6 +148,7 @@ class Timeline:
     def _build_timeline(self) -> None:
         current_time = 500.0
         accumulated_height = 0.0
+        num_messages = len(self.messages)
         for i, msg in enumerate(self.messages):
             delay = self._get_message_delay(msg)
             current_time += delay
@@ -162,7 +163,11 @@ class Timeline:
             appear_time = current_time
             fully_visible_time = current_time + anim_dur
             accumulated_height += self._estimate_msg_height(msg)
-            target_scroll = max(0.0, accumulated_height - self.usable_height + 25.0)
+            # Para a última mensagem usa padding maior para garantir que fique
+            # completamente acima da barra de input (altura estimada pode ser menor que a real).
+            is_last = (i == num_messages - 1)
+            extra_padding = 80.0 if is_last else 25.0
+            target_scroll = max(0.0, accumulated_height - self.usable_height + extra_padding)
             scroll_dur = self._get_scroll_duration()
             self.events.append(MessageEvent(
                 index=i, message=msg, appear_time=appear_time,
@@ -172,7 +177,8 @@ class Timeline:
                 target_scroll_y=target_scroll,
             ))
             current_time = fully_visible_time + self._get_reading_pause(msg)
-        self.total_duration_ms = current_time + 4000.0
+        # Buffer final: garante frames suficientes depois da última mensagem aparecer
+        self.total_duration_ms = current_time + 5000.0
         self.total_frames = max(1, int(math.ceil(self.total_duration_ms / 1000.0 * self.fps)))
 
     def get_frame_state(self, frame_index: int) -> FrameState:

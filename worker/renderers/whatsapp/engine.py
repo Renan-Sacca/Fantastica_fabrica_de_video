@@ -178,19 +178,19 @@ async def _render_chunk_async(
 async def _progress_reporter(frames_to_render: int, progress_queue: asyncio.Queue, report_callback):
     if frames_to_render == 0:
         return
-        
+
     frames_done = 0
     last_reported_threshold = 0
-    
+
     while frames_done < frames_to_render:
         await progress_queue.get()
         frames_done += 1
-        
-        raw_progress = 10.0 + (frames_done / max(1, frames_to_render - 1)) * 80.0
+
+        raw_progress = 10.0 + (frames_done / frames_to_render) * 80.0
         for threshold in _PROGRESS_THRESHOLDS:
             if last_reported_threshold < threshold <= raw_progress:
                 last_reported_threshold = threshold
-                report_callback(raw_progress, f"Renderizando únicos: {frames_done}/{frames_to_render}")
+                report_callback(raw_progress, f"Renderizando: {frames_done}/{frames_to_render}")
                 break
 
 async def _render_frames_async(
