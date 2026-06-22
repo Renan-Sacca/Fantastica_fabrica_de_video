@@ -62,6 +62,11 @@ GEMINI = {
         'div[data-author="model"] .markdown',
         'message-content',
     ],
+    # Seletor do toggle "Atividade do Gemini" para desativar histórico (modo anônimo)
+    "activity_toggle": [
+        'button[aria-label*="Atividade"]',
+        'button[aria-label*="Gemini Apps Activity"]',
+    ],
 }
 
 PROVIDERS = {
@@ -208,8 +213,14 @@ class BrowserEngine:
         logger.info(f"Browser iniciado — provider: {self.provider}, headless: {self.headless}")
 
     async def navigate_to_chat(self) -> None:
-        """Navega até a URL do provider e verifica se precisa de login."""
+        """Navega até a URL do provider e verifica se precisa de login.
+        
+        Para Gemini, tenta usar nova conversa para não poluir histórico.
+        """
         url = self.selectors["url"]
+        # Para Gemini, inicia sempre uma nova conversa para não salvar no histórico
+        if self.provider == "gemini":
+            url = "https://gemini.google.com/app/new"
         logger.info(f"Navegando para {url}")
         await self._page.goto(url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(3)
@@ -226,9 +237,10 @@ class BrowserEngine:
         logger.info("Navegação concluída — pronto para enviar mensagens.")
 
     async def switch_provider(self, provider: str) -> None:
-        """Troca o provider dinamicamente (para jobs com provider diferente)."""
-        if provider == self.provider:
-            return
+        """Troca o provider dinamicamente (para jobs com provider diferente).
+        
+        Para Gemini, sempre abre nova conversa para não salvar histórico.
+        """
         self.provider = provider
         self.selectors = PROVIDERS.get(provider, CHATGPT)
         await self.navigate_to_chat()

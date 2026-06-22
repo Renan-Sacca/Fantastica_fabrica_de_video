@@ -21,6 +21,9 @@ MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "fabrica_video_db")
 
+# ── Autenticação ──
+SECRET_KEY = os.getenv("SECRET_KEY", "fabrica_video_secret_2025")
+
 # ── Google Drive ──
 SERVICE_ACCOUNT_FILE = os.getenv(
     "SERVICE_ACCOUNT_FILE",

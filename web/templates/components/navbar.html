@@ -9,9 +9,21 @@
                 </div>
             </div>
         </a>
-        <nav class="nav-links" style="display: flex; gap: 20px;">
+        <nav class="nav-links" style="display: flex; gap: 20px; align-items: center;">
             <a href="/" class="nav-link" style="color: var(--text-primary); text-decoration: none; font-weight: 500;">Início</a>
+            {% if user is defined and user and 'whatsapp_videos' in user.permissions %}
             <a href="/whatsapp" class="nav-link" style="color: var(--text-primary); text-decoration: none; font-weight: 500;">WhatsApp</a>
+            {% endif %}
+            {% if user is defined and user and 'whatsapp_extract' in user.permissions %}
+            <a href="/whatsapp/extract" class="nav-link" style="color: var(--text-primary); text-decoration: none; font-weight: 500;">Extrair</a>
+            {% endif %}
+            {% if user is defined and user %}
+            <div style="display: flex; align-items: center; gap: 12px; border-left: 1px solid var(--border-subtle); padding-left: 20px;">
+                <a href="/auth/admin/users" class="nav-link" style="color: var(--text-secondary); text-decoration: none; font-size: 13px;">👥 Usuários</a>
+                <span style="font-size: 13px; color: var(--text-secondary);">{{ user.email }}</span>
+                <a href="/auth/logout" class="btn btn-secondary" style="padding: 4px 12px; font-size: 13px; text-decoration: none;">Sair</a>
+            </div>
+            {% endif %}
         </nav>
     </div>
 </header>

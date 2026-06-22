@@ -11,8 +11,7 @@ from app.models.text_correction import TextCorrectionJob
 
 logger = logging.getLogger(__name__)
 
-
-def create_job(job_id: str, raw_text: str, provider: str = "chatgpt") -> None:
+def create_job(job_id: str, raw_text: str, provider: str = "gemini", user_id: Optional[int] = None) -> None:
     """Cria um novo job de correção de texto no MySQL."""
     with SessionLocal() as session:
         job = TextCorrectionJob(
@@ -20,6 +19,7 @@ def create_job(job_id: str, raw_text: str, provider: str = "chatgpt") -> None:
             raw_text=raw_text,
             provider=provider,
             status="pending",
+            user_id=user_id,
         )
         session.add(job)
         session.commit()

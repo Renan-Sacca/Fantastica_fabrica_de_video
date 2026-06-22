@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS `jobs` (
     `title`            VARCHAR(255)    NOT NULL,
     `video_type`       VARCHAR(50)     NOT NULL,
 
+    -- Usuário dono do job
+    `user_id`          INT             NULL,
+
     -- Estado do processamento (atualizado pelo worker)
     `status`           VARCHAR(30)     NOT NULL DEFAULT 'pending',
     `progress`         FLOAT           NOT NULL DEFAULT 0.0,
@@ -30,5 +33,6 @@ CREATE TABLE IF NOT EXISTS `jobs` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uq_jobs_job_id` (`job_id`),
     INDEX `ix_jobs_job_id` (`job_id`),
-    INDEX `ix_jobs_video_type` (`video_type`)
+    INDEX `ix_jobs_video_type` (`video_type`),
+    INDEX `ix_jobs_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

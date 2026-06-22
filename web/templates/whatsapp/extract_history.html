@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico de Extrações{% endblock %}
+
+{% block content %}
+<div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <h1>🗂️ Histórico de Extrações</h1>
+    <a href="/whatsapp/extract" class="btn btn-secondary" style="padding: 0.5rem 1rem;">
+        ← Nova Extração
+    </a>
+</div>
+
+<!-- Filtros -->
+<section class="card" style="margin-bottom: 20px;">
+    <form method="get" action="/whatsapp/extract/history" style="display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap;">
+        <div>
+            <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Filtrar por Título</label>
+            <input type="text" name="title" value="{{ filter_title }}"
+                placeholder="Ex: Reel 01"
+                style="padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: white; font-size: 14px; width: 220px;">
+        </div>
+        <div>
+            <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Filtrar por Data</label>
+            <input type="date" name="date" value="{{ filter_date }}"
+                style="padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: white; font-size: 14px;">
+        </div>
+        <button type="submit" class="btn btn-secondary" style="padding: 8px 18px;">🔍 Filtrar</button>
+        {% if filter_title or filter_date %}
+        <a href="/whatsapp/extract/history" class="btn btn-secondary" style="padding: 8px 14px; opacity: 0.7;">Limpar</a>
+        {% endif %}
+    </form>
+</section>
+
+<!-- Lista -->
+<section class="card">
+    <div class="jobs-list">
+        {% if jobs %}
+            {% for job in jobs %}
+            <div class="job-item" style="flex-direction: column; align-items: stretch; margin-bottom: 16px;">
+                <div class="job-info" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <span class="job-name" style="font-weight: 600; font-size: 15px;">{{ job.title }}</span>
+                        <span style="margin-left: 12px; font-size: 12px; color: var(--text-secondary);">
+                            {{ job.created_at[:10] if job.created_at else '' }}
+                        </span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span class="job-type-badge">{{ job.status }}</span>
+                        {% if job.status == 'completed' %}
+                        <a href="/whatsapp/extract/{{ job.job_id }}" class="btn btn-secondary" style="padding: 4px 12px; font-size: 13px;">
+                            Abrir →
+                        </a>
+                        {% endif %}
+                        <button class="btn btn-delete" onclick="deleteJob('{{ job.job_id }}')" title="Excluir">🗑️</button>
+                    </div>
+                </div>
+                {% if job.status == 'error' %}
+                <div style="font-size: 12px; color: #ef4444; margin-top: 6px;">{{ job.error }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="jobs-empty" style="text-align: center; padding: 60px 0;">
+                <span style="font-size: 3rem; display: block; margin-bottom: 12px;">📄</span>
+                <p style="color: var(--text-secondary);">
+                    {% if filter_title or filter_date %}
+                        Nenhuma extração encontrada com os filtros aplicados.
+                    {% else %}
+                        Nenhuma extração ainda. <a href="/whatsapp/extract" style="color: var(--accent);">Fazer uma extração</a>
+                    {% endif %}
+                </p>
+            </div>
+        {% endif %}
+    </div>
+</section>
+
+<!-- Modal Deleção -->
+<div id="delete-modal" class="modal-overlay" style="display:none; z-index: 9999;">
+    <div class="modal-content" style="max-width: 400px; text-align: center;">
+        <div class="modal-header" style="justify-content: center; border-bottom: none;">
+            <h2 style="margin: 0; font-size: 1.5rem;">🗑️ Excluir Extração</h2>
+        </div>
+        <div class="modal-body" style="padding-top: 0;">
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Tem certeza? Esta ação não pode ser desfeita.</p>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete()">
+                    ⚠️ Excluir permanentemente
+                </button>
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 8px; background: transparent; border: none;" onclick="closeDeleteModal()">
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let jobToDelete = null;
+
+    function deleteJob(jobId) {
+        jobToDelete = jobId;
+        document.getElementById('delete-modal').style.display = 'flex';
+    }
+
+    function closeDeleteModal() {
+        document.getElementById('delete-modal').style.display = 'none';
+        jobToDelete = null;
+    }
+
+    function submitDelete() {
+        if (!jobToDelete) return;
+        const jobId = jobToDelete;
+        const btn = event.currentTarget;
+        btn.innerHTML = '⏳ Excluindo...';
+        btn.disabled = true;
+
+        fetch(`/api/jobs/${jobId}?delete_drive=true`, { method: 'DELETE' })
+        .then(res => {
+            if (res.ok) {
+                document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
+                closeDeleteModal();
+                window.location.reload();
+            } else {
+                return res.json().then(d => alert('Erro: ' + (d.error || 'Desconhecido')));
+            }
+        })
+        .catch(() => alert('Erro de rede.'))
+        .finally(() => { btn.innerHTML = '⚠️ Excluir permanentemente'; btn.disabled = false; });
+    }
+</script>
+{% endblock %}

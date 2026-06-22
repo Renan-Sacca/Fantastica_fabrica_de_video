@@ -51,6 +51,8 @@ def _apply_common(job: Job, metadata: dict, drive_folder_id: str, metadata_file_
         job.video_drive_id = metadata.get("video_drive_id")
     if metadata.get("video_url") is not None:
         job.video_url = metadata.get("video_url")
+    if metadata.get("user_id") is not None:
+        job.user_id = metadata.get("user_id")
 
 
 def _apply_specific(job: Job, video_type: str, metadata: dict) -> None:
@@ -87,6 +89,19 @@ def save_job(metadata: dict, drive_folder_id: str, metadata_file_id: Optional[st
         logger.info(f"[{job_id}] Job salvo no MySQL (tipo={video_type}).")
 
 
+def update_extract_text(job_id: str, conversa_text: str) -> bool:
+    """Atualiza o texto extraído de um WhatsAppExtractJob."""
+    with SessionLocal() as session:
+        job = session.scalar(select(JobPoly).where(Job.job_id == job_id))
+        if not job:
+            return False
+        if hasattr(job, "conversa_text"):
+            job.conversa_text = conversa_text
+            session.commit()
+            return True
+        return False
+
+
 def update_basic(job_id: str, **fields) -> None:
     """Atualiza campos básicos (ex.: title, video_type) de um job existente."""
     with SessionLocal() as session:
@@ -105,12 +120,14 @@ def get_job(job_id: str) -> Optional[dict]:
         return job.to_dict() if job else None
 
 
-def get_all_jobs(video_type: Optional[str] = None) -> list[dict]:
-    """Lista jobs (mais recentes primeiro), opcionalmente filtrando por tipo."""
+def get_all_jobs(video_type: Optional[str] = None, user_id: Optional[int] = None) -> list[dict]:
+    """Lista jobs (mais recentes primeiro), opcionalmente filtrando por tipo e usuário."""
     with SessionLocal() as session:
         stmt = select(JobPoly)
         if video_type:
             stmt = stmt.where(Job.video_type == video_type)
+        if user_id is not None:
+            stmt = stmt.where(Job.user_id == user_id)
         stmt = stmt.order_by(Job.created_at.desc())
         return [j.to_dict() for j in session.scalars(stmt).all()]
 

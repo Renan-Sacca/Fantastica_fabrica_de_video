@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.auth import get_current_user, permission_required
 from app.config import BASE_DIR, TEMPLATES_DIR
 from app.drive import get_drive
 from app.parser import parse_conversation
@@ -25,31 +26,58 @@ router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 TOKEN_FILE = os.getenv("TOKEN_FILE", str(BASE_DIR.parent / "token.json"))
 
+
+def _require_permission(request: Request, perm: str):
+    """Retorna (user, error_response). Se ok, error_response é None."""
+    user = get_current_user(request)
+    if not user:
+        return None, RedirectResponse(url="/auth/login", status_code=302)
+    if perm not in user.get("permissions", []):
+        resp = templates.TemplateResponse(
+            "403.html",
+            {"request": request, "user": user, "required_permission": perm},
+            status_code=403,
+        )
+        return user, resp
+    return user, None
+
 @router.get("", response_class=HTMLResponse)
 async def whatsapp_dashboard(request: Request):
     """Página principal de criação de vídeo de WhatsApp."""
-    # Listar apenas os jobs de whatsapp para o histórico
-    jobs = jobs_repo.get_all_jobs("whatsapp")
+    user, err = _require_permission(request, "whatsapp_videos")
+    if err:
+        return err
+    jobs = jobs_repo.get_all_jobs("whatsapp", user_id=user["id"])
     return templates.TemplateResponse(
         "whatsapp/create.html",
-        {"request": request, "jobs": jobs},
+        {"request": request, "jobs": jobs, "user": user},
     )
 
 @router.get("/jobs", response_class=HTMLResponse)
 async def whatsapp_jobs(request: Request):
     """Página com a lista de jobs de WhatsApp."""
-    jobs = jobs_repo.get_all_jobs("whatsapp")
+    user, err = _require_permission(request, "whatsapp_videos")
+    if err:
+        return err
+    jobs = jobs_repo.get_all_jobs("whatsapp", user_id=user["id"])
     return templates.TemplateResponse(
         "whatsapp/jobs_list.html",
-        {"request": request, "jobs": jobs},
+        {"request": request, "jobs": jobs, "user": user},
     )
 
 @router.get("/video/{job_id}", response_class=HTMLResponse)
 async def whatsapp_video_detail(request: Request, job_id: str):
     """Tela de detalhes de um vídeo específico."""
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
     job_info = jobs_repo.get_job(job_id)
     if not job_info:
         return HTMLResponse("<h1>Job não encontrado</h1>", status_code=404)
+    # Verificar se o job pertence ao usuário
+    if job_info.get("user_id") != user["id"]:
+        return HTMLResponse("<h1>Acesso negado</h1>", status_code=403)
 
     drive = get_drive(TOKEN_FILE)
     try:
@@ -81,11 +109,13 @@ async def whatsapp_video_detail(request: Request, job_id: str):
             "job_info": job_info,
             "drive_link": drive_link,
             "conversa_text": conversa_text,
+            "user": user,
         },
     )
 
 @router.post("/render")
 async def render_whatsapp_video(
+    request: Request,
     title: str = Form(...),
     video_type: str = Form("whatsapp"),
     conversation_text: str = Form(""),
@@ -104,6 +134,12 @@ async def render_whatsapp_video(
     conversation_images: List[UploadFile] = File(default=[]),
 ):
     """Recebe o formulário, sobe tudo no Drive e publica no RabbitMQ."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+    if "whatsapp_videos" not in user.get("permissions", []):
+        return JSONResponse({"error": "Sem permissão"}, status_code=403)
+    user_id = user["id"]
     try:
         try:
             vt = get_video_type(video_type)
@@ -146,6 +182,7 @@ async def render_whatsapp_video(
             "job_id": job_id,
             "title": title,
             "video_type": video_type,
+            "user_id": user_id,
             "contact_name": contact_name,
             "contact_status": contact_status,
             "video_format": video_format,
@@ -230,6 +267,7 @@ async def render_whatsapp_video(
 
 @router.post("/video/{job_id}/edit")
 async def edit_whatsapp_video(
+    request: Request,
     job_id: str,
     title: str = Form(...),
     video_type: str = Form("whatsapp"),
@@ -250,9 +288,15 @@ async def edit_whatsapp_video(
 ):
     """Atualiza as configs do vídeo no Drive e publica no RabbitMQ para recriar."""
     import json
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
     job_info = jobs_repo.get_job(job_id)
     if not job_info:
         return JSONResponse({"error": "Job não encontrado"}, status_code=404)
+    if job_info.get("user_id") != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
 
     drive = get_drive(TOKEN_FILE)
     loop = asyncio.get_event_loop()
@@ -372,6 +416,10 @@ async def edit_whatsapp_video(
 @router.post("/video/{job_id}/duplicate")
 async def duplicate_whatsapp_video(request: Request, job_id: str):
     """Duplica um job de WhatsApp existente."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
     try:
         data = await request.json()
     except:
@@ -383,6 +431,8 @@ async def duplicate_whatsapp_video(request: Request, job_id: str):
     job_info = jobs_repo.get_job(job_id)
     if not job_info:
         return JSONResponse({"error": "Job original não encontrado"}, status_code=404)
+    if job_info.get("user_id") != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
 
     drive = get_drive(TOKEN_FILE)
     loop = asyncio.get_event_loop()
@@ -403,6 +453,7 @@ async def duplicate_whatsapp_video(request: Request, job_id: str):
             "job_id": new_job_id,
             "title": new_title,
             "status": "draft",
+            "user_id": user["id"],
             "progress": 0,
             "detail": "Projeto duplicado, pronto para edição.",
             "error": None,
@@ -466,20 +517,74 @@ async def duplicate_whatsapp_video(request: Request, job_id: str):
 
 @router.get("/extract", response_class=HTMLResponse)
 async def whatsapp_extract_page(request: Request):
-    """Página separada para extração de conversas e listagem dos jobs extraídos."""
-    # Tudo vem do MySQL (status, progresso e texto extraído em cache) — sem tocar no Drive.
-    jobs = jobs_repo.get_all_jobs("whatsapp_extract")
+    """Página de extração — mostra apenas o formulário de upload e a conversa gerada no momento."""
+    user, err = _require_permission(request, "whatsapp_extract")
+    if err:
+        return err
     return templates.TemplateResponse(
         "whatsapp/extract.html",
-        {"request": request, "jobs": jobs},
+        {"request": request, "user": user},
+    )
+
+
+@router.get("/extract/history", response_class=HTMLResponse)
+async def whatsapp_extract_history(
+    request: Request,
+    title: Optional[str] = None,
+    date: Optional[str] = None,
+):
+    """Histórico de extrações — filtro por título e data."""
+    user, err = _require_permission(request, "whatsapp_extract")
+    if err:
+        return err
+
+    jobs = jobs_repo.get_all_jobs("whatsapp_extract", user_id=user["id"])
+
+    # Filtrar por título
+    if title:
+        jobs = [j for j in jobs if title.lower() in j.get("title", "").lower()]
+
+    # Filtrar por data (formato YYYY-MM-DD)
+    if date:
+        jobs = [j for j in jobs if j.get("created_at", "").startswith(date)]
+
+    return templates.TemplateResponse(
+        "whatsapp/extract_history.html",
+        {"request": request, "jobs": jobs, "user": user, "filter_title": title or "", "filter_date": date or ""},
+    )
+
+
+@router.get("/extract/{job_id}", response_class=HTMLResponse)
+async def whatsapp_extract_detail(request: Request, job_id: str):
+    """Tela de detalhe de uma extração — editar conversa + corrigir com IA."""
+    user, err = _require_permission(request, "whatsapp_extract")
+    if err:
+        return err
+
+    job_info = jobs_repo.get_job(job_id)
+    if not job_info:
+        return HTMLResponse("<h1>Extração não encontrada</h1>", status_code=404)
+    if job_info.get("user_id") != user["id"]:
+        return HTMLResponse("<h1>Acesso negado</h1>", status_code=403)
+
+    return templates.TemplateResponse(
+        "whatsapp/extract_detail.html",
+        {"request": request, "job": job_info, "user": user},
     )
 
 @router.post("/extract")
 async def extract_whatsapp_from_video(
+    request: Request,
     title: str = Form(...),
     video_original: UploadFile = File(...),
 ):
     """Cria um job para extrair as conversas de um vídeo existente."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+    if "whatsapp_extract" not in user.get("permissions", []):
+        return JSONResponse({"error": "Sem permissão"}, status_code=403)
+    user_id = user["id"]
     try:
         if not video_original or not video_original.filename:
             return JSONResponse({"error": "Vídeo não fornecido."}, status_code=400)
@@ -498,6 +603,7 @@ async def extract_whatsapp_from_video(
             "job_id": job_id,
             "title": title,
             "video_type": video_type,
+            "user_id": user_id,
             "status": "pending",
             "progress": 0,
             "detail": "Aguardando worker para extração...",
@@ -533,14 +639,20 @@ async def extract_whatsapp_from_video(
 
 @router.post("/correct-text")
 async def correct_text(
+    request: Request,
     raw_text: str = Form(...),
-    provider: str = Form("chatgpt"),
 ):
-    """Submete um texto para correção via agente IA (ChatGPT/Gemini).
+    """Submete um texto para correção via agente IA (sempre Gemini, modo anônimo).
 
     Cria um registro no MySQL, publica na fila do agente e retorna o job_id.
     O frontend pode acompanhar o progresso via SSE em /api/correction/{job_id}/stream.
     """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+    if "whatsapp_extract" not in user.get("permissions", []):
+        return JSONResponse({"error": "Sem permissão"}, status_code=403)
+
     try:
         if not raw_text.strip():
             return JSONResponse(
@@ -548,16 +660,12 @@ async def correct_text(
                 status_code=400,
             )
 
-        if provider not in ("chatgpt", "gemini"):
-            return JSONResponse(
-                {"error": f"Provider inválido: '{provider}'. Use 'chatgpt' ou 'gemini'."},
-                status_code=400,
-            )
-
+        # Sempre usa Gemini
+        provider = "gemini"
         job_id = uuid.uuid4().hex[:8]
 
         # Salvar no MySQL
-        corrections_repo.create_job(job_id, raw_text.strip(), provider)
+        corrections_repo.create_job(job_id, raw_text.strip(), provider, user_id=user["id"])
 
         # Publicar na fila do agente
         await publish_correction_job(job_id, raw_text.strip(), provider)
@@ -580,4 +688,25 @@ async def get_correction_result(job_id: str):
     if not job:
         return JSONResponse({"error": "Job não encontrado"}, status_code=404)
     return JSONResponse(job)
+
+
+@router.post("/extract/{job_id}/save")
+async def save_extract_text(
+    request: Request,
+    job_id: str,
+    conversa_text: str = Form(...),
+):
+    """Salva edição manual do texto extraído."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
+    job_info = jobs_repo.get_job(job_id)
+    if not job_info:
+        return JSONResponse({"error": "Job não encontrado"}, status_code=404)
+    if job_info.get("user_id") != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
+
+    jobs_repo.update_extract_text(job_id, conversa_text)
+    return JSONResponse({"ok": True})
 

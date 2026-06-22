@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Gerenciar Usuários{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center;">
+    <h1>👥 Gerenciar Usuários</h1>
+    <a href="/" class="btn btn-secondary" style="padding: 0.5rem 1rem;">← Início</a>
+</div>
+
+<section class="card">
+    <div class="jobs-list">
+        {% if users %}
+            {% for u in users %}
+            <div class="job-item" style="flex-direction: column; align-items: stretch; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div>
+                        <span style="font-weight: 600; font-size: 15px;">{{ u.email }}</span>
+                        <span style="margin-left: 10px; font-size: 12px; color: var(--text-secondary);">ID: {{ u.id }}</span>
+                        {% if not u.is_active %}
+                        <span style="margin-left: 8px; background: rgba(239,68,68,0.15); color: #ef4444; font-size: 11px; padding: 2px 7px; border-radius: 4px;">inativo</span>
+                        {% endif %}
+                    </div>
+                    <span style="font-size: 12px; color: var(--text-secondary);">{{ u.created_at[:10] if u.created_at else '' }}</span>
+                </div>
+
+                <form method="post" action="/auth/admin/users/{{ u.id }}/permissions" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span style="font-size: 13px; color: var(--text-secondary);">Permissões:</span>
+                    {% for perm in all_permissions %}
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
+                        <input type="checkbox" name="perm_{{ perm }}" value="{{ perm }}"
+                            {% if perm in u.permissions %}checked{% endif %}
+                            onchange="syncPermissions(this)">
+                        {{ perm }}
+                    </label>
+                    {% endfor %}
+                    <input type="hidden" name="permissions" id="perm-hidden-{{ u.id }}" value="{{ u.permissions | join(',') }}">
+                    <button type="submit" class="btn btn-secondary" style="padding: 4px 12px; font-size: 13px;"
+                        onclick="buildPermissions({{ u.id }}, this.closest('form'))">
+                        Salvar
+                    </button>
+                </form>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="jobs-empty" style="text-align: center; padding: 40px 0;">
+                <p style="color: var(--text-secondary);">Nenhum usuário cadastrado.</p>
+            </div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function buildPermissions(userId, form) {
+    const checkboxes = form.querySelectorAll('input[type=checkbox]');
+    const perms = [];
+    checkboxes.forEach(cb => { if (cb.checked) perms.push(cb.value); });
+    form.querySelector('input[name=permissions]').value = perms.join(',');
+}
+</script>
+{% endblock %}

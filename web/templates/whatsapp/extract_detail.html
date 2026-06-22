@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block title %}{{ job.title }} — Extração{% endblock %}
+
+{% block content %}
+<div class="header-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <h1>📄 {{ job.title }}</h1>
+    <div style="display: flex; gap: 10px;">
+        <a href="/whatsapp/extract/history" class="btn btn-secondary" style="padding: 0.5rem 1rem;">← Histórico</a>
+        <a href="/whatsapp/extract" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Nova Extração</a>
+    </div>
+</div>
+
+<div class="form-grid">
+    <!-- Coluna esquerda: Texto Original -->
+    <div class="form-column">
+        <section class="card">
+            <h2 class="card-title">
+                <span class="card-icon">📝</span>
+                Texto Extraído (OCR)
+            </h2>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                Você pode editar e salvar as correções manuais.
+            </p>
+            <textarea id="conversa-text"
+                style="width: 100%; height: 400px; padding: 12px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: white; font-family: monospace; font-size: 13px; resize: vertical; box-sizing: border-box;">{{ job.conversa_text or '' }}</textarea>
+
+            <div style="display: flex; gap: 10px; margin-top: 14px;">
+                <button class="btn btn-secondary" style="flex: 1;" onclick="saveText()">
+                    💾 Salvar
+                </button>
+                <button class="btn btn-secondary" style="flex: 1;" onclick="copyText('conversa-text')">
+                    📋 Copiar
+                </button>
+            </div>
+            <div id="save-msg" style="display: none; margin-top: 10px; font-size: 13px; color: #25d366;">✅ Salvo com sucesso!</div>
+        </section>
+    </div>
+
+    <!-- Coluna direita: Corrigir com IA -->
+    <div class="form-column">
+        <section class="card">
+            <h2 class="card-title">
+                <span class="card-icon">✨</span>
+                Corrigir com Gemini
+            </h2>
+            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                O texto original (coluna ao lado) será enviado ao Gemini para correção ortográfica, remoção de duplicatas e limpeza do OCR.
+            </p>
+
+            <button id="btn-correct" class="btn-primary" style="width: 100%; padding: 12px; font-size: 15px; border-radius: 10px; margin-bottom: 16px;" onclick="corrigirComIA()">
+                🪄 Corrigir com IA
+            </button>
+
+            <div id="ai-progress" style="display: none; margin-bottom: 14px; padding: 10px; border-radius: 8px; background: rgba(37, 211, 102, 0.05); border: 1px solid rgba(37, 211, 102, 0.15);">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px;">
+                    <span id="ai-status" style="font-weight: 600; color: #25d366;">Iniciando...</span>
+                </div>
+                <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden;">
+                    <div id="ai-bar" style="width: 0%; height: 100%; background: #25d366; transition: width 0.3s;"></div>
+                </div>
+            </div>
+
+            <div>
+                <label style="display: block; margin-bottom: 8px; font-size: 13px; color: var(--text-secondary); font-weight: 600;">Resultado da Correção</label>
+                <textarea id="corrected-text" readonly
+                    style="width: 100%; height: 320px; padding: 12px; border-radius: 8px; border: 1px solid rgba(37,211,102,0.3); background: var(--bg-input); color: white; font-family: monospace; font-size: 13px; resize: vertical; box-sizing: border-box;"
+                    placeholder="O texto corrigido aparecerá aqui..."></textarea>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 14px;">
+                <button class="btn btn-secondary" style="flex: 1;" onclick="copyText('corrected-text')">
+                    📋 Copiar Corrigido
+                </button>
+                <button class="btn btn-secondary" style="flex: 1;" onclick="usarCorrigido()">
+                    ↩️ Usar como Base
+                </button>
+            </div>
+            <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+                "Usar como Base" substitui o texto original pelo corrigido e salva automaticamente.
+            </p>
+        </section>
+
+        <section class="card" style="margin-top: 16px;">
+            <p style="font-size: 12px; color: var(--text-secondary);">
+                <strong>Job ID:</strong> {{ job.job_id }}<br>
+                <strong>Status:</strong> {{ job.status }}<br>
+                <strong>Criado em:</strong> {{ job.created_at[:16].replace('T',' ') if job.created_at else '—' }}
+            </p>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const JOB_ID = '{{ job.job_id }}';
+
+    function copyText(id) {
+        const el = document.getElementById(id);
+        el.select();
+        document.execCommand('copy');
+        const btn = event.currentTarget;
+        const orig = btn.textContent;
+        btn.textContent = 'Copiado!';
+        setTimeout(() => btn.textContent = orig, 2000);
+    }
+
+    async function saveText() {
+        const text = document.getElementById('conversa-text').value;
+        const formData = new FormData();
+        formData.append('conversa_text', text);
+        try {
+            const res = await fetch(`/whatsapp/extract/${JOB_ID}/save`, { method: 'POST', body: formData });
+            if (res.ok) {
+                const msg = document.getElementById('save-msg');
+                msg.style.display = 'block';
+                setTimeout(() => msg.style.display = 'none', 3000);
+            } else {
+                alert('Erro ao salvar.');
+            }
+        } catch(e) {
+            alert('Erro de conexão.');
+        }
+    }
+
+    function usarCorrigido() {
+        const corrected = document.getElementById('corrected-text').value;
+        if (!corrected.trim()) {
+            alert('Nenhum texto corrigido disponível.');
+            return;
+        }
+        document.getElementById('conversa-text').value = corrected;
+        saveText();
+    }
+
+    // ── Correção com IA ──
+    async function corrigirComIA() {
+        const rawText = document.getElementById('conversa-text').value;
+        if (!rawText.trim()) {
+            alert('Texto vazio.');
+            return;
+        }
+        const btn = document.getElementById('btn-correct');
+        const progContainer = document.getElementById('ai-progress');
+        const progStatus = document.getElementById('ai-status');
+        const progBar = document.getElementById('ai-bar');
+        const correctedEl = document.getElementById('corrected-text');
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Corrigindo...';
+        progContainer.style.display = 'block';
+        progStatus.textContent = 'Enviando para o Gemini...';
+        progBar.style.width = '10%';
+
+        try {
+            const formData = new FormData();
+            formData.append('raw_text', rawText);
+            const res = await fetch('/whatsapp/correct-text', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Erro ao solicitar correção');
+
+            const aiJobId = data.job_id;
+            progBar.style.width = '30%';
+            progStatus.textContent = 'Na fila do agente...';
+
+            const eventSource = new EventSource(`/api/correction/${aiJobId}/stream`);
+            let progressVal = 30;
+
+            eventSource.onmessage = async (e) => {
+                try {
+                    const sseData = JSON.parse(e.data);
+                    if (sseData.status === 'processing') {
+                        progressVal = Math.min(progressVal + 15, 85);
+                        progBar.style.width = progressVal + '%';
+                        progStatus.textContent = sseData.detail || 'Corrigindo...';
+                    } else if (sseData.status === 'done') {
+                        eventSource.close();
+                        progBar.style.width = '100%';
+                        progStatus.textContent = 'Correção finalizada!';
+                        const resultRes = await fetch(`/whatsapp/correct-text/${aiJobId}`);
+                        const resultData = await resultRes.json();
+                        if (resultData.corrected_text) {
+                            correctedEl.value = resultData.corrected_text;
+                        }
+                        setTimeout(() => {
+                            progContainer.style.display = 'none';
+                            btn.disabled = false;
+                            btn.textContent = '🪄 Corrigir com IA';
+                        }, 2000);
+                    } else if (sseData.status === 'error') {
+                        eventSource.close();
+                        throw new Error(sseData.detail || 'Erro no agente');
+                    }
+                } catch(err) {
+                    eventSource.close();
+                    resetBtn(btn, progContainer);
+                    alert('❌ ' + err.message);
+                }
+            };
+            eventSource.onerror = () => {
+                eventSource.close();
+                fallback(aiJobId, correctedEl, btn, progContainer, progStatus, progBar);
+            };
+        } catch(err) {
+            resetBtn(btn, progContainer);
+            alert('❌ Erro: ' + err.message);
+        }
+    }
+
+    function resetBtn(btn, progContainer) {
+        progContainer.style.display = 'none';
+        btn.disabled = false;
+        btn.textContent = '🪄 Corrigir com IA';
+    }
+
+    async function fallback(aiJobId, correctedEl, btn, progContainer, progStatus, progBar) {
+        progStatus.textContent = 'Aguardando...';
+        progBar.style.width = '50%';
+        for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 3000));
+            try {
+                const res = await fetch(`/whatsapp/correct-text/${aiJobId}`);
+                if (!res.ok) continue;
+                const data = await res.json();
+                if (data.status === 'done') {
+                    if (data.corrected_text) correctedEl.value = data.corrected_text;
+                    break;
+                } else if (data.status === 'error') {
+                    alert('❌ ' + (data.error || ''));
+                    break;
+                }
+            } catch(e) {}
+        }
+        resetBtn(btn, progContainer);
+    }
+</script>
+{% endblock %}

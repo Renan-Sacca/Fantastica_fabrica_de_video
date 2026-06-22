@@ -13,7 +13,10 @@ CREATE TABLE IF NOT EXISTS `text_correction_jobs` (
 
     -- Estado
     `status`           VARCHAR(30)     NOT NULL DEFAULT 'pending',
-    `provider`         VARCHAR(30)     NOT NULL DEFAULT 'chatgpt',
+    `provider`         VARCHAR(30)     NOT NULL DEFAULT 'gemini',
+
+    -- Usuário que solicitou a correção
+    `user_id`          INT             NULL,
 
     -- Texto
     `raw_text`         MEDIUMTEXT      NULL COMMENT 'Texto bruto recebido (transcrição OCR)',
@@ -26,5 +29,6 @@ CREATE TABLE IF NOT EXISTS `text_correction_jobs` (
 
     PRIMARY KEY (`id`),
     UNIQUE KEY `uq_text_correction_job_id` (`job_id`),
-    INDEX `ix_text_correction_job_id` (`job_id`)
+    INDEX `ix_text_correction_job_id` (`job_id`),
+    INDEX `ix_text_correction_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

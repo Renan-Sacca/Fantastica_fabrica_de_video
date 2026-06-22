@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Acesso Negado{% endblock %}
+{% block content %}
+<section class="card" style="text-align: center; padding: 60px 20px;">
+    <div style="font-size: 4rem; margin-bottom: 16px;">🔒</div>
+    <h1 style="font-size: 2rem; margin-bottom: 12px;">Acesso Negado</h1>
+    <p style="color: var(--text-secondary); max-width: 400px; margin: 0 auto 32px;">
+        Você não tem permissão para acessar este recurso.
+        {% if required_permission %}
+        Permissão necessária: <strong>{{ required_permission }}</strong>.
+        {% endif %}
+        Entre em contato com um administrador.
+    </p>
+    <a href="/" class="btn-primary" style="padding: 12px 28px; text-decoration: none; border-radius: 10px;">Voltar ao Início</a>
+</section>
+{% endblock %}

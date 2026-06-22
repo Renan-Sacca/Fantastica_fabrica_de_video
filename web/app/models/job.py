@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -19,6 +19,11 @@ class Job(Base):
     job_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     video_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+
+    # FK para o usuário dono do job
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Estado do processamento (atualizado pelo worker)
     status: Mapped[str] = mapped_column(String(30), default="pending")
@@ -48,6 +53,7 @@ class Job(Base):
             "job_id": self.job_id,
             "title": self.title,
             "video_type": self.video_type,
+            "user_id": self.user_id,
             "status": self.status,
             "progress": self.progress,
             "detail": self.detail,

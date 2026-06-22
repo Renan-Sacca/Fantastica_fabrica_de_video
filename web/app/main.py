@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
-from app.config import STATIC_DIR
+from app.config import STATIC_DIR, TEMPLATES_DIR
 from app.database import init_db
-from app.routers import dashboard, drive, jobs, progress, whatsapp
+from app.routers import auth, dashboard, drive, jobs, progress, whatsapp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Incluir roteadores
+app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(whatsapp.router)
 app.include_router(jobs.router)

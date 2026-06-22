@@ -5,10 +5,13 @@
 -- Charset: utf8mb4
 --
 -- Ordem de execução:
---   1. 001_jobs.sql            (tabela base)
---   2. 002_whatsapp_jobs.sql   (herança de jobs)
---   3. 003_whatsapp_extract_jobs.sql (herança de jobs)
---   4. 004_text_correction_jobs.sql  (tabela independente)
+--   1. 001_jobs.sql                   (tabela base)
+--   2. 002_whatsapp_jobs.sql          (herança de jobs)
+--   3. 003_whatsapp_extract_jobs.sql  (herança de jobs)
+--   4. 004_text_correction_jobs.sql   (tabela independente)
+--   5. 005_users.sql                  (usuários)
+--   6. 006_permissions.sql            (permissões por usuário)
+--   7. 007_add_user_id_to_jobs.sql    (FK de user nos jobs)
 --
 -- Para executar todos de uma vez:
 --   mysql -u user -p fabrica_video_db < sql/000_all.sql
@@ -32,3 +35,15 @@ SOURCE sql/003_whatsapp_extract_jobs.sql;
 
 -- ── 4. Tabela: text_correction_jobs ──
 SOURCE sql/004_text_correction_jobs.sql;
+
+-- ── 5. Tabela: users ──
+SOURCE sql/005_users.sql;
+
+-- ── 6. Tabela: permissions ──
+SOURCE sql/006_permissions.sql;
+
+-- ── 7. FKs de user_id nos jobs ──
+SOURCE sql/008_add_fk_user_references.sql;
+
+-- Para migração de banco existente:
+-- SOURCE sql/007_add_user_id_to_jobs.sql;
