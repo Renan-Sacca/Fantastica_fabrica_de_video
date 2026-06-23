@@ -212,7 +212,7 @@ async function submitDelete() {
     showToast('Processando exclusão...', 'info');
     
     try {
-        const res = await fetch(`/api/jobs/${jobId}?delete_drive=true`, { method: 'DELETE' });
+        const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
         if (res.ok) {
             document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
             showToast('🗑️ Vídeo excluído permanentemente!', 'success');

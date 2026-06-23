@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS `jobs` (
 
     -- Estado do processamento (atualizado pelo worker)
     `status`           VARCHAR(30)     NOT NULL DEFAULT 'pending',
+    `is_deleted`       TINYINT(1)      NOT NULL DEFAULT 0,
+    `deleted_at`       DATETIME        NULL,
     `progress`         FLOAT           NOT NULL DEFAULT 0.0,
     `detail`           TEXT            NULL,
     `error`            TEXT            NULL,
@@ -34,5 +36,6 @@ CREATE TABLE IF NOT EXISTS `jobs` (
     UNIQUE KEY `uq_jobs_job_id` (`job_id`),
     INDEX `ix_jobs_job_id` (`job_id`),
     INDEX `ix_jobs_video_type` (`video_type`),
-    INDEX `ix_jobs_user_id` (`user_id`)
+    INDEX `ix_jobs_user_id` (`user_id`),
+    INDEX `ix_jobs_is_deleted` (`is_deleted`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

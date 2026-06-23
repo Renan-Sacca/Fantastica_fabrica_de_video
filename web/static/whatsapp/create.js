@@ -12,9 +12,7 @@ document.querySelectorAll('.tab').forEach(tab => {
         tab.classList.add('active');
         document.getElementById(`tab-${tabId}`).classList.add('active');
     });
-});
-
-// ── Range Sliders ──
+});// ── Range Sliders ──
 ['speed', 'reading_speed', 'scroll_speed'].forEach(name => {
     const input = document.getElementById(name);
     const valueEl = document.getElementById(`${name}-value`);
@@ -125,9 +123,7 @@ if (convFileInput) {
             reader.readAsText(file);
         }
     });
-}
-
-// ── File: Imagens da Conversa ──
+}// ── File: Imagens da Conversa ──
 const imagesInput = document.getElementById('conversation_images');
 if (imagesInput) {
     imagesInput.addEventListener('change', () => {
@@ -157,8 +153,7 @@ const form = document.getElementById('render-form');
 if (form) {
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        
-        // Validação básica
+
         const title = document.getElementById('title').value.trim();
         if (!title) {
             showToast('❌ Por favor, informe o título do vídeo', 'error');
@@ -166,44 +161,28 @@ if (form) {
         }
 
         const convText = document.getElementById('conversation_text')?.value.trim();
-        const convFile = document.getElementById('conversation_file')?.files[0];
-        const activeTab = document.querySelector('.tab.active')?.dataset.tab;
-        
-        if (activeTab === 'text' && !convText) {
+        if (!convText) {
             showToast('❌ Por favor, cole a conversa no campo de texto', 'error');
-            return;
-        }
-        if (activeTab === 'file' && !convFile) {
-            showToast('❌ Por favor, selecione um arquivo de conversa', 'error');
             return;
         }
 
         // Lógica de Modal [IMAGE]
-        let textToParse = convText || "";
-        if (activeTab === 'file' && convFile) {
-            textToParse = await new Promise(resolve => {
-                const reader = new FileReader();
-                reader.onload = e => resolve(e.target.result);
-                reader.readAsText(convFile);
-            });
-        }
-
         const imgRegex = /\[IMAGE\]\s+(.+)/gi;
         let matches;
         const requiredImages = [];
-        while ((matches = imgRegex.exec(textToParse)) !== null) {
+        while ((matches = imgRegex.exec(convText)) !== null) {
             const name = matches[1].trim();
             if (!requiredImages.includes(name)) requiredImages.push(name);
         }
 
         if (requiredImages.length > 0) {
             window._pendingFormData = new FormData(form);
-            window._pendingFormTab = activeTab;
+            window._pendingFormTab = 'text';
             showImagesModal(requiredImages);
             return;
         }
 
-        submitGenerateForm(new FormData(form), activeTab);
+        submitGenerateForm(new FormData(form), 'text');
     });
 }
 
@@ -385,8 +364,7 @@ async function submitGenerateForm(formData, activeTab) {
     const btn = document.getElementById('btn-generate');
     const btnText = btn.querySelector('.btn-text');
     
-    if (activeTab === 'text') formData.delete('conversation_file');
-    if (activeTab === 'file') formData.delete('conversation_text');
+    formData.delete('conversation_file');
     
     const uploadedFiles = [];
     for (let [key, value] of formData.entries()) {
@@ -550,7 +528,7 @@ function addJobToList(jobId, title, videoType) {
     list.prepend(item);
 }
 
-// ── Deletar Job ──
+// ── Deletar Job (soft delete) ──
 let currentDeleteJobId = null;
 
 function deleteJob(jobId) {
@@ -567,20 +545,75 @@ async function submitDelete() {
     if (!currentDeleteJobId) return;
     const jobId = currentDeleteJobId;
     closeDeleteModal();
-    
+
     showToast('Processando exclusão...', 'info');
-    
+
     try {
-        const res = await fetch(`/api/jobs/${jobId}?delete_drive=true`, { method: 'DELETE' });
+        const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
         if (res.ok) {
             document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
-            showToast('🗑️ Vídeo excluído permanentemente!', 'success');
+            showToast('🗑️ Vídeo movido para a lixeira!', 'success');
         } else {
             const data = await res.json();
             showToast('❌ Erro ao excluir: ' + (data.error || ''), 'error');
         }
     } catch(e) {
         showToast('❌ Erro de rede ao excluir', 'error');
+    }
+}
+
+// ── Renomear Job ──
+let currentRenameJobId = null;
+
+function openRenameModal(jobId, currentTitle) {
+    currentRenameJobId = jobId;
+    document.getElementById('rename-input').value = currentTitle;
+    document.getElementById('rename-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('rename-input').focus(), 100);
+}
+
+function closeRenameModal() {
+    document.getElementById('rename-modal').style.display = 'none';
+    currentRenameJobId = null;
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && currentRenameJobId) submitRename();
+});
+
+async function submitRename() {
+    if (!currentRenameJobId) return;
+    const newTitle = document.getElementById('rename-input').value.trim();
+    if (!newTitle) { showToast('❌ Título não pode ser vazio', 'error'); return; }
+
+    const btn = document.getElementById('btn-rename-confirm');
+    btn.disabled = true;
+    btn.textContent = 'Salvando...';
+
+    try {
+        const res = await fetch(`/api/jobs/${currentRenameJobId}/rename`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            // Atualiza o nome na lista sem recarregar
+            const item = document.querySelector(`[data-job-id="${currentRenameJobId}"]`);
+            if (item) {
+                const nameEl = item.querySelector('.job-name');
+                if (nameEl) nameEl.textContent = newTitle;
+            }
+            showToast('✅ Título atualizado!', 'success');
+            closeRenameModal();
+        } else {
+            showToast('❌ Erro: ' + (data.error || ''), 'error');
+        }
+    } catch(e) {
+        showToast('❌ Erro de rede', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Salvar';
     }
 }
 

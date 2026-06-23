@@ -121,9 +121,9 @@ def get_job(job_id: str) -> Optional[dict]:
 
 
 def get_all_jobs(video_type: Optional[str] = None, user_id: Optional[int] = None) -> list[dict]:
-    """Lista jobs (mais recentes primeiro), opcionalmente filtrando por tipo e usuário."""
+    """Lista jobs (mais recentes primeiro), excluindo deletados."""
     with SessionLocal() as session:
-        stmt = select(JobPoly)
+        stmt = select(JobPoly).where(Job.is_deleted == False)  # noqa: E712
         if video_type:
             stmt = stmt.where(Job.video_type == video_type)
         if user_id is not None:
@@ -132,7 +132,34 @@ def get_all_jobs(video_type: Optional[str] = None, user_id: Optional[int] = None
         return [j.to_dict() for j in session.scalars(stmt).all()]
 
 
+def soft_delete_job(job_id: str) -> Optional[dict]:
+    """Marca o job como deletado (sem remover do banco)."""
+    from datetime import datetime
+    with SessionLocal() as session:
+        job = session.scalar(select(Job).where(Job.job_id == job_id))
+        if not job:
+            return None
+        job.is_deleted = True
+        job.deleted_at = datetime.utcnow()
+        session.commit()
+        logger.info(f"[{job_id}] Job marcado como deletado.")
+        return job.to_dict()
+
+
+def rename_job(job_id: str, new_title: str) -> bool:
+    """Atualiza o título de um job no MySQL."""
+    with SessionLocal() as session:
+        job = session.scalar(select(Job).where(Job.job_id == job_id))
+        if not job:
+            return False
+        job.title = new_title
+        session.commit()
+        logger.info(f"[{job_id}] Título atualizado para: {new_title}")
+        return True
+
+
 def delete_job(job_id: str) -> Optional[dict]:
+    """Remoção física (mantida para uso interno/admin)."""
     with SessionLocal() as session:
         job = session.scalar(select(Job).where(Job.job_id == job_id))
         if not job:

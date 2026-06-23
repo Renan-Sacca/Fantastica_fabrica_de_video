@@ -186,6 +186,45 @@ class DriveClient:
         """Exclui permanentemente um arquivo ou pasta do Drive."""
         self.service.files().delete(fileId=file_id).execute(num_retries=5)
 
+    def move_to_deleted(self, folder_id: str, drive_type_folder: Optional[str] = None) -> str:
+        """Move uma pasta para 'Deletados' dentro do contexto correto do tipo de vídeo.
+
+        Se drive_type_folder for passado (ex: 'WhatsApp', 'whatsapp_extracts'),
+        a pasta vai para FantasticaFabricaDeVideo/{drive_type_folder}/Deletados.
+        Caso contrário, vai para FantasticaFabricaDeVideo/Deletados (fallback).
+        """
+        root = self.get_or_create_folder("FantasticaFabricaDeVideo")
+
+        if drive_type_folder:
+            type_folder = self.get_or_create_folder(drive_type_folder, root)
+            deleted_folder = self.get_or_create_folder("Deletados", type_folder)
+        else:
+            deleted_folder = self.get_or_create_folder("Deletados", root)
+
+        file_meta = self.service.files().get(
+            fileId=folder_id, fields="parents"
+        ).execute(num_retries=5)
+        current_parents = ",".join(file_meta.get("parents", []))
+
+        self.service.files().update(
+            fileId=folder_id,
+            addParents=deleted_folder,
+            removeParents=current_parents,
+            fields="id, parents",
+        ).execute(num_retries=5)
+
+        logger.info(f"Pasta {folder_id} movida para Deletados ({drive_type_folder or 'raiz'})")
+        return deleted_folder
+
+    def rename_folder(self, folder_id: str, new_name: str) -> None:
+        """Renomeia uma pasta ou arquivo no Drive."""
+        self.service.files().update(
+            fileId=folder_id,
+            body={"name": new_name},
+            fields="id, name",
+        ).execute(num_retries=5)
+        logger.info(f"Renomeado {folder_id} → {new_name}")
+
     def get_folder_link(self, folder_id: str) -> str:
         """Retorna o link web da pasta no Drive."""
         return f"https://drive.google.com/drive/folders/{folder_id}"

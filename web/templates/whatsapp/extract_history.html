@@ -36,7 +36,7 @@
     <div class="jobs-list">
         {% if jobs %}
             {% for job in jobs %}
-            <div class="job-item" style="flex-direction: column; align-items: stretch; margin-bottom: 16px;">
+            <div class="job-item" data-job-id="{{ job.job_id }}" style="flex-direction: column; align-items: stretch; margin-bottom: 16px;">
                 <div class="job-info" style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
                         <span class="job-name" style="font-weight: 600; font-size: 15px;">{{ job.title }}</span>
@@ -51,6 +51,7 @@
                             Abrir →
                         </a>
                         {% endif %}
+                        <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 13px;" onclick="openRenameModal('{{ job.job_id }}', '{{ job.title | e }}')">✏️</button>
                         <button class="btn btn-delete" onclick="deleteJob('{{ job.job_id }}')" title="Excluir">🗑️</button>
                     </div>
                 </div>
@@ -74,6 +75,25 @@
     </div>
 </section>
 
+<!-- Modal Renomear -->
+<div id="rename-modal" class="modal-overlay" style="display:none; z-index: 9999;">
+    <div class="modal-content" style="max-width: 420px;">
+        <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <h2 style="margin:0;font-size:1.3rem;">✏️ Renomear Extração</h2>
+            <button type="button" style="background:none;border:none;color:white;font-size:24px;cursor:pointer;" onclick="closeRenameModal()">×</button>
+        </div>
+        <div class="modal-body" style="padding-top:16px;">
+            <div class="form-group">
+                <label style="display:block;margin-bottom:8px;color:var(--text-secondary);font-size:14px;">Novo título</label>
+                <input type="text" id="rename-input" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--bg-input);color:white;font-size:15px;box-sizing:border-box;">
+            </div>
+            <button id="btn-rename-confirm" class="btn-primary" style="width:100%;margin-top:16px;padding:12px;font-size:15px;border-radius:10px;border:none;cursor:pointer;" onclick="submitRename()">
+                Salvar
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Modal Deleção -->
 <div id="delete-modal" class="modal-overlay" style="display:none; z-index: 9999;">
     <div class="modal-content" style="max-width: 400px; text-align: center;">
@@ -81,10 +101,10 @@
             <h2 style="margin: 0; font-size: 1.5rem;">🗑️ Excluir Extração</h2>
         </div>
         <div class="modal-body" style="padding-top: 0;">
-            <p style="color: var(--text-secondary); margin-bottom: 24px;">Tem certeza? Esta ação não pode ser desfeita.</p>
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Tem certeza que deseja excluir esta extração permanentemente?</p>
             <div style="display: flex; flex-direction: column; gap: 12px;">
                 <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete()">
-                    ⚠️ Excluir permanentemente
+                    🗑️ Excluir
                 </button>
                 <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 8px; background: transparent; border: none;" onclick="closeDeleteModal()">
                     Cancelar
@@ -98,6 +118,7 @@
 {% block scripts %}
 <script>
     let jobToDelete = null;
+    let jobToRename = null;
 
     function deleteJob(jobId) {
         jobToDelete = jobId;
@@ -116,10 +137,9 @@
         btn.innerHTML = '⏳ Excluindo...';
         btn.disabled = true;
 
-        fetch(`/api/jobs/${jobId}?delete_drive=true`, { method: 'DELETE' })
+        fetch(`/api/jobs/${jobId}`, { method: 'DELETE' })
         .then(res => {
             if (res.ok) {
-                document.querySelector(`[data-job-id="${jobId}"]`)?.remove();
                 closeDeleteModal();
                 window.location.reload();
             } else {
@@ -127,7 +147,56 @@
             }
         })
         .catch(() => alert('Erro de rede.'))
-        .finally(() => { btn.innerHTML = '⚠️ Excluir permanentemente'; btn.disabled = false; });
+        .finally(() => { btn.innerHTML = '⚠️ Excluir'; btn.disabled = false; });
+    }
+
+    // ── Renomear ──
+    function openRenameModal(jobId, currentTitle) {
+        jobToRename = jobId;
+        document.getElementById('rename-input').value = currentTitle;
+        document.getElementById('rename-modal').style.display = 'flex';
+        setTimeout(() => document.getElementById('rename-input').focus(), 100);
+    }
+
+    function closeRenameModal() {
+        document.getElementById('rename-modal').style.display = 'none';
+        jobToRename = null;
+    }
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && jobToRename) submitRename();
+    });
+
+    async function submitRename() {
+        if (!jobToRename) return;
+        const newTitle = document.getElementById('rename-input').value.trim();
+        if (!newTitle) { alert('Título não pode ser vazio'); return; }
+
+        const btn = document.getElementById('btn-rename-confirm');
+        btn.disabled = true;
+        btn.textContent = 'Salvando...';
+
+        try {
+            const res = await fetch(`/api/jobs/${jobToRename}/rename`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: newTitle }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                // Atualiza o nome na tela sem recarregar
+                const nameEl = document.querySelector(`[data-job-id="${jobToRename}"] .job-name`);
+                if (nameEl) nameEl.textContent = newTitle;
+                closeRenameModal();
+            } else {
+                alert('Erro: ' + (data.error || ''));
+            }
+        } catch(e) {
+            alert('Erro de rede');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Salvar';
+        }
     }
 </script>
 {% endblock %}

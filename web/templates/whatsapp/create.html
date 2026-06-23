@@ -182,17 +182,12 @@
                     <span class="card-icon">💬</span>
                     Conversa
                 </h2>
-                <div class="conversation-input-tabs">
-                    <button type="button" class="tab active" data-tab="text">✍️ Digitar</button>
-                    <button type="button" class="tab" data-tab="file">📁 Carregar Arquivo</button>
-                </div>
 
-                <div class="tab-content active" id="tab-text">
-                    <div class="form-group">
-                        <label for="conversation_text">Cole a conversa abaixo:</label>
-                        <textarea id="conversation_text" name="conversation_text"
-                                  rows="20"
-                                  placeholder="[10:30] João: Olá, tudo bem?
+                <div class="form-group">
+                    <label for="conversation_text">Cole a conversa abaixo:</label>
+                    <textarea id="conversation_text" name="conversation_text"
+                              rows="20"
+                              placeholder="[10:30] João: Olá, tudo bem?
 [10:31] Maria: Tudo sim! E você?
 [10:32] João: Tudo ótimo! Veja esta foto:
 [IMAGE] imagens/foto1.jpg
@@ -208,27 +203,6 @@ Comandos especiais:
 [EMOJI] 😀
 [AUDIO] caminho/do/audio.mp3
 [DATE] 10 de Junho de 2024"></textarea>
-                    </div>
-                </div>
-
-                <div class="tab-content" id="tab-file">
-                    <div class="form-group">
-                        <div class="file-upload large">
-                            <input type="file" id="conversation_file" name="conversation_file"
-                                   accept=".txt,.json,.csv" />
-                            <div class="file-upload-content">
-                                <span class="upload-placeholder large">📄</span>
-                                <span class="file-upload-text">Arraste um arquivo .txt, .json ou .csv</span>
-                                <span class="file-upload-hint">ou clique para selecionar</span>
-                            </div>
-                        </div>
-                        <span class="file-selected" id="conv-file-name"></span>
-                    </div>
-                    <div style="text-align: center; margin-top: 10px;">
-                        <a href="/conversations/exemplo.txt" target="_blank" class="btn" style="color: var(--accent); border-color: var(--accent);">
-                            📄 Ver arquivo de exemplo
-                        </a>
-                    </div>
                 </div>
             </section>
 
@@ -290,6 +264,7 @@ Comandos especiais:
                 </div>
                 <div class="job-actions">
                     <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 13px;" onclick="openDuplicateModal('{{ job.job_id }}', '{{ job.title }}')">📄 Duplicar</button>
+                    <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 13px;" onclick="openRenameModal('{{ job.job_id }}', '{{ job.title | e }}')">✏️ Renomear</button>
                     <a href="/whatsapp/video/{{ job.job_id }}" class="btn btn-detail">🔍 Detalhes</a>
                     <button class="btn btn-delete" onclick="deleteJob('{{ job.job_id }}')">🗑️</button>
                 </div>
@@ -348,6 +323,25 @@ Comandos especiais:
     </div>
 </div>
 
+<!-- Modal Renomear -->
+<div id="rename-modal" class="modal-overlay" style="display:none; z-index: 9999;">
+    <div class="modal-content" style="max-width: 420px;">
+        <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <h2 style="margin:0;font-size:1.3rem;">✏️ Renomear Vídeo</h2>
+            <button type="button" style="background:none;border:none;color:white;font-size:24px;cursor:pointer;" onclick="closeRenameModal()">×</button>
+        </div>
+        <div class="modal-body" style="padding-top:16px;">
+            <div class="form-group">
+                <label style="display:block;margin-bottom:8px;color:var(--text-secondary);font-size:14px;">Novo título</label>
+                <input type="text" id="rename-input" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--bg-input);color:white;font-size:15px;box-sizing:border-box;">
+            </div>
+            <button id="btn-rename-confirm" class="btn-primary" style="width:100%;margin-top:16px;padding:12px;font-size:15px;border-radius:10px;border:none;cursor:pointer;" onclick="submitRename()">
+                Salvar
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Modal Deleção -->
 <div id="delete-modal" class="modal-overlay" style="display:none; z-index: 9999;">
     <div class="modal-content" style="max-width: 400px; text-align: center;">
@@ -355,10 +349,10 @@ Comandos especiais:
             <h2 style="margin: 0; font-size: 1.5rem;">🗑️ Excluir Vídeo</h2>
         </div>
         <div class="modal-body" style="padding-top: 0;">
-            <p style="color: var(--text-secondary); margin-bottom: 24px;">Tem certeza? O vídeo e todos os seus arquivos serão <strong>excluídos permanentemente</strong> do Google Drive. Esta ação não pode ser desfeita.</p>
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Tem certeza que deseja excluir este vídeo permanentemente?</p>
             <div style="display: flex; flex-direction: column; gap: 12px;">
                 <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete()">
-                    ⚠️ Excluir permanentemente
+                    🗑️ Excluir
                 </button>
                 <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; margin-top: 8px; background: transparent; border: none;" onclick="closeDeleteModal()">
                     Cancelar

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -27,6 +27,8 @@ class Job(Base):
 
     # Estado do processamento (atualizado pelo worker)
     status: Mapped[str] = mapped_column(String(30), default="pending")
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     progress: Mapped[float] = mapped_column(Float, default=0.0)
     detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -55,6 +57,8 @@ class Job(Base):
             "video_type": self.video_type,
             "user_id": self.user_id,
             "status": self.status,
+            "is_deleted": self.is_deleted,
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
             "progress": self.progress,
             "detail": self.detail,
             "error": self.error,
