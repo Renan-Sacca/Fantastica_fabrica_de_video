@@ -226,6 +226,7 @@ async def _render_frames_async(
             "visibleMessages": state.visible_messages,
             "messageOpacity": {str(k): v for k, v in state.message_opacity.items()},
             "messageTranslateY": {str(k): v for k, v in state.message_translate_y.items()},
+            "messageScale": {str(k): v for k, v in state.message_scale.items()},
             "showTyping": state.show_typing,
             "typingSender": state.typing_sender,
             "statusBarTime": state.status_bar_time,

@@ -235,20 +235,21 @@
             const isVisible = state.visibleMessages.indexOf(i) !== -1;
 
             if (isVisible) {
-                const opacity = state.messageOpacity[String(i)];
+                const opacity    = state.messageOpacity[String(i)];
                 const translateY = state.messageTranslateY[String(i)] || 0;
+                const scale      = state.messageScale ? (state.messageScale[String(i)] || 1.0) : 1.0;
 
                 el.classList.add('visible');
-                if (opacity !== undefined && opacity < 1) {
-                    el.style.opacity = opacity;
-                    el.style.transform = translateY ? `translateY(${translateY}px)` : '';
-                } else {
-                    el.style.opacity = '1';
-                    el.style.transform = '';
-                }
+                el.style.opacity = (opacity !== undefined) ? opacity : 1;
+
+                let transform = '';
+                if (translateY) transform += `translateY(${translateY}px) `;
+                if (scale !== 1.0) transform += `scale(${scale})`;
+                el.style.transform = transform.trim();
             } else {
                 el.classList.remove('visible');
                 el.style.opacity = '0';
+                el.style.transform = '';
             }
         }
 

@@ -105,40 +105,103 @@
                 
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Velocidade ({{ job.speed }}x)</label>
-                        <input type="range" name="speed" min="0.5" max="3.0" step="0.1" value="{{ job.speed }}" oninput="this.previousElementSibling.textContent = 'Velocidade (' + this.value + 'x)'">
+                        <label id="lbl-speed">Velocidade ({{ job.speed }}x)</label>
+                        <input type="range" id="edit-speed" name="speed" min="0.5" max="3.0" step="0.1" value="{{ job.speed }}"
+                            oninput="document.getElementById('lbl-speed').textContent='Velocidade ('+this.value+'x)'; detailEstimate();">
                     </div>
                     <div class="form-group">
-                        <label>Vel. Leitura ({{ job.reading_speed }}x)</label>
-                        <input type="range" name="reading_speed" min="0.5" max="3.0" step="0.1" value="{{ job.reading_speed }}" oninput="this.previousElementSibling.textContent = 'Vel. Leitura (' + this.value + 'x)'">
+                        <label id="lbl-reading">Vel. Leitura ({{ job.reading_speed }}x)</label>
+                        <input type="range" id="edit-reading" name="reading_speed" min="0.5" max="3.0" step="0.1" value="{{ job.reading_speed }}"
+                            oninput="document.getElementById('lbl-reading').textContent='Vel. Leitura ('+this.value+'x)'; detailEstimate();">
                     </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Vel. Scroll ({{ job.scroll_speed }}x)</label>
-                        <input type="range" name="scroll_speed" min="0.5" max="3.0" step="0.1" value="{{ job.scroll_speed }}" oninput="this.previousElementSibling.textContent = 'Vel. Scroll (' + this.value + 'x)'">
+                        <label id="lbl-scroll">Vel. Scroll ({{ job.scroll_speed }}x)</label>
+                        <input type="range" id="edit-scroll" name="scroll_speed" min="0.5" max="3.0" step="0.1" value="{{ job.scroll_speed }}"
+                            oninput="document.getElementById('lbl-scroll').textContent='Vel. Scroll ('+this.value+'x)'; detailEstimate();">
                     </div>
                     <div class="form-group">
                         <label>Animação</label>
-                        <select name="animation_style">
+                        <select id="edit-anim" name="animation_style" onchange="detailEstimate()">
                             <option value="fade" {% if job.animation_style == 'fade' %}selected{% endif %}>✨ Fade In</option>
                             <option value="slide" {% if job.animation_style == 'slide' %}selected{% endif %}>📤 Slide Up</option>
-                            <option value="typing" {% if job.animation_style == 'typing' %}selected{% endif %}>⌨️ Digitando</option>
                         </select>
                     </div>
+                </div>
+
+                <!-- Aparência: Papel de Parede + Cor de Fundo -->
+                <div class="form-group" style="margin-top: 8px;">
+                    <label>Papel de Parede (Opcional)</label>
+                    <div class="file-upload compact" id="upload-wallpaper">
+                        <input type="file" id="edit-wallpaper" name="wallpaper" accept="image/*" onchange="handleFilePreview(this, 'image'); toggleBgColor(this);" />
+                        <div class="file-upload-content">
+                            {% if job.get('files', {}).get('papel_parede') %}
+                            <div class="file-upload-preview"><img src="/api/drive/media/{{ job.get('files').get('papel_parede') }}" /></div>
+                            <span class="file-upload-text">Substituir Fundo</span>
+                            {% else %}
+                            <span class="upload-placeholder" style="font-size:24px;">🖼️</span>
+                            <span class="file-upload-text">Enviar Fundo</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Color picker — oculto se já tem wallpaper -->
+                <div class="form-group" id="bg-color-group" {% if job.get('files', {}).get('papel_parede') %}style="display:none"{% endif %}>
+                    <label>Cor de Fundo <span style="font-size:12px; color:var(--text-secondary);">(quando sem imagem)</span></label>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;" id="bg-color-presets">
+                        {% set cur_color = job.get('bg_color', '#e5ddd5') or '#e5ddd5' %}
+                        <button type="button" class="bg-color-btn {% if cur_color == '#e5ddd5' %}active{% endif %}" data-color="#e5ddd5" title="Bege WhatsApp"
+                            style="width:32px;height:32px;border-radius:6px;border:{% if cur_color == '#e5ddd5' %}2px solid var(--accent){% else %}2px solid transparent{% endif %};background:#e5ddd5;cursor:pointer;"></button>
+                        <button type="button" class="bg-color-btn {% if cur_color == '#0d1117' %}active{% endif %}" data-color="#0d1117" title="Preto"
+                            style="width:32px;height:32px;border-radius:6px;border:{% if cur_color == '#0d1117' %}2px solid var(--accent){% else %}2px solid transparent{% endif %};background:#0d1117;cursor:pointer;"></button>
+                        <button type="button" class="bg-color-btn {% if cur_color == '#1a1a2e' %}active{% endif %}" data-color="#1a1a2e" title="Azul escuro"
+                            style="width:32px;height:32px;border-radius:6px;border:{% if cur_color == '#1a1a2e' %}2px solid var(--accent){% else %}2px solid transparent{% endif %};background:#1a1a2e;cursor:pointer;"></button>
+                        <button type="button" class="bg-color-btn {% if cur_color == '#128c7e' %}active{% endif %}" data-color="#128c7e" title="Verde WhatsApp"
+                            style="width:32px;height:32px;border-radius:6px;border:{% if cur_color == '#128c7e' %}2px solid var(--accent){% else %}2px solid transparent{% endif %};background:#128c7e;cursor:pointer;"></button>
+                        <button type="button" class="bg-color-btn {% if cur_color == '#2c3e50' %}active{% endif %}" data-color="#2c3e50" title="Cinza escuro"
+                            style="width:32px;height:32px;border-radius:6px;border:{% if cur_color == '#2c3e50' %}2px solid var(--accent){% else %}2px solid transparent{% endif %};background:#2c3e50;cursor:pointer;"></button>
+                        <button type="button" class="bg-color-btn {% if cur_color == '#1e3a5f' %}active{% endif %}" data-color="#1e3a5f" title="Azul marinho"
+                            style="width:32px;height:32px;border-radius:6px;border:{% if cur_color == '#1e3a5f' %}2px solid var(--accent){% else %}2px solid transparent{% endif %};background:#1e3a5f;cursor:pointer;"></button>
+                        <button type="button" class="bg-color-btn {% if cur_color == '#2d1b69' %}active{% endif %}" data-color="#2d1b69" title="Roxo escuro"
+                            style="width:32px;height:32px;border-radius:6px;border:{% if cur_color == '#2d1b69' %}2px solid var(--accent){% else %}2px solid transparent{% endif %};background:#2d1b69;cursor:pointer;"></button>
+                        <label title="Cor personalizada" style="width:32px;height:32px;border-radius:6px;border:2px solid transparent;background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;">
+                            <input type="color" id="bg-color-custom" value="{{ cur_color }}" style="opacity:0;width:0;height:0;position:absolute;">
+                            🎨
+                        </label>
+                    </div>
+                    <input type="hidden" id="bg_color" name="bg_color" value="{{ cur_color }}">
                 </div>
             </div>
 
             <div class="form-column">
                 <div class="form-group" style="height: 100%;">
                     <label style="margin-bottom: 8px; display: block;">Conversa (pode ser editada)</label>
-                    <textarea name="conversation_text" id="conversation_text" rows="15" style="height: calc(100% - 44px);">{{ conversa_text }}</textarea>
+                    <textarea name="conversation_text" id="conversation_text" rows="15"
+                        style="height: calc(100% - 100px);"
+                        oninput="detailEstimateDebounced()">{{ conversa_text }}</textarea>
+                </div>
+
+                <!-- Simulador de duração -->
+                <div id="duration-estimator" style="background:rgba(37,211,102,0.06);border:1px solid rgba(37,211,102,0.2);border-radius:10px;padding:12px 16px;margin-top:10px;display:none;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span style="font-size:13px;font-weight:600;color:var(--text-primary);">⏱️ Duração estimada</span>
+                        <span id="duration-value" style="font-size:1.3rem;font-weight:800;color:#25d366;">—</span>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-secondary);display:flex;gap:14px;flex-wrap:wrap;">
+                        <span>📝 <span id="est-msg-count">0</span> msgs</span>
+                        <span>🖼️ <span id="est-img-count">0</span> imgs</span>
+                        <span>📅 <span id="est-date-count">0</span> datas</span>
+                        <span>⚡ <span id="est-speed-val">1.0x</span></span>
+                    </div>
                 </div>
             </div>
         </div>
-        <!-- Adicionar edição de mídias -->
-        <div class="edit-grid">
+
+        <!-- Mídias -->
+        <div class="edit-grid" style="margin-top: 16px;">
             <div class="form-group">
                 <label>Foto de Perfil (Opcional)</label>
                 <div class="file-upload compact" id="upload-contact_photo">
@@ -150,21 +213,6 @@
                         {% else %}
                         <span class="upload-placeholder" style="font-size:24px;">👤</span>
                         <span class="file-upload-text">Enviar Foto</span>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Papel de Parede (Opcional)</label>
-                <div class="file-upload compact" id="upload-wallpaper">
-                    <input type="file" name="wallpaper" accept="image/*" onchange="handleFilePreview(this, 'image')" />
-                    <div class="file-upload-content">
-                        {% if job.get('files', {}).get('papel_parede') %}
-                        <div class="file-upload-preview"><img src="/api/drive/media/{{ job.get('files').get('papel_parede') }}" /></div>
-                        <span class="file-upload-text">Substituir Fundo</span>
-                        {% else %}
-                        <span class="upload-placeholder" style="font-size:24px;">🖼️</span>
-                        <span class="file-upload-text">Enviar Fundo</span>
                         {% endif %}
                     </div>
                 </div>
@@ -189,7 +237,7 @@
         </div>
 
         <div style="margin-top: 10px; font-size: 13px; color: var(--accent);">
-            <i>Você agora pode editar os arquivos de mídia. Envie um novo arquivo para substituir o atual, ou deixe em branco para manter.</i>
+            <i>Envie um novo arquivo para substituir o atual, ou deixe em branco para manter.</i>
         </div>
 
         <div class="action-row" style="margin-top: 20px;">
@@ -225,5 +273,129 @@
     const JOB_ID = "{{ job.job_id }}";
     const JOB_STATUS = "{{ job.status }}";
     const JOB_IMAGES = {{ job.get('files', {}).get('imagens', {}) | tojson | safe }};
+
+    // ── Color picker de fundo ──
+    (function () {
+        const presets = document.querySelectorAll('.bg-color-btn');
+        const hiddenInput = document.getElementById('bg_color');
+        const customInput = document.getElementById('bg-color-custom');
+
+        function selectColor(color) {
+            if (hiddenInput) hiddenInput.value = color;
+            presets.forEach(b => {
+                b.style.border = b.dataset.color === color
+                    ? '2px solid var(--accent)'
+                    : '2px solid transparent';
+            });
+        }
+
+        presets.forEach(btn => btn.addEventListener('click', () => selectColor(btn.dataset.color)));
+
+        if (customInput) {
+            customInput.addEventListener('input', () => {
+                if (hiddenInput) hiddenInput.value = customInput.value;
+                presets.forEach(b => b.style.border = '2px solid transparent');
+            });
+            customInput.parentElement.addEventListener('click', () => customInput.click());
+        }
+    })();
+
+    function toggleBgColor(input) {
+        const group = document.getElementById('bg-color-group');
+        if (group) group.style.display = input.files.length ? 'none' : 'block';
+    }
+
+    // ── Simulador de duração ──
+    let _detailEstimateTimer = null;
+
+    function detailEstimateDebounced() {
+        clearTimeout(_detailEstimateTimer);
+        _detailEstimateTimer = setTimeout(detailEstimate, 400);
+    }
+
+    function detailEstimate() {
+        const text = (document.getElementById('conversation_text')?.value || '').trim();
+        const estimatorEl = document.getElementById('duration-estimator');
+        if (!estimatorEl) return;
+        if (!text) { estimatorEl.style.display = 'none'; return; }
+
+        const speed        = parseFloat(document.getElementById('edit-speed')?.value || 1.0);
+        const readingSpeed = parseFloat(document.getElementById('edit-reading')?.value || 1.0);
+        const scrollSpeed  = parseFloat(document.getElementById('edit-scroll')?.value || 1.0);
+        const animStyle    = document.getElementById('edit-anim')?.value || 'fade';
+
+        const msgPattern = /^\[(\d{1,2}:\d{2})\]\s+.+?:\s+(.+)$/;
+        const cmdPattern = /^\[(IMAGE|EMOJI|AUDIO|DATE)\]\s+(.+)$/i;
+        const messages   = [];
+
+        for (const rawLine of text.split('\n')) {
+            const line = rawLine.trim();
+            if (!line) continue;
+            const cmd = line.match(cmdPattern);
+            if (cmd) {
+                const t = cmd[1].toUpperCase();
+                if (t === 'IMAGE')  messages.push({ type: 'image',          text: '' });
+                if (t === 'EMOJI')  messages.push({ type: 'emoji',          text: cmd[2] });
+                if (t === 'AUDIO')  messages.push({ type: 'audio',          text: '' });
+                if (t === 'DATE')   messages.push({ type: 'date_separator', text: cmd[2] });
+                continue;
+            }
+            const msg = line.match(msgPattern);
+            if (msg) messages.push({ type: 'text', text: msg[2] });
+        }
+
+        if (!messages.length) { estimatorEl.style.display = 'none'; return; }
+
+        const SCROLL_DUR = 450;
+        let currentTime  = 500;
+
+        for (const msg of messages) {
+            let delay;
+            if (msg.type === 'date_separator') delay = 300;
+            else if (msg.type === 'image')     delay = 2000;
+            else if (msg.type === 'audio')     delay = 1800;
+            else if (msg.type === 'emoji')     delay = 600;
+            else {
+                const len = (msg.text || '').length;
+                delay = len > 100 ? 2200 : len > 50 ? 1600 : 1000;
+            }
+            currentTime += delay / speed;
+
+            if (animStyle === 'typing' && msg.type === 'text') {
+                const len = (msg.text || '').length;
+                currentTime += Math.min(500 + len * 15, 2000) / speed;
+            }
+
+            currentTime += 350;
+
+            let readPause;
+            if (msg.type === 'date_separator') readPause = 200;
+            else if (msg.type === 'image')     readPause = 2500;
+            else if (msg.type === 'audio')     readPause = 2000;
+            else {
+                const len = (msg.text || '').length;
+                readPause = len > 100 ? 2000 : len > 50 ? 1500 : 800;
+            }
+            currentTime += readPause / readingSpeed;
+
+            const scrollDur = SCROLL_DUR / scrollSpeed;
+            if (scrollDur > 350) currentTime += scrollDur - 350;
+        }
+
+        const totalSec = Math.ceil((currentTime + 5000) / 1000);
+        const mins = Math.floor(totalSec / 60);
+        const secs = totalSec % 60;
+        const formatted = mins > 0 ? `${mins}m ${secs.toString().padStart(2,'0')}s` : `${secs}s`;
+
+        document.getElementById('duration-value').textContent   = formatted;
+        document.getElementById('est-msg-count').textContent    = messages.length;
+        document.getElementById('est-img-count').textContent    = messages.filter(m => m.type === 'image').length;
+        document.getElementById('est-date-count').textContent   = messages.filter(m => m.type === 'date_separator').length;
+        document.getElementById('est-speed-val').textContent    = speed.toFixed(1) + 'x';
+        estimatorEl.style.display = 'block';
+    }
+
+    // Roda na carga da página (texto já preenchido pelo servidor)
+    setTimeout(detailEstimate, 100);
 </script>
 {% endblock %}

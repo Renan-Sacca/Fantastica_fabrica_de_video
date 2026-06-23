@@ -758,15 +758,13 @@ function estimateDuration() {
     // Contar tipos
     let imgCount  = messages.filter(m => m.type === 'image').length;
     let dateCount = messages.filter(m => m.type === 'date_separator').length;
-    let textCount = messages.filter(m => m.type === 'text' || m.type === 'emoji').length;
 
-    // ── Simulação da timeline (simplificada) ──
-    // Valores médios usados no Python (sem humanize):
-    const TYPING_DUR   = 600;  // média de min(500+len*15, 2000) para texto médio
+    // ── Simulação da timeline (espelha animator.py _build_timeline) ──
+    const SCROLL_DUR = 450; // _get_scroll_duration média
     let currentTime = 500;
 
     for (const msg of messages) {
-        // Delay de chegada
+        // Delay de chegada (_get_message_delay)
         let delay;
         if (msg.type === 'date_separator') delay = 300;
         else if (msg.type === 'image')     delay = 2000;
@@ -780,17 +778,17 @@ function estimateDuration() {
         }
         currentTime += delay / speed;
 
-        // Animação de digitação (apenas para mensagens recebidas em modo typing)
+        // Digitação (typing mode, só mensagens recebidas)
         if (animStyle === 'typing' && msg.type === 'text' && msg.sender !== 'me') {
             const len = (msg.text || '').length;
             const typingDur = Math.min(500 + len * 15, 2000);
             currentTime += typingDur / speed;
         }
 
-        // Aparecer (350ms de animação)
+        // Animação de aparecer (350ms médio)
         currentTime += 350;
 
-        // Pausa de leitura
+        // Pausa de leitura (_get_reading_pause)
         let readPause;
         if (msg.type === 'date_separator') readPause = 200;
         else if (msg.type === 'image')     readPause = 2500;
@@ -802,6 +800,13 @@ function estimateDuration() {
             else readPause = 800;
         }
         currentTime += readPause / readingSpeed;
+
+        // Scroll — ocorre em paralelo com appear_time mas sua duração
+        // pode estender o tempo se for mais lento que a animação de aparecer
+        const scrollDur = SCROLL_DUR / scrollSpeed;
+        if (scrollDur > 350) {
+            currentTime += (scrollDur - 350); // tempo extra que o scroll acrescenta
+        }
     }
 
     // Buffer final de 5s

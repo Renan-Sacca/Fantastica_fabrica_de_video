@@ -158,7 +158,6 @@
                         <select id="animation_style" name="animation_style">
                             <option value="fade" selected>✨ Fade In</option>
                             <option value="slide">📤 Slide Up</option>
-                            <option value="typing">⌨️ Digitando...</option>
                         </select>
                     </div>
                 </div>
@@ -387,7 +386,15 @@ Comandos especiais:
         if (conversa) {
             const ta = document.getElementById('conversation_text')
                     || document.querySelector('textarea[name="conversation_text"]');
-            if (ta) ta.value = conversa;
+            if (ta) {
+                ta.value = conversa;
+                // Atualiza a variável interna e dispara o simulador de duração
+                // (setTimeout garante que create.js já inicializou tudo)
+                setTimeout(() => {
+                    if (typeof _lastConvText !== 'undefined') _lastConvText = conversa;
+                    if (typeof estimateDuration === 'function') estimateDuration();
+                }, 50);
+            }
         }
         const contactName = sessionStorage.getItem('prefill_contact_name');
         if (contactName) {

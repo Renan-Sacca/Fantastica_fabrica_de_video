@@ -28,6 +28,7 @@ class FrameState:
     visible_messages: list[int] = field(default_factory=list)
     message_opacity: dict[int, float] = field(default_factory=dict)
     message_translate_y: dict[int, float] = field(default_factory=dict)
+    message_scale: dict[int, float] = field(default_factory=dict)
     show_typing: bool = False
     typing_sender: str = ""
     status_bar_time: str = "10:30"
@@ -192,11 +193,29 @@ class Timeline:
             if t_ms >= event.fully_visible_time:
                 state.message_opacity[event.index] = 1.0
                 state.message_translate_y[event.index] = 0.0
+                state.message_scale[event.index] = 1.0
             else:
                 progress = (t_ms - event.appear_time) / max(1, event.fully_visible_time - event.appear_time)
                 eased = ease_out_cubic(progress)
-                state.message_opacity[event.index] = eased
-                state.message_translate_y[event.index] = (1.0 - eased) * 20 if self.animation_style == "slide" else 0.0
+
+                if self.animation_style == "fade":
+                    # Fade puro: só opacidade, sem movimento
+                    state.message_opacity[event.index] = eased
+                    state.message_translate_y[event.index] = 0.0
+                    state.message_scale[event.index] = 1.0
+
+                elif self.animation_style == "slide":
+                    # Slide: sobe 40px enquanto aparece (mais exagerado para ser visível)
+                    state.message_opacity[event.index] = eased
+                    state.message_translate_y[event.index] = (1.0 - eased) * 40.0
+                    state.message_scale[event.index] = 1.0
+
+                elif self.animation_style == "typing":
+                    # Typing: mensagem "pop in" — escala de 0.7→1 + fade
+                    state.message_opacity[event.index] = eased
+                    state.message_translate_y[event.index] = 0.0
+                    state.message_scale[event.index] = 0.7 + eased * 0.3  # 0.7→1.0
+
         for event in self.events:
             if event.typing_start >= 0 and event.typing_start <= t_ms < event.typing_end:
                 state.show_typing = True
