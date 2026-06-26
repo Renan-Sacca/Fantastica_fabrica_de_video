@@ -1,0 +1,22 @@
+services:
+  omni-worker:
+    build: ./worker
+    container_name: fabrica-omni-worker
+    env_file:
+      - .env
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      # Pasta compartilhada com o site (web/): vozes de referência e áudios gerados.
+      - ./data:/app/data
+    restart: unless-stopped
+    # ── GPU NVIDIA ──
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

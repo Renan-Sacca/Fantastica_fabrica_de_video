@@ -1,0 +1,5 @@
+# torch/torchaudio são instalados no Dockerfile (wheels +cu128, casados)
+omnivoice
+aio-pika==9.4.3
+python-dotenv==1.0.1
+soundfile==0.12.1
