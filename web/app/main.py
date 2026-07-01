@@ -6,9 +6,9 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.config import STATIC_DIR, TEMPLATES_DIR
+from app.config import STATIC_DIR, TEMPLATES_DIR, OMNI_OUTPUTS_DIR
 from app.database import init_db
-from app.routers import auth, dashboard, drive, jobs, progress, whatsapp
+from app.routers import audio3, auth, dashboard, drive, jobs, progress, whatsapp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,10 +21,15 @@ app = FastAPI(
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Servir os áudios gerados pelo OmniVoice (volume compartilhado tts3/data/outputs)
+OMNI_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/audio3-files", StaticFiles(directory=str(OMNI_OUTPUTS_DIR)), name="audio3-files")
+
 # Incluir roteadores
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(whatsapp.router)
+app.include_router(audio3.router)
 app.include_router(jobs.router)
 app.include_router(drive.router)
 app.include_router(progress.router)

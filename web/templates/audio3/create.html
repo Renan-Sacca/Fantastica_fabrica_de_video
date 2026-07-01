@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+
+{% block title %}Gerar Áudio — OmniVoice{% endblock %}
+
+{% block extra_css %}
+<style>
+    .o-wrap { max-width: 1120px; margin: 0 auto; padding: 24px 16px; }
+    .o-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+    .o-head h1 { font-size: 1.5rem; font-weight: 800; }
+    .o-badge { background: #0e9488; color: #fff; padding: 4px 10px; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+
+    .o-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; align-items: start; }
+    .o-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 20px; }
+    .o-card h2 { font-size: 1.05rem; margin-bottom: 12px; }
+    .o-card h3.sub { font-size: .78rem; opacity: .6; margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .5px; }
+
+    .o-card label { display: block; font-size: .82rem; font-weight: 500; margin: 12px 0 6px; }
+    .o-card textarea, .o-card input[type=text], .o-card input[type=number], .o-card input[type=file], .o-card select {
+        width: 100%; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.12);
+        border-radius: 8px; color: inherit; padding: 10px 12px; font-family: inherit; font-size: .95rem;
+    }
+    .o-card textarea { resize: vertical; }
+
+    /* Abas de modo */
+    .tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+    .tab { padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); cursor: pointer; font-size: .85rem; font-weight: 600; opacity: .7; }
+    .tab.active { background: #0e9488; color: #fff; opacity: 1; border-color: #0e9488; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row .field { flex: 1; min-width: 140px; }
+
+    .symbols { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .symbol { font-size: .75rem; padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,.14); cursor: pointer; background: rgba(0,0,0,.2); }
+
+    .o-btn { margin-top: 16px; padding: 10px 18px; border: none; border-radius: 8px; font-weight: 600; font-size: .9rem; cursor: pointer; color: #fff; text-decoration: none; display: inline-block; }
+    .o-btn-primary { background: #0e9488; }
+    .o-btn-secondary { background: #2ea043; }
+    .o-btn-ghost { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit; }
+    .o-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    details.adv { margin-top: 8px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 8px 12px; }
+    details.adv summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+    details.adv .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .hint { font-size: .72rem; opacity: .5; margin-top: 2px; }
+    .check { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+    .check input { width: auto; }
+
+    .o-progress { margin-top: 16px; }
+    .o-progress .bar { height: 8px; background: rgba(255,255,255,.1); border-radius: 999px; overflow: hidden; }
+    .o-progress .fill { height: 100%; width: 0; background: #2dd4bf; transition: width .3s; }
+    .o-result { margin-top: 16px; }
+    .o-result audio { width: 100%; margin: 10px 0; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 6px 12px; font-size: .82rem; }
+    .chip .del { color: #f85149; cursor: pointer; font-weight: 700; }
+    .muted { opacity: .6; font-size: .88rem; }
+    .hidden { display: none !important; }
+    code.preview { display:block; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,.3); border-radius:6px; font-size:.8rem; }
+
+    @media (max-width: 860px) { .o-grid { grid-template-columns: 1fr; } details.adv .grid2 { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="o-wrap">
+    <div class="o-head">
+        <h1>🌍 Gerar Áudio (OmniVoice)</h1>
+        <span class="o-badge">k2-fsa · 600+ idiomas · GPU</span>
+        <a href="/audio3/history" class="o-btn o-btn-ghost" style="margin:0 0 0 auto; padding:6px 14px;">🗂️ Histórico</a>
+    </div>
+
+    <div class="o-grid">
+        <!-- Coluna principal -->
+        <section class="o-card">
+            <h2>Texto</h2>
+            <label>Título (para o histórico)</label>
+            <input type="text" id="title" placeholder="Ex: Narração intro">
+            <label style="margin-top:12px;">Texto</label>
+            <textarea id="text" rows="5" placeholder="Digite o texto que será falado..."></textarea>
+            <div class="symbols" id="symbols">
+                <span class="symbol" data-tag="[laughter]">[laughter]</span>
+                <span class="symbol" data-tag="[sigh]">[sigh]</span>
+                <span class="symbol" data-tag="[confirmation-en]">[confirmation-en]</span>
+                <span class="symbol" data-tag="[question-en]">[question-en]</span>
+                <span class="symbol" data-tag="[surprise-ah]">[surprise-ah]</span>
+                <span class="symbol" data-tag="[surprise-oh]">[surprise-oh]</span>
+                <span class="symbol" data-tag="[surprise-wa]">[surprise-wa]</span>
+                <span class="symbol" data-tag="[dissatisfaction-hnn]">[dissatisfaction-hnn]</span>
+            </div>
+
+            <h3 class="sub">Modo de geração</h3>
+            <div class="tabs">
+                <div class="tab active" data-mode="clone">Clonagem de voz</div>
+                <div class="tab" data-mode="design">Voice Design</div>
+                <div class="tab" data-mode="auto">Auto</div>
+            </div>
+
+            <!-- Clonagem -->
+            <div class="panel active" data-panel="clone">
+                <label>Voz de referência</label>
+                <select id="voice"></select>
+                <p class="muted">Crie/gerencie vozes no painel à direita. Referência de 3–10s funciona melhor.</p>
+            </div>
+
+            <!-- Voice Design -->
+            <div class="panel" data-panel="design">
+                <div class="row">
+                    <div class="field">
+                        <label>Gênero</label>
+                        <select id="d-gender">
+                            <option value="">—</option>
+                            <option value="male">male (masculino)</option>
+                            <option value="female">female (feminino)</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Idade</label>
+                        <select id="d-age">
+                            <option value="">—</option>
+                            <option value="child">child</option>
+                            <option value="teenager">teenager</option>
+                            <option value="young adult">young adult</option>
+                            <option value="middle-aged">middle-aged</option>
+                            <option value="elderly">elderly</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Tom (pitch)</label>
+                        <select id="d-pitch">
+                            <option value="">—</option>
+                            <option value="very low pitch">very low pitch</option>
+                            <option value="low pitch">low pitch</option>
+                            <option value="moderate pitch">moderate pitch</option>
+                            <option value="high pitch">high pitch</option>
+                            <option value="very high pitch">very high pitch</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="field">
+                        <label>Estilo</label>
+                        <select id="d-style">
+                            <option value="">—</option>
+                            <option value="whisper">whisper (sussurro)</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Sotaque (texto em inglês)</label>
+                        <select id="d-accent">
+                            <option value="">—</option>
+                            <option value="american accent">american</option>
+                            <option value="british accent">british</option>
+                            <option value="australian accent">australian</option>
+                            <option value="canadian accent">canadian</option>
+                            <option value="indian accent">indian</option>
+                            <option value="chinese accent">chinese</option>
+                            <option value="korean accent">korean</option>
+                            <option value="japanese accent">japanese</option>
+                            <option value="portuguese accent">portuguese</option>
+                            <option value="russian accent">russian</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Dialeto chinês (texto em chinês)</label>
+                        <select id="d-dialect">
+                            <option value="">—</option>
+                            <option value="河南话">河南话</option>
+                            <option value="陕西话">陕西话</option>
+                            <option value="四川话">四川话</option>
+                            <option value="贵州话">贵州话</option>
+                            <option value="云南话">云南话</option>
+                            <option value="桂林话">桂林话</option>
+                            <option value="济南话">济南话</option>
+                            <option value="石家庄话">石家庄话</option>
+                            <option value="甘肃话">甘肃话</option>
+                            <option value="宁夏话">宁夏话</option>
+                            <option value="青岛话">青岛话</option>
+                            <option value="东北话">东北话</option>
+                        </select>
+                    </div>
+                </div>
+                <label>Instruct livre (opcional — sobrescreve os campos acima)</label>
+                <input type="text" id="d-free" placeholder='ex: female, young adult, british accent'>
+                <code class="preview" id="d-preview">instruct: (vazio)</code>
+            </div>
+
+            <!-- Auto -->
+            <div class="panel" data-panel="auto">
+                <p class="muted">O modelo escolhe uma voz automaticamente. Sem referência nem atributos.</p>
+            </div>
+
+            <!-- Parâmetros avançados -->
+            <details class="adv">
+                <summary>Parâmetros avançados</summary>
+                <div class="grid2">
+                    <div>
+                        <label>num_step</label>
+                        <input type="number" id="p-num_step" placeholder="32" step="1" min="1">
+                        <div class="hint">Passos de difusão. Maior = melhor/lento. 16 = rápido.</div>
+                    </div>
+                    <div>
+                        <label>guidance_scale</label>
+                        <input type="number" id="p-guidance_scale" placeholder="2.0" step="0.1">
+                        <div class="hint">Classifier-free guidance.</div>
+                    </div>
+                    <div>
+                        <label>t_shift</label>
+                        <input type="number" id="p-t_shift" placeholder="0.1" step="0.01">
+                        <div class="hint">Shift do schedule de ruído.</div>
+                    </div>
+                    <div>
+                        <label>position_temperature</label>
+                        <input type="number" id="p-position_temperature" placeholder="5.0" step="0.1">
+                        <div class="hint">0 = determinístico.</div>
+                    </div>
+                    <div>
+                        <label>class_temperature</label>
+                        <input type="number" id="p-class_temperature" placeholder="0.0" step="0.1">
+                        <div class="hint">0 = determinístico.</div>
+                    </div>
+                    <div>
+                        <label>layer_penalty_factor</label>
+                        <input type="number" id="p-layer_penalty_factor" placeholder="5.0" step="0.1">
+                    </div>
+                    <div>
+                        <label>speed</label>
+                        <input type="number" id="p-speed" placeholder="1.0" step="0.1">
+                        <div class="hint">&gt;1 mais rápido, &lt;1 mais lento.</div>
+                    </div>
+                    <div>
+                        <label>duration (s)</label>
+                        <input type="number" id="p-duration" placeholder="(auto)" step="0.5">
+                        <div class="hint">Fixa a duração. Sobrescreve speed.</div>
+                    </div>
+                    <div>
+                        <label>audio_chunk_duration (s)</label>
+                        <input type="number" id="p-audio_chunk_duration" placeholder="15.0" step="0.5">
+                    </div>
+                    <div>
+                        <label>audio_chunk_threshold (s)</label>
+                        <input type="number" id="p-audio_chunk_threshold" placeholder="30.0" step="0.5">
+                    </div>
+                    <div>
+                        <label>language_id (opcional)</label>
+                        <input type="text" id="p-language_id" placeholder="ex: pt, en, zh">
+                    </div>
+                </div>
+                <div class="check"><input type="checkbox" id="p-denoise" checked> <label style="margin:0;">denoise (fala mais limpa)</label></div>
+                <div class="check"><input type="checkbox" id="p-preprocess_prompt" checked> <label style="margin:0;">preprocess_prompt (limpa o áudio de referência)</label></div>
+                <div class="check"><input type="checkbox" id="p-postprocess_output" checked> <label style="margin:0;">postprocess_output (remove silêncios do resultado)</label></div>
+            </details>
+
+            <button class="o-btn o-btn-primary" id="gen-btn">Gerar áudio</button>
+
+            <div id="progress-box" class="o-progress hidden">
+                <div class="bar"><div id="progress-fill" class="fill"></div></div>
+                <p id="progress-detail" class="muted"></p>
+            </div>
+
+            <div id="result-box" class="o-result hidden">
+                <h3 class="sub">Resultado</h3>
+                <audio id="result-audio" controls></audio>
+                <a id="download-link" class="o-btn o-btn-ghost" download>Baixar .wav</a>
+            </div>
+        </section>
+
+        <!-- Coluna de vozes -->
+        <section class="o-card">
+            <h2>Vozes de referência</h2>
+            <p class="muted">Para o modo Clonagem. A transcrição ajuda; sem ela o Whisper transcreve sozinho.</p>
+            <form id="voice-form">
+                <label>Nome da voz</label>
+                <input type="text" id="voice-name" placeholder="Ex: Minha voz">
+                <label>Áudio de referência (3–10s)</label>
+                <input type="file" id="voice-file" accept="audio/*">
+                <label>Transcrição (opcional)</label>
+                <textarea id="voice-reftext" rows="2" placeholder="O que é falado no áudio"></textarea>
+                <button type="submit" class="o-btn o-btn-secondary">Criar voz</button>
+            </form>
+
+            <h3 class="sub">Minhas vozes</h3>
+            <div id="custom-voices" class="chips"><p class="muted">Nenhuma ainda.</p></div>
+            <button id="refresh-voices" class="o-btn o-btn-ghost" style="margin-top:12px;">Atualizar vozes</button>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="/static/audio3.js?v=1"></script>
+{% endblock %}

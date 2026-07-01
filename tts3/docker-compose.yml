@@ -4,12 +4,16 @@ services:
     container_name: fabrica-omni-worker
     env_file:
       - .env
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
       # Pasta compartilhada com o site (web/): vozes de referência e áudios gerados.
       - ./data:/app/data
+      # Credenciais do Google Drive (mesmos arquivos usados pelos outros módulos)
+      - ../token.json:/app/token.json:ro
+      - ../credentials.json:/app/credentials.json:ro
+    environment:
+      - TOKEN_FILE=/app/token.json
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     restart: unless-stopped
     # ── GPU NVIDIA ──
     gpus: all

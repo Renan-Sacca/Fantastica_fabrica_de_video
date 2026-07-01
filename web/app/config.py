@@ -14,6 +14,16 @@ if not RABBITMQ_URL:
 RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "video_jobs")
 RABBITMQ_AGENT_QUEUE = os.getenv("RABBITMQ_AGENT_QUEUE", "text_correction_jobs")
 
+# ── Áudio (OmniVoice) ──
+RABBITMQ_OMNI_QUEUE = os.getenv("RABBITMQ_OMNI_QUEUE", "omni_audio_jobs")
+RABBITMQ_OMNI_PROGRESS_EXCHANGE = os.getenv("RABBITMQ_OMNI_PROGRESS_EXCHANGE", "omni_audio_progress")
+
+# Pasta compartilhada com o worker do OmniVoice (tts3/data montada no container)
+OMNI_DATA_DIR = Path(os.getenv("OMNI_DATA_DIR", "/app/tts3_audio"))
+OMNI_VOICES_DIR = OMNI_DATA_DIR / "voices"
+OMNI_OUTPUTS_DIR = OMNI_DATA_DIR / "outputs"
+OMNI_CUSTOM_INDEX = OMNI_VOICES_DIR / "_custom_voices.json"
+
 # ── MySQL ──
 MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
@@ -39,3 +49,10 @@ JOBS_FILE = DATA_DIR / "jobs.json"
 
 # Garantir diretórios
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Garantir diretórios compartilhados de áudio (podem não existir no 1º boot)
+try:
+    OMNI_VOICES_DIR.mkdir(parents=True, exist_ok=True)
+    OMNI_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass

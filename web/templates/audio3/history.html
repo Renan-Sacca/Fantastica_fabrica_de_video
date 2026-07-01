@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico de Áudios — OmniVoice{% endblock %}
+
+{% block extra_css %}
+<style>
+    .back-link { display:inline-flex; align-items:center; gap:6px; color:var(--text-muted); text-decoration:none; font-size:14px; margin-bottom:20px; }
+    .back-link:hover { color:var(--text-primary); }
+    .a-item { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 16px; border:1px solid var(--border-subtle); border-radius:12px; margin-bottom:12px; flex-wrap:wrap; }
+    .a-info { display:flex; flex-direction:column; gap:6px; min-width:240px; flex:1; }
+    .a-title { font-weight:600; }
+    .a-meta { font-size:12px; color:var(--text-secondary); display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .badge { padding:2px 8px; border-radius:999px; font-size:11px; border:1px solid var(--border-subtle); }
+    .badge.done { color:#22c55e; border-color:#22c55e55; }
+    .badge.error { color:#ef4444; border-color:#ef444455; }
+    .badge.pending, .badge.processing { color:#eab308; border-color:#eab30855; }
+    .a-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .a-actions audio { height:34px; }
+    .btn-sm { padding:6px 12px; font-size:13px; border-radius:8px; border:1px solid var(--border-subtle); background:transparent; color:var(--text-primary); cursor:pointer; text-decoration:none; }
+    .btn-del { color:#ef4444; border-color:#ef444455; }
+    .empty { text-align:center; padding:40px; color:var(--text-secondary); }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="/audio3" class="back-link">← Voltar para Gerar Áudio</a>
+
+<section class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.2rem;">
+        <h2 class="card-title" style="margin-bottom:0;"><span class="card-icon">🗂️</span> Histórico de Áudios</h2>
+        <input type="text" id="search" placeholder="Buscar por título ou ID..." onkeyup="filterRows()"
+               style="padding:0.5rem 1rem; border-radius:8px; border:1px solid var(--border-subtle); background:var(--bg-input); color:var(--text-primary); font-size:0.9rem; min-width:240px;">
+    </div>
+
+    <div id="rows">
+        {% if jobs %}
+            {% for job in jobs %}
+            <div class="a-item" data-job-id="{{ job.job_id }}" data-search="{{ job.title|lower }} {{ job.job_id }}">
+                <div class="a-info">
+                    <span class="a-title">{{ job.title }}</span>
+                    <span class="a-meta">
+                        <span>#{{ job.job_id }}</span>
+                        <span class="badge">{{ job.mode }}</span>
+                        <span class="badge {{ job.status }}">{{ job.status }}</span>
+                        <span>{{ job.created_at[:16] if job.created_at else '' }}</span>
+                    </span>
+                </div>
+                <div class="a-actions">
+                    {% if job.status == 'done' %}
+                    <audio controls preload="none" src="/audio3-files/{{ job.job_id }}.wav"></audio>
+                    {% if job.audio_url %}
+                    <a class="btn-sm" href="{{ job.audio_url }}" target="_blank">Drive</a>
+                    {% endif %}
+                    {% elif job.status == 'error' %}
+                    <span style="color:#ef4444; font-size:12px;">{{ job.detail or job.error or 'Erro' }}</span>
+                    {% else %}
+                    <span style="color:var(--text-secondary); font-size:12px;">{{ job.detail or 'Processando...' }}</span>
+                    {% endif %}
+                    <button class="btn-sm" onclick="renameJob('{{ job.job_id }}', '{{ job.title|e }}')">✏️</button>
+                    <button class="btn-sm btn-del" onclick="deleteJob('{{ job.job_id }}')">🗑️</button>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty">🎧 Nenhum áudio gerado ainda.</div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+function filterRows() {
+    const q = document.getElementById('search').value.toLowerCase();
+    document.querySelectorAll('.a-item').forEach(el => {
+        el.style.display = el.dataset.search.includes(q) ? '' : 'none';
+    });
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('Excluir este áudio?')) return;
+    const res = await fetch(`/audio3/api/jobs/${jobId}`, { method: 'DELETE' });
+    if (res.ok) {
+        const el = document.querySelector(`.a-item[data-job-id="${jobId}"]`);
+        if (el) el.remove();
+    } else {
+        const d = await res.json().catch(() => ({}));
+        alert('Erro: ' + (d.error || ''));
+    }
+}
+
+async function renameJob(jobId, current) {
+    const t = prompt('Novo título:', current);
+    if (t === null) return;
+    const title = t.trim();
+    if (!title) return;
+    const res = await fetch(`/audio3/api/jobs/${jobId}/rename`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+    });
+    if (res.ok) {
+        const el = document.querySelector(`.a-item[data-job-id="${jobId}"] .a-title`);
+        if (el) el.textContent = title;
+    } else {
+        const d = await res.json().catch(() => ({}));
+        alert('Erro: ' + (d.error || ''));
+    }
+}
+</script>
+{% endblock %}

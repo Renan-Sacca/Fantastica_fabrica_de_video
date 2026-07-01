@@ -1,7 +1,7 @@
 """Worker de geração de áudio com OmniVoice (k2-fsa).
 
-Consome a fila própria `omni_audio_jobs` no RabbitMQ, gera o áudio na GPU e
-publica o progresso no exchange `omni_audio_progress` (consumido via SSE pela web).
+Consome a fila `omni_audio_jobs`, gera o áudio na GPU, salva no Google Drive,
+atualiza o MySQL e publica o progresso no exchange `omni_audio_progress`.
 """
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ import soundfile as sf
 from dotenv import load_dotenv
 
 from omni_engine import OmniEngine
+import db
+from drive import DriveClient
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR.parent / ".env")
@@ -26,6 +28,7 @@ if not RABBITMQ_URL:
     raise ValueError("RABBITMQ_URL não encontrada no .env")
 OMNI_QUEUE = os.getenv("RABBITMQ_OMNI_QUEUE", "omni_audio_jobs")
 PROGRESS_EXCHANGE = os.getenv("RABBITMQ_OMNI_PROGRESS_EXCHANGE", "omni_audio_progress")
+TOKEN_FILE = os.getenv("TOKEN_FILE", "/app/token.json")
 
 DATA_DIR = Path("/app/data")
 VOICES_DIR = DATA_DIR / "voices"
@@ -41,6 +44,7 @@ logger = logging.getLogger("OmniWorker")
 class OmniWorker:
     def __init__(self) -> None:
         self.engine = OmniEngine()
+        self.drive: Optional[DriveClient] = None
         self.connection: Optional[aio_pika.RobustConnection] = None
         self._channel: Optional[aio_pika.Channel] = None
         self._progress_exchange: Optional[aio_pika.Exchange] = None
@@ -48,6 +52,13 @@ class OmniWorker:
     async def start(self) -> None:
         VOICES_DIR.mkdir(parents=True, exist_ok=True)
         OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+        db.init_db()
+        try:
+            self.drive = DriveClient(TOKEN_FILE)
+        except Exception as e:
+            logger.warning(f"Drive indisponível (seguindo sem upload): {e}")
+            self.drive = None
 
         await asyncio.to_thread(self.engine.load)
 
@@ -113,39 +124,53 @@ class OmniWorker:
             ref_text = payload.get("ref_text", "") or ""
             instruct = payload.get("instruct", "") or ""
             gen_params = payload.get("gen_params", {}) or {}
+            drive_folder_id = payload.get("drive_folder_id")
 
             if not job_id:
                 logger.error("Payload inválido: sem job_id")
                 return
             if not text:
-                await self._publish_progress(job_id, "error", 0, "Texto vazio.")
+                await self._fail(job_id, "Texto vazio.")
                 return
 
             ref_audio = None
             if mode == "clone":
                 ref = VOICES_DIR / ref_filename if ref_filename else None
                 if not ref or not ref.exists():
-                    await self._publish_progress(job_id, "error", 0, "Voz de referência não encontrada.")
+                    await self._fail(job_id, "Voz de referência não encontrada.")
                     return
                 ref_audio = str(ref)
 
             logger.info(f"[{job_id}] Gerando áudio (OmniVoice, modo={mode})")
+            db.update_status(job_id, status="processing", progress=25, detail="Gerando áudio...")
             await self._publish_progress(job_id, "processing", 25, "Gerando áudio...")
 
             audio = await asyncio.to_thread(
-                self.engine.generate,
-                text,
-                mode,
-                ref_audio,
-                ref_text,
-                instruct,
-                gen_params,
+                self.engine.generate, text, mode, ref_audio, ref_text, instruct, gen_params
             )
 
             out_path = OUTPUTS_DIR / f"{job_id}.wav"
             sf.write(str(out_path), audio, self.engine.sample_rate)
             logger.info(f"[{job_id}] Áudio gerado: {out_path}")
 
+            # Upload para o Google Drive (best-effort)
+            audio_drive_id = None
+            audio_drive_url = None
+            if self.drive and drive_folder_id:
+                try:
+                    await self._publish_progress(job_id, "processing", 80, "Enviando ao Drive...")
+                    wav_bytes = out_path.read_bytes()
+                    audio_drive_id = await asyncio.to_thread(
+                        self.drive.upload_bytes, wav_bytes, f"{job_id}.wav", drive_folder_id, "audio/wav"
+                    )
+                    audio_drive_url = await asyncio.to_thread(self.drive.make_public, audio_drive_id)
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Falha no upload ao Drive: {e}")
+
+            db.update_status(
+                job_id, status="done", progress=100, detail="Áudio gerado com sucesso.",
+                audio_drive_id=audio_drive_id, audio_url=audio_drive_url,
+            )
             await self._publish_progress(
                 job_id, "done", 100, "Áudio gerado com sucesso.", audio_url=f"/audio3-files/{job_id}.wav"
             )
@@ -153,7 +178,11 @@ class OmniWorker:
         except Exception as e:
             logger.exception(f"[{job_id}] Falha ao gerar áudio:")
             if job_id:
-                await self._publish_progress(job_id, "error", 0, f"Erro: {e}")
+                await self._fail(job_id, f"Erro: {e}")
+
+    async def _fail(self, job_id: str, detail: str) -> None:
+        db.update_status(job_id, status="error", progress=0, detail=detail, error=detail)
+        await self._publish_progress(job_id, "error", 0, detail)
 
 
 if __name__ == "__main__":

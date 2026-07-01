@@ -3,3 +3,12 @@ omnivoice
 aio-pika==9.4.3
 python-dotenv==1.0.1
 soundfile==0.12.1
+# MySQL
+sqlalchemy==2.0.36
+pymysql==1.1.1
+cryptography==44.0.0
+# Google Drive
+google-api-python-client==2.154.0
+google-auth==2.37.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0

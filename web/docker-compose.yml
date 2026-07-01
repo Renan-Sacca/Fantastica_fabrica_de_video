@@ -8,6 +8,8 @@ services:
       - ../credentials.json:/app/credentials.json:ro
       - ../token.json:/app/token.json:ro
       - ./data:/app/data
+      # Pasta compartilhada com o worker OmniVoice (tts3/data): vozes e .wav gerados
+      - ../tts3/data:/app/tts3_audio
     env_file:
       - .env
     environment:

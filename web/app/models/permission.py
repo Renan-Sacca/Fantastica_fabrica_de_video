@@ -26,4 +26,5 @@ class Permission(Base):
         "whatsapp_videos",
         "whatsapp_extract",
         "use_ai",
+        "omnivoice_audio",
     ]
