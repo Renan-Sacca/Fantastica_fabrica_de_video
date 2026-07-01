@@ -172,7 +172,7 @@ class OmniWorker:
                 audio_drive_id=audio_drive_id, audio_url=audio_drive_url,
             )
             await self._publish_progress(
-                job_id, "done", 100, "Áudio gerado com sucesso.", audio_url=f"/audio3-files/{job_id}.wav"
+                job_id, "done", 100, "Áudio gerado com sucesso.", audio_url=f"/audio-files/{job_id}.wav"
             )
 
         except Exception as e:

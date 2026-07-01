@@ -58,7 +58,7 @@
     // ── Vozes ──
     async function loadVoices() {
         try {
-            const res = await fetch("/audio3/api/voices");
+            const res = await fetch("/audio/api/voices");
             if (!res.ok) throw new Error("Falha ao carregar vozes");
             voicesData = await res.json();
             renderVoiceSelect();
@@ -101,7 +101,7 @@
         fd.append("reference_text", refText);
         fd.append("reference_audio", file);
         try {
-            const res = await fetch("/audio3/api/voices", { method: "POST", body: fd });
+            const res = await fetch("/audio/api/voices", { method: "POST", body: fd });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Erro");
             toast("Voz criada!", "success");
@@ -113,7 +113,7 @@
     async function deleteVoice(id) {
         if (!confirm("Remover esta voz?")) return;
         try {
-            const res = await fetch(`/audio3/api/voices/${id}`, { method: "DELETE" });
+            const res = await fetch(`/audio/api/voices/${id}`, { method: "DELETE" });
             if (!res.ok) throw new Error("Erro ao remover");
             toast("Voz removida.", "success");
             await loadVoices();
@@ -162,7 +162,7 @@
         showProgress(5, "Enviando para a fila...");
 
         try {
-            const res = await fetch("/audio3/api/generate", { method: "POST", body: fd });
+            const res = await fetch("/audio/api/generate", { method: "POST", body: fd });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Erro");
             listenProgress(data.job_id, btn);
@@ -181,14 +181,14 @@
     function hideProgress() { $("progress-box").classList.add("hidden"); }
 
     function listenProgress(jobId, btn) {
-        const es = new EventSource(`/audio3/api/progress/${jobId}/stream`);
+        const es = new EventSource(`/audio/api/progress/${jobId}/stream`);
         es.onmessage = (ev) => {
             let data;
             try { data = JSON.parse(ev.data); } catch { return; }
             showProgress(data.progress || 0, data.detail || "");
             if (data.status === "done") {
                 es.close(); btn.disabled = false;
-                showResult(`/audio3-files/${jobId}.wav`);
+                showResult(`/audio-files/${jobId}.wav`);
                 toast("Áudio gerado!", "success");
             } else if (data.status === "error") {
                 es.close(); btn.disabled = false; hideProgress();
@@ -208,4 +208,192 @@
 
     $("refresh-voices").addEventListener("click", loadVoices);
     loadVoices();
+
+    // ── Presets de parâmetros ──
+    let presetsData = { presets: [], plan: {} };
+    let currentPresetId = null;  // Armazena o preset atualmente carregado
+
+    async function loadPresets() {
+        try {
+            const res = await fetch("/audio/api/presets");
+            if (!res.ok) throw new Error("Falha ao carregar presets");
+            presetsData = await res.json();
+            renderPresetsSelect();
+        } catch (e) { toast(e.message, "error"); }
+    }
+
+    function renderPresetsSelect() {
+        const select = $("preset-select");
+        if (presetsData.presets.length) {
+            select.innerHTML = '<option value="">Selecione um preset salvo...</option>' +
+                presetsData.presets.map((p) => 
+                    `<option value="${p.preset_id}">${p.name}</option>`
+                ).join("");
+        } else {
+            select.innerHTML = '<option value="">Nenhum preset salvo ainda</option>';
+        }
+    }
+
+    function updatePresetButtons() {
+        const hasPreset = currentPresetId !== null;
+        $("update-preset-btn").style.display = hasPreset ? "inline-block" : "none";
+        $("delete-preset-btn").style.display = hasPreset ? "inline-block" : "none";
+    }
+
+    // Carregar preset selecionado
+    $("preset-select").addEventListener("change", (e) => {
+        const presetId = e.target.value;
+        
+        if (!presetId) {
+            currentPresetId = null;
+            updatePresetButtons();
+            return;
+        }
+        
+        const preset = presetsData.presets.find(p => p.preset_id === presetId);
+        if (!preset) return;
+        
+        currentPresetId = presetId;
+        updatePresetButtons();
+        
+        // Carrega os parâmetros
+        const params = preset.params;
+        Object.keys(params).forEach(key => {
+            const el = $("p-" + key);
+            if (!el) return;
+            
+            if (el.type === "checkbox") {
+                el.checked = params[key] === true || params[key] === 1;
+            } else if (params[key] !== null && params[key] !== undefined) {
+                el.value = params[key];
+            } else {
+                el.value = "";
+            }
+        });
+        
+        toast(`Preset "${preset.name}" carregado!`, "success");
+    });
+
+    // Salvar novo preset
+    $("save-preset-btn").addEventListener("click", async () => {
+        const name = prompt("Nome para esta nova configuração:");
+        if (!name || !name.trim()) return;
+
+        // Verifica limite
+        if (!presetsData.plan.can_create_more) {
+            return toast(`Limite de ${presetsData.plan.max_presets} presets atingido.`, "error");
+        }
+
+        // Coleta os parâmetros atuais
+        const params = {};
+        [
+            "num_step", "guidance_scale", "t_shift", "position_temperature",
+            "class_temperature", "layer_penalty_factor", "speed", "duration",
+            "audio_chunk_duration", "audio_chunk_threshold", "language_id",
+        ].forEach((k) => {
+            const v = numVal("p-" + k);
+            if (v !== "") {
+                params[k] = k === "language_id" ? v : parseFloat(v);
+            }
+        });
+
+        params.denoise = $("p-denoise").checked;
+        params.preprocess_prompt = $("p-preprocess_prompt").checked;
+        params.postprocess_output = $("p-postprocess_output").checked;
+
+        try {
+            const res = await fetch("/audio/api/presets", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: name.trim(), params })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Erro ao salvar");
+            
+            toast("Preset salvo com sucesso!", "success");
+            await loadPresets();
+            
+            // Seleciona o preset recém-criado
+            $("preset-select").value = data.preset.preset_id;
+            currentPresetId = data.preset.preset_id;
+            updatePresetButtons();
+        } catch (err) {
+            toast(err.message, "error");
+        }
+    });
+
+    // Atualizar preset existente
+    $("update-preset-btn").addEventListener("click", async () => {
+        if (!currentPresetId) return;
+        
+        const preset = presetsData.presets.find(p => p.preset_id === currentPresetId);
+        if (!preset) return;
+        
+        if (!confirm(`Atualizar o preset "${preset.name}" com as configurações atuais?`)) return;
+
+        // Coleta os parâmetros atuais
+        const params = {};
+        [
+            "num_step", "guidance_scale", "t_shift", "position_temperature",
+            "class_temperature", "layer_penalty_factor", "speed", "duration",
+            "audio_chunk_duration", "audio_chunk_threshold", "language_id",
+        ].forEach((k) => {
+            const v = numVal("p-" + k);
+            if (v !== "") {
+                params[k] = k === "language_id" ? v : parseFloat(v);
+            }
+        });
+
+        params.denoise = $("p-denoise").checked;
+        params.preprocess_prompt = $("p-preprocess_prompt").checked;
+        params.postprocess_output = $("p-postprocess_output").checked;
+
+        try {
+            const res = await fetch(`/audio/api/presets/${currentPresetId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ params })
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.error || "Erro ao atualizar");
+            }
+            
+            toast("Preset atualizado com sucesso!", "success");
+            await loadPresets();
+        } catch (err) {
+            toast(err.message, "error");
+        }
+    });
+
+    // Deletar preset
+    $("delete-preset-btn").addEventListener("click", async () => {
+        if (!currentPresetId) return;
+        
+        const preset = presetsData.presets.find(p => p.preset_id === currentPresetId);
+        if (!preset) return;
+        
+        if (!confirm(`Deletar o preset "${preset.name}"? Esta ação não pode ser desfeita.`)) return;
+
+        try {
+            const res = await fetch(`/audio/api/presets/${currentPresetId}`, {
+                method: "DELETE"
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.error || "Erro ao deletar");
+            }
+            
+            toast("Preset deletado com sucesso!", "success");
+            currentPresetId = null;
+            $("preset-select").value = "";
+            updatePresetButtons();
+            await loadPresets();
+        } catch (err) {
+            toast(err.message, "error");
+        }
+    });
+
+    loadPresets();
+    updatePresetButtons();
 })();

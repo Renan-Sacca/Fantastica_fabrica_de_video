@@ -1,54 +1,84 @@
-# SQL Scripts — Fantástica Fábrica de Vídeo
+# Scripts SQL
 
-Scripts de criação de todas as tabelas do banco MySQL `fabrica_video_db`.
+Scripts SQL para criar e atualizar o banco de dados do sistema.
 
-## Tabelas
+## Ordem de Execução
 
-| # | Arquivo | Tabela | Descrição |
-|---|---------|--------|-----------|
-| 1 | `001_jobs.sql` | `jobs` | Tabela base com campos comuns a todos os tipos de vídeo (inclui `user_id`) |
-| 2 | `002_whatsapp_jobs.sql` | `whatsapp_jobs` | Config específica de vídeos WhatsApp (herda de jobs) |
-| 3 | `003_whatsapp_extract_jobs.sql` | `whatsapp_extract_jobs` | Extração de conversas de vídeo (herda de jobs) |
-| 4 | `004_text_correction_jobs.sql` | `text_correction_jobs` | Correção de texto via IA — tabela independente (inclui `user_id`) |
-| 5 | `005_users.sql` | `users` | Usuários — autenticação por email/senha |
-| 6 | `006_permissions.sql` | `permissions` | Permissões por usuário (whatsapp_videos, whatsapp_extract) |
-| 7 | `007_add_user_id_to_jobs.sql` | — | **Migração apenas** — adiciona `user_id` em bancos existentes |
+Execute os scripts na ordem numérica:
 
-## Como usar
+1. `000_all.sql` - Script completo (alternativa ao processo incremental)
+2. `001_jobs.sql` - Tabela de jobs de vídeo
+3. `002_whatsapp_jobs.sql` - Tabela de jobs de WhatsApp
+4. `003_whatsapp_extract_jobs.sql` - Tabela de extração de WhatsApp
+5. `004_text_correction_jobs.sql` - Tabela de correção de texto
+6. `005_users.sql` - Tabela de usuários
+7. `006_permissions.sql` - Tabela de permissões
+8. `007_add_user_id_to_jobs.sql` - Adiciona user_id às tabelas de jobs
+9. `008_add_fk_user_references.sql` - Adiciona foreign keys para users
+10. `009_voice_plans.sql` - **NOVO** - Tabela de planos de vozes
+11. `010_user_voices.sql` - **NOVO** - Tabela de vozes personalizadas por usuário
+12. `011_add_voice_plan_to_users.sql` - **NOVO** - Adiciona plano de vozes aos usuários
 
-### Banco novo (do zero)
+## Novos Scripts (Sistema de Vozes)
+
+### 009_voice_plans.sql
+Cria a tabela `voice_plans` com os planos de vozes:
+- Plano Básico: até 10 vozes personalizadas
+- Plano Admin: vozes ilimitadas
+
+### 010_user_voices.sql
+Cria a tabela `user_voices` para armazenar vozes personalizadas por usuário:
+- Vinculada ao usuário (com FK)
+- Armazena nome, arquivo e texto de referência
+- Soft delete (is_deleted)
+
+### 011_add_voice_plan_to_users.sql
+Adiciona campo `voice_plan_id` à tabela `users`:
+- Admins recebem automaticamente o plano ilimitado
+- Usuários comuns recebem o plano básico
+
+## Como Aplicar
+
+### Método 1: Via MySQL Client
 ```bash
-mysql -u user_pessoal -p < sql/000_all.sql
+mysql -u usuario -p nome_banco < sql/009_voice_plans.sql
+mysql -u usuario -p nome_banco < sql/010_user_voices.sql
+mysql -u usuario -p nome_banco < sql/011_add_voice_plan_to_users.sql
 ```
 
-### Executar um script individual
+### Método 2: Via Docker
 ```bash
-mysql -u user_pessoal -p fabrica_video_db < sql/005_users.sql
+docker exec -i container_mysql mysql -u root -p nome_banco < sql/009_voice_plans.sql
+docker exec -i container_mysql mysql -u root -p nome_banco < sql/010_user_voices.sql
+docker exec -i container_mysql mysql -u root -p nome_banco < sql/011_add_voice_plan_to_users.sql
 ```
 
-### Migração de banco existente (adicionar user_id)
-Se você já tinha o banco criado antes da versão com usuários, execute:
-```bash
-mysql -u user_pessoal -p fabrica_video_db < sql/007_add_user_id_to_jobs.sql
-mysql -u user_pessoal -p fabrica_video_db < sql/005_users.sql
-mysql -u user_pessoal -p fabrica_video_db < sql/006_permissions.sql
+## Migração de Vozes Existentes
+
+Se você tem vozes no formato antigo (arquivo JSON `_custom_voices.json`), será necessário:
+
+1. Executar os scripts SQL acima
+2. Criar um script Python para migrar as vozes do JSON para o banco de dados
+3. Associar cada voz a um usuário
+
+Exemplo de script de migração:
+```python
+import json
+from pathlib import Path
+from app.repositories import user_voices
+
+# Ler arquivo JSON antigo
+json_path = Path("/caminho/para/_custom_voices.json")
+if json_path.exists():
+    voices = json.load(json_path.open())
+    
+    # Para cada voz, criar entrada no banco
+    for voice_id, info in voices.items():
+        user_voices.create_voice(
+            voice_id=voice_id,
+            user_id=1,  # Definir usuário apropriado
+            name=info["name"],
+            filename=info["filename"],
+            reference_text=info.get("reference_text", "")
+        )
 ```
-
-### Executar todos (via SQLAlchemy/Python)
-Os serviços (web, worker, agente) já criam as tabelas automaticamente via `init_db()` ao iniciar. Estes scripts servem como **documentação** e **backup** caso precise recriar o banco manualmente.
-
-## Sistema de Permissões
-
-| Permissão | Descrição |
-|-----------|-----------|
-| `whatsapp_videos` | Pode criar e visualizar vídeos de WhatsApp |
-| `whatsapp_extract` | Pode usar a extração de conversas por vídeo |
-| `use_ai` | Pode usar a correção de texto via IA (Gemini) |
-
-Permissões são gerenciadas em `/auth/admin/users` (acessível a qualquer usuário logado).
-
-## Notas
-- As tabelas `whatsapp_jobs` e `whatsapp_extract_jobs` usam **joined-table inheritance** (FK para `jobs.id`)
-- A tabela `text_correction_jobs` é **independente** — não herda de `jobs`
-- Todas usam `ENGINE=InnoDB` com charset `utf8mb4`
-- A correção via IA sempre usa **Gemini** com nova conversa (modo anônimo — sem salvar no histórico)

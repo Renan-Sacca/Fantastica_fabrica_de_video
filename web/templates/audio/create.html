@@ -56,6 +56,7 @@
     .chips { display: flex; flex-wrap: wrap; gap: 8px; }
     .chip { display: inline-flex; align-items: center; gap: 8px; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 6px 12px; font-size: .82rem; }
     .chip .del { color: #f85149; cursor: pointer; font-weight: 700; }
+    .chip .load { color: #2ea043; cursor: pointer; font-weight: 600; margin-left:4px; }
     .muted { opacity: .6; font-size: .88rem; }
     .hidden { display: none !important; }
     code.preview { display:block; margin-top:8px; padding:8px 10px; background:rgba(0,0,0,.3); border-radius:6px; font-size:.8rem; }
@@ -69,7 +70,7 @@
     <div class="o-head">
         <h1>🌍 Gerar Áudio (OmniVoice)</h1>
         <span class="o-badge">k2-fsa · 600+ idiomas · GPU</span>
-        <a href="/audio3/history" class="o-btn o-btn-ghost" style="margin:0 0 0 auto; padding:6px 14px;">🗂️ Histórico</a>
+        <a href="/audio/history" class="o-btn o-btn-ghost" style="margin:0 0 0 auto; padding:6px 14px;">🗂️ Histórico</a>
     </div>
 
     <div class="o-grid">
@@ -194,63 +195,80 @@
 
             <!-- Parâmetros avançados -->
             <details class="adv">
-                <summary>Parâmetros avançados</summary>
+                <summary>⚙️ Parâmetros avançados</summary>
+                
+                <div style="display:flex; justify-content:space-between; align-items:center; margin:12px 0 8px; flex-wrap:wrap; gap:8px;">
+                    <h4 style="margin:0; font-size:.9rem;">Configurações salvas</h4>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <button class="o-btn o-btn-ghost" id="save-preset-btn" style="padding:4px 10px; font-size:.8rem;">💾 Salvar novo</button>
+                        <button class="o-btn o-btn-ghost" id="update-preset-btn" style="padding:4px 10px; font-size:.8rem; display:none;">✏️ Atualizar</button>
+                        <button class="o-btn o-btn-ghost" id="delete-preset-btn" style="padding:4px 10px; font-size:.8rem; display:none; color:#f85149;">🗑️ Deletar</button>
+                    </div>
+                </div>
+                <select id="preset-select" style="width:100%; margin-bottom:12px;">
+                    <option value="">Selecione um preset salvo...</option>
+                </select>
+                
                 <div class="grid2">
                     <div>
                         <label>num_step</label>
                         <input type="number" id="p-num_step" placeholder="32" step="1" min="1">
-                        <div class="hint">Passos de difusão. Maior = melhor/lento. 16 = rápido.</div>
+                        <div class="hint">🔢 Passos de difusão (16-64). Valores maiores = melhor qualidade mas mais lento. Padrão: 32. Recomendado: 16 para rápido, 32 para qualidade.</div>
                     </div>
                     <div>
                         <label>guidance_scale</label>
                         <input type="number" id="p-guidance_scale" placeholder="2.0" step="0.1">
-                        <div class="hint">Classifier-free guidance.</div>
+                        <div class="hint">🎯 Força do guia (0.0-5.0). Controla quanto o modelo segue as instruções. Padrão: 2.0. Valores altos = mais fidelidade.</div>
                     </div>
                     <div>
                         <label>t_shift</label>
                         <input type="number" id="p-t_shift" placeholder="0.1" step="0.01">
-                        <div class="hint">Shift do schedule de ruído.</div>
+                        <div class="hint">📊 Deslocamento temporal (0.0-1.0). Ajusta o agendamento de ruído. Padrão: 0.1. Raramente precisa alterar.</div>
                     </div>
                     <div>
                         <label>position_temperature</label>
                         <input type="number" id="p-position_temperature" placeholder="5.0" step="0.1">
-                        <div class="hint">0 = determinístico.</div>
+                        <div class="hint">🎲 Temperatura de posição (0.0-10.0). 0 = determinístico (sempre igual), maior = mais variação. Padrão: 5.0.</div>
                     </div>
                     <div>
                         <label>class_temperature</label>
                         <input type="number" id="p-class_temperature" placeholder="0.0" step="0.1">
-                        <div class="hint">0 = determinístico.</div>
+                        <div class="hint">🎲 Temperatura de classe (0.0-10.0). 0 = determinístico. Padrão: 0.0. Controla variação de tokens.</div>
                     </div>
                     <div>
                         <label>layer_penalty_factor</label>
                         <input type="number" id="p-layer_penalty_factor" placeholder="5.0" step="0.1">
+                        <div class="hint">⚖️ Fator de penalidade (0.0-10.0). Penaliza camadas específicas. Padrão: 5.0.</div>
                     </div>
                     <div>
                         <label>speed</label>
-                        <input type="number" id="p-speed" placeholder="1.0" step="0.1">
-                        <div class="hint">&gt;1 mais rápido, &lt;1 mais lento.</div>
+                        <input type="number" id="p-speed" placeholder="1.0" step="0.1" min="0.5" max="2.0">
+                        <div class="hint">⏩ Velocidade da fala (0.5-2.0). 1.0 = normal, &gt;1 = mais rápido, &lt;1 = mais lento. Ex: 1.2 = 20% mais rápido.</div>
                     </div>
                     <div>
                         <label>duration (s)</label>
                         <input type="number" id="p-duration" placeholder="(auto)" step="0.5">
-                        <div class="hint">Fixa a duração. Sobrescreve speed.</div>
+                        <div class="hint">⏱️ Duração fixa em segundos. Se definido, ignora o parâmetro speed. Deixe vazio para duração automática.</div>
                     </div>
                     <div>
                         <label>audio_chunk_duration (s)</label>
                         <input type="number" id="p-audio_chunk_duration" placeholder="15.0" step="0.5">
+                        <div class="hint">✂️ Duração de cada pedaço de áudio (segundos). Textos longos são divididos. Padrão: 15s.</div>
                     </div>
                     <div>
                         <label>audio_chunk_threshold (s)</label>
                         <input type="number" id="p-audio_chunk_threshold" placeholder="30.0" step="0.5">
+                        <div class="hint">📏 Limite para dividir em pedaços (segundos). Se áudio estimado &gt; threshold, divide. Padrão: 30s.</div>
                     </div>
                     <div>
-                        <label>language_id (opcional)</label>
-                        <input type="text" id="p-language_id" placeholder="ex: pt, en, zh">
+                        <label>language_id</label>
+                        <input type="text" id="p-language_id" placeholder="ex: pt-BR, en-US, es-ES">
+                        <div class="hint">🌍 Código do idioma no formato ISO (opcional). Ex: pt-BR (português Brasil), en-US (inglês EUA), es-ES (espanhol), fr-FR (francês), zh-CN (chinês), ja-JP (japonês). Auto-detecta se vazio.</div>
                     </div>
                 </div>
-                <div class="check"><input type="checkbox" id="p-denoise" checked> <label style="margin:0;">denoise (fala mais limpa)</label></div>
-                <div class="check"><input type="checkbox" id="p-preprocess_prompt" checked> <label style="margin:0;">preprocess_prompt (limpa o áudio de referência)</label></div>
-                <div class="check"><input type="checkbox" id="p-postprocess_output" checked> <label style="margin:0;">postprocess_output (remove silêncios do resultado)</label></div>
+                <div class="check"><input type="checkbox" id="p-denoise" checked> <label style="margin:0;">🔇 denoise — Remove ruídos de fundo da voz gerada (recomendado)</label></div>
+                <div class="check"><input type="checkbox" id="p-preprocess_prompt" checked> <label style="margin:0;">🧹 preprocess_prompt — Limpa áudio de referência antes de clonar (recomendado)</label></div>
+                <div class="check"><input type="checkbox" id="p-postprocess_output" checked> <label style="margin:0;">✂️ postprocess_output — Remove silêncios inicial e final do áudio (recomendado)</label></div>
             </details>
 
             <button class="o-btn o-btn-primary" id="gen-btn">Gerar áudio</button>
@@ -291,5 +309,5 @@
 
 {% block scripts %}
 {{ super() }}
-<script src="/static/audio3.js?v=1"></script>
+<script src="/static/audio.js?v=1"></script>
 {% endblock %}

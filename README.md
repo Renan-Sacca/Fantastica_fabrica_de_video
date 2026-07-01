@@ -8,6 +8,7 @@ Os vídeos são gerados 100% em background — sem abrir janelas, sem mover mous
 
 ## ✨ Funcionalidades
 
+### Geração de Vídeos WhatsApp
 - 📱 Interface pixel-perfect do WhatsApp
 - 💬 Importação de conversas via TXT, JSON ou CSV
 - 🎨 Dashboard web para configuração visual
@@ -17,7 +18,23 @@ Os vídeos são gerados 100% em background — sem abrir janelas, sem mover mous
 - 📐 Formatos: Vertical (1080×1920), Horizontal (1920×1080), Quadrado (1080×1080)
 - 🎵 Música de fundo opcional
 - 🤖 Simulação humana (scroll orgânico, pausas naturais)
+
+### Sistema de Vozes OmniVoice (Novo! 🎤)
+- 🎙️ **Criação e gerenciamento de vozes personalizadas**
+- 🔊 Clonagem de voz a partir de áudio de referência
+- 📦 **Sistema de planos com limites configuráveis**
+  - **Plano Básico**: até 10 vozes personalizadas por usuário
+  - **Plano Admin**: vozes ilimitadas
+- 👤 Vozes vinculadas ao usuário (cada usuário gerencia suas próprias vozes)
+- 🗄️ Armazenamento em banco de dados (MySQL)
+- 🔐 Controle de permissões por usuário
+- ♻️ Soft delete (vozes deletadas podem ser recuperadas)
+
+### Infraestrutura
 - 🐳 Docker pronto para produção
+- 🔐 Sistema de autenticação e permissões
+- 📁 Integração com Google Drive
+- 🐰 Processamento assíncrono com RabbitMQ
 
 ---
 

@@ -23,7 +23,7 @@
 {% endblock %}
 
 {% block content %}
-<a href="/audio3" class="back-link">← Voltar para Gerar Áudio</a>
+<a href="/audio" class="back-link">← Voltar para Gerar Áudio</a>
 
 <section class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.2rem;">
@@ -47,7 +47,7 @@
                 </div>
                 <div class="a-actions">
                     {% if job.status == 'done' %}
-                    <audio controls preload="none" src="/audio3-files/{{ job.job_id }}.wav"></audio>
+                    <audio controls preload="none" src="/audio-files/{{ job.job_id }}.wav"></audio>
                     {% if job.audio_url %}
                     <a class="btn-sm" href="{{ job.audio_url }}" target="_blank">Drive</a>
                     {% endif %}
@@ -80,7 +80,7 @@ function filterRows() {
 
 async function deleteJob(jobId) {
     if (!confirm('Excluir este áudio?')) return;
-    const res = await fetch(`/audio3/api/jobs/${jobId}`, { method: 'DELETE' });
+    const res = await fetch(`/audio/api/jobs/${jobId}`, { method: 'DELETE' });
     if (res.ok) {
         const el = document.querySelector(`.a-item[data-job-id="${jobId}"]`);
         if (el) el.remove();
@@ -95,7 +95,7 @@ async function renameJob(jobId, current) {
     if (t === null) return;
     const title = t.trim();
     if (!title) return;
-    const res = await fetch(`/audio3/api/jobs/${jobId}/rename`, {
+    const res = await fetch(`/audio/api/jobs/${jobId}/rename`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),

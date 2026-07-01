@@ -29,7 +29,7 @@ from app.drive import get_drive
 from app.publisher import publish_omni_job
 from app.repositories import audio_jobs as audio_repo
 
-router = APIRouter(prefix="/audio3", tags=["audio3"])
+router = APIRouter(prefix="/audio", tags=["audio"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 logger = logging.getLogger(__name__)
 
@@ -78,23 +78,23 @@ def _to_int(v):
 
 
 @router.get("", response_class=HTMLResponse)
-async def audio3_page(request: Request):
+async def audio_page(request: Request):
     user, err = _require_permission(request)
     if err:
         return err
     return templates.TemplateResponse(
-        "audio3/create.html", {"request": request, "user": user}
+        "audio/create.html", {"request": request, "user": user}
     )
 
 
 @router.get("/history", response_class=HTMLResponse)
-async def audio3_history(request: Request):
+async def audio_history(request: Request):
     user, err = _require_permission(request)
     if err:
         return err
     jobs = audio_repo.get_all_jobs(user_id=user["id"])
     return templates.TemplateResponse(
-        "audio3/history.html", {"request": request, "user": user, "jobs": jobs}
+        "audio/history.html", {"request": request, "user": user, "jobs": jobs}
     )
 
 
@@ -105,7 +105,25 @@ async def get_voices(request: Request):
     user, err = _require_permission(request)
     if err:
         return JSONResponse({"error": "Sem acesso"}, status_code=403)
-    return JSONResponse({"custom": voices_mgr.list_custom()})
+    
+    voices = voices_mgr.list_custom(user["id"])
+    
+    # Adiciona informações do plano
+    plan = user.get("voice_plan", {})
+    max_voices = plan.get("max_voices", 10) if plan else 10
+    is_unlimited = plan.get("is_unlimited", False) if plan else False
+    current_count = len(voices)
+    
+    return JSONResponse({
+        "custom": voices,
+        "plan": {
+            "name": plan.get("name", "Sem plano") if plan else "Sem plano",
+            "max_voices": max_voices,
+            "is_unlimited": is_unlimited,
+            "current_count": current_count,
+            "can_create_more": is_unlimited or current_count < max_voices,
+        }
+    })
 
 
 @router.post("/api/voices")
@@ -118,15 +136,35 @@ async def create_voice(
     user, err = _require_permission(request)
     if err:
         return JSONResponse({"error": "Sem acesso"}, status_code=403)
+    
     if not name.strip():
         return JSONResponse({"error": "Informe um nome para a voz."}, status_code=400)
+    
     if not reference_audio or not reference_audio.filename:
         return JSONResponse({"error": "Envie um áudio de referência."}, status_code=400)
+    
     content = await reference_audio.read()
     if len(content) < 1024:
         return JSONResponse({"error": "Áudio muito curto/inválido."}, status_code=400)
-    voice = voices_mgr.save_custom(name, content, reference_audio.filename, reference_text)
-    return JSONResponse({"voice": voice})
+    
+    # Obtém informações do plano
+    plan = user.get("voice_plan", {})
+    max_voices = plan.get("max_voices", 10) if plan else 10
+    is_unlimited = plan.get("is_unlimited", False) if plan else False
+    
+    try:
+        voice = voices_mgr.save_custom(
+            user_id=user["id"],
+            name=name,
+            content=content,
+            original_filename=reference_audio.filename,
+            reference_text=reference_text,
+            max_voices=max_voices,
+            is_unlimited=is_unlimited,
+        )
+        return JSONResponse({"voice": voice})
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 
 @router.delete("/api/voices/{voice_id}")
@@ -134,8 +172,135 @@ async def remove_voice(request: Request, voice_id: str):
     user, err = _require_permission(request)
     if err:
         return JSONResponse({"error": "Sem acesso"}, status_code=403)
-    if not voices_mgr.delete_custom(voice_id):
-        return JSONResponse({"error": "Voz não encontrada."}, status_code=404)
+    
+    if not voices_mgr.delete_custom(voice_id, user["id"]):
+        return JSONResponse({"error": "Voz não encontrada ou sem permissão."}, status_code=404)
+    
+    return JSONResponse({"ok": True})
+
+
+# ── Presets de parâmetros ──
+
+@router.get("/api/presets")
+async def get_presets(request: Request):
+    user, err = _require_permission(request)
+    if err:
+        return JSONResponse({"error": "Sem acesso"}, status_code=403)
+    
+    from app.repositories import audio_presets
+    
+    presets = audio_presets.get_user_presets(user["id"])
+    
+    # Adiciona informações do plano
+    plan = user.get("voice_plan", {})
+    max_presets = plan.get("max_presets", 10) if plan else 10
+    is_unlimited = plan.get("is_unlimited", False) if plan else False
+    current_count = len(presets)
+    
+    return JSONResponse({
+        "presets": presets,
+        "plan": {
+            "name": plan.get("name", "Sem plano") if plan else "Sem plano",
+            "max_presets": max_presets,
+            "is_unlimited": is_unlimited,
+            "current_count": current_count,
+            "can_create_more": is_unlimited or current_count < max_presets,
+        }
+    })
+
+
+@router.post("/api/presets")
+async def create_preset(request: Request):
+    user, err = _require_permission(request)
+    if err:
+        return JSONResponse({"error": "Sem acesso"}, status_code=403)
+    
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "JSON inválido"}, status_code=400)
+    
+    name = body.get("name", "").strip()
+    if not name:
+        return JSONResponse({"error": "Nome do preset é obrigatório"}, status_code=400)
+    
+    from app.repositories import audio_presets
+    
+    # Obtém informações do plano
+    plan = user.get("voice_plan", {})
+    max_presets = plan.get("max_presets", 10) if plan else 10
+    is_unlimited = plan.get("is_unlimited", False) if plan else False
+    
+    # Verifica limite
+    if not audio_presets.check_preset_limit(user["id"], max_presets, is_unlimited):
+        return JSONResponse(
+            {"error": f"Limite de {max_presets} presets atingido para este plano."},
+            status_code=400
+        )
+    
+    # Extrai parâmetros
+    params = body.get("params", {})
+    preset = audio_presets.create_preset(
+        user_id=user["id"],
+        name=name,
+        description=body.get("description", ""),
+        **params
+    )
+    
+    return JSONResponse({"preset": preset}, status_code=201)
+
+
+@router.delete("/api/presets/{preset_id}")
+async def remove_preset(request: Request, preset_id: str):
+    user, err = _require_permission(request)
+    if err:
+        return JSONResponse({"error": "Sem acesso"}, status_code=403)
+    
+    from app.repositories import audio_presets
+    
+    # Verifica propriedade
+    preset = audio_presets.get_preset(preset_id)
+    if not preset or preset["user_id"] != user["id"]:
+        return JSONResponse({"error": "Preset não encontrado ou sem permissão."}, status_code=404)
+    
+    audio_presets.soft_delete_preset(preset_id)
+    return JSONResponse({"ok": True})
+
+
+@router.patch("/api/presets/{preset_id}")
+async def update_preset(request: Request, preset_id: str):
+    user, err = _require_permission(request)
+    if err:
+        return JSONResponse({"error": "Sem acesso"}, status_code=403)
+    
+    from app.repositories import audio_presets
+    
+    # Verifica propriedade
+    preset = audio_presets.get_preset(preset_id)
+    if not preset or preset["user_id"] != user["id"]:
+        return JSONResponse({"error": "Preset não encontrado ou sem permissão."}, status_code=404)
+    
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "JSON inválido"}, status_code=400)
+    
+    # Extrai parâmetros para atualizar
+    params = body.get("params", {})
+    name = body.get("name")
+    description = body.get("description")
+    
+    # Atualiza o preset
+    success = audio_presets.update_preset(
+        preset_id,
+        name=name,
+        description=description,
+        **params
+    )
+    
+    if not success:
+        return JSONResponse({"error": "Erro ao atualizar preset"}, status_code=500)
+    
     return JSONResponse({"ok": True})
 
 
@@ -173,9 +338,9 @@ async def generate_audio(
     ref_filename = None
     ref_text = ""
     if mode == "clone":
-        info = voices_mgr.get_custom(voice)
+        info = voices_mgr.get_custom(voice, user["id"])
         if not info:
-            return JSONResponse({"error": "Voz de referência não encontrada."}, status_code=400)
+            return JSONResponse({"error": "Voz de referência não encontrada ou sem permissão."}, status_code=400)
         ref_filename = info["filename"]
         ref_text = info.get("reference_text", "")
     elif mode == "design":
@@ -267,16 +432,33 @@ async def delete_job(request: Request, job_id: str):
         return JSONResponse({"error": "Job não encontrado"}, status_code=404)
     if job.get("user_id") != user["id"]:
         return JSONResponse({"error": "Acesso negado"}, status_code=403)
-    # Move a pasta no Drive para Deletados (best-effort)
-    if job.get("drive_folder_id"):
-        try:
-            drive = get_drive(TOKEN_FILE)
-            await asyncio.get_event_loop().run_in_executor(
-                None, drive.move_to_deleted, job["drive_folder_id"], DRIVE_TYPE_FOLDER
-            )
-        except Exception as e:
-            logger.warning(f"[{job_id}] Falha ao mover pasta no Drive: {e}")
+    
+    # Soft delete no MySQL (imediato)
     audio_repo.soft_delete_job(job_id)
+    
+    # Move a pasta no Drive para Deletados em background (não bloqueia resposta)
+    if job.get("drive_folder_id"):
+        async def move_to_drive_deleted():
+            try:
+                drive = get_drive(TOKEN_FILE)
+                loop = asyncio.get_event_loop()
+                # Timeout de 10 segundos para não travar
+                await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None, drive.move_to_deleted, job["drive_folder_id"], DRIVE_TYPE_FOLDER
+                    ),
+                    timeout=10.0
+                )
+                logger.info(f"[{job_id}] Pasta movida para Deletados no Drive")
+            except asyncio.TimeoutError:
+                logger.warning(f"[{job_id}] Timeout ao mover pasta no Drive (10s)")
+            except Exception as e:
+                logger.warning(f"[{job_id}] Falha ao mover pasta no Drive: {e}")
+        
+        # Executa em background sem aguardar
+        asyncio.create_task(move_to_drive_deleted())
+    
+    # Responde imediatamente
     return {"status": "ok"}
 
 
@@ -297,15 +479,33 @@ async def rename_job(request: Request, job_id: str):
         return JSONResponse({"error": "Job não encontrado"}, status_code=404)
     if job.get("user_id") != user["id"]:
         return JSONResponse({"error": "Acesso negado"}, status_code=403)
-    if job.get("drive_folder_id"):
-        try:
-            drive = get_drive(TOKEN_FILE)
-            await asyncio.get_event_loop().run_in_executor(
-                None, drive.rename_folder, job["drive_folder_id"], f"{new_title}-{job_id}"
-            )
-        except Exception as e:
-            logger.warning(f"[{job_id}] Falha ao renomear pasta no Drive: {e}")
+    
+    # Renomeia no MySQL (imediato)
     audio_repo.rename_job(job_id, new_title)
+    
+    # Renomeia no Drive em background (não bloqueia resposta)
+    if job.get("drive_folder_id"):
+        async def rename_in_drive():
+            try:
+                drive = get_drive(TOKEN_FILE)
+                loop = asyncio.get_event_loop()
+                # Timeout de 10 segundos
+                await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None, drive.rename_folder, job["drive_folder_id"], f"{new_title}-{job_id}"
+                    ),
+                    timeout=10.0
+                )
+                logger.info(f"[{job_id}] Pasta renomeada no Drive")
+            except asyncio.TimeoutError:
+                logger.warning(f"[{job_id}] Timeout ao renomear pasta no Drive (10s)")
+            except Exception as e:
+                logger.warning(f"[{job_id}] Falha ao renomear pasta no Drive: {e}")
+        
+        # Executa em background sem aguardar
+        asyncio.create_task(rename_in_drive())
+    
+    # Responde imediatamente
     return {"status": "ok", "title": new_title}
 
 
