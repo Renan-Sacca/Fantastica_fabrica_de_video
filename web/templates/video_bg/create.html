@@ -8,6 +8,7 @@
     .vb-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
     .vb-head h1 { font-size: 1.5rem; font-weight: 800; }
     .vb-badge { background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; padding: 4px 10px; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+    .vb-head-actions { display: flex; gap: 8px; margin-left: auto; }
 
     .vb-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }
     .vb-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 20px; }
@@ -104,6 +105,122 @@
         opacity: 0; cursor: pointer; padding: 0; border: none;
     }
 
+    /* ── Fila de vídeos ── */
+    .vb-queue { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .vb-queue-item {
+        background: rgba(255,255,255,.04);
+        border: 1px solid rgba(255,255,255,.08);
+        border-radius: 10px;
+        padding: 12px 16px;
+        animation: slideIn .3s ease;
+    }
+    .vb-queue-item .qi-header {
+        display: flex; align-items: center; justify-content: space-between;
+        margin-bottom: 8px;
+    }
+    .vb-queue-item .qi-title { font-weight: 600; font-size: .9rem; }
+    .vb-queue-item .qi-status {
+        font-size: .72rem; font-weight: 600; padding: 3px 8px;
+        border-radius: 999px;
+    }
+    .qi-status.pending { background: rgba(245,158,11,.15); color: #f59e0b; }
+    .qi-status.processing { background: rgba(124,58,237,.15); color: #a855f7; }
+    .qi-status.done { background: rgba(34,197,94,.15); color: #22c55e; }
+    .qi-status.error { background: rgba(239,68,68,.15); color: #ef4444; }
+    .vb-queue-item .qi-detail { font-size: .8rem; opacity: .6; margin-top: 4px; }
+    .vb-queue-item .qi-link { font-size: .82rem; color: #a855f7; font-weight: 600; text-decoration: none; margin-top: 4px; display: inline-block; }
+    .vb-queue-item .qi-link:hover { text-decoration: underline; }
+
+    @keyframes slideIn {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Modal ── */
+    .vb-modal-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
+        z-index: 9999; display: none; align-items: center; justify-content: center;
+        animation: fadeIn .2s;
+    }
+    .vb-modal-overlay.show { display: flex; }
+    .vb-modal {
+        background: var(--bg-card, #1a1a2e); border: 1px solid rgba(255,255,255,.1);
+        border-radius: 16px; padding: 24px; max-width: 520px; width: 90%;
+        max-height: 85vh; overflow-y: auto; position: relative;
+        animation: scaleIn .2s ease;
+    }
+    .vb-modal h2 { margin: 0 0 16px; font-size: 1.2rem; }
+    .vb-modal .close-btn {
+        position: absolute; top: 14px; right: 16px; background: none; border: none;
+        color: inherit; font-size: 1.5rem; cursor: pointer; opacity: .5; transition: opacity .2s;
+    }
+    .vb-modal .close-btn:hover { opacity: 1; }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes scaleIn { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
+
+    /* ── Reddit Search ── */
+    .reddit-search-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+    .reddit-search-bar input {
+        flex: 1; background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.12);
+        border-radius: 8px; color: inherit; padding: 9px 12px; font-family: inherit; font-size: .9rem;
+    }
+    .reddit-search-bar button {
+        padding: 9px 16px; border: none; border-radius: 8px; font-weight: 600;
+        font-size: .85rem; cursor: pointer; color: #fff;
+        background: linear-gradient(135deg, #FF4500, #ff6b35);
+        transition: all .2s; white-space: nowrap;
+    }
+    .reddit-search-bar button:hover { transform: translateY(-1px); box-shadow: 0 3px 12px rgba(255,69,0,.4); }
+    .reddit-search-bar button:disabled { opacity: .5; transform: none; cursor: not-allowed; }
+
+    .reddit-sort-row { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+    .reddit-sort-chip {
+        padding: 5px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,.12);
+        cursor: pointer; font-size: .78rem; font-weight: 600; opacity: .6; transition: all .2s;
+        background: transparent; color: inherit;
+    }
+    .reddit-sort-chip.active { background: rgba(255,69,0,.15); color: #FF4500; border-color: #FF4500; opacity: 1; }
+    .reddit-sort-chip:hover:not(.active) { opacity: 1; border-color: rgba(255,255,255,.3); }
+
+    .reddit-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+    .reddit-chip {
+        padding: 5px 12px; border-radius: 999px; border: 1px solid rgba(255,69,0,.25);
+        cursor: pointer; font-size: .78rem; font-weight: 500; color: #ff6b35;
+        background: rgba(255,69,0,.08); transition: all .2s;
+    }
+    .reddit-chip:hover { background: rgba(255,69,0,.18); border-color: #FF4500; }
+
+    .reddit-results { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .reddit-post {
+        background: rgba(0,0,0,.2); border: 1px solid rgba(255,255,255,.06);
+        border-radius: 10px; padding: 12px; cursor: pointer; transition: all .2s;
+    }
+    .reddit-post:hover { border-color: #FF4500; background: rgba(255,69,0,.05); }
+    .reddit-post .rp-title { font-weight: 600; font-size: .88rem; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .reddit-post .rp-meta { font-size: .72rem; opacity: .5; display: flex; gap: 10px; margin-bottom: 6px; }
+    .reddit-post .rp-preview { font-size: .8rem; opacity: .6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
+
+    /* Reddit post detail modal */
+    .reddit-detail-body { font-size: .9rem; line-height: 1.6; color: var(--text-secondary); white-space: pre-wrap; max-height: 300px; overflow-y: auto; padding: 12px; background: rgba(0,0,0,.2); border-radius: 8px; margin: 12px 0; }
+    .reddit-detail-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .reddit-detail-actions button {
+        flex: 1; padding: 10px; border: none; border-radius: 8px; font-weight: 600;
+        font-size: .85rem; cursor: pointer; color: #fff; transition: all .2s; min-width: 140px;
+    }
+    .reddit-detail-actions button:hover { transform: translateY(-1px); }
+    .reddit-detail-actions button:disabled { opacity: .5; transform: none; cursor: not-allowed; }
+
+    /* Correção IA status */
+    .correction-status {
+        margin-top: 10px; padding: 10px 14px; border-radius: 8px;
+        font-size: .85rem; display: none;
+    }
+    .correction-status.active { display: block; }
+    .correction-status.pending { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.2); color: #f59e0b; }
+    .correction-status.done { background: rgba(34,197,94,.1); border: 1px solid rgba(34,197,94,.2); color: #22c55e; }
+    .correction-status.error { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.2); color: #ef4444; }
+
     @media (max-width: 860px) { .vb-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
@@ -113,7 +230,10 @@
     <div class="vb-head">
         <h1>🎬 Vídeo com Fundo</h1>
         <span class="vb-badge">Vídeo + Áudio + Legendas</span>
-        <a href="/video-bg/jobs" class="vb-btn vb-btn-ghost" style="margin:0 0 0 auto; padding:6px 14px;">🗂️ Histórico</a>
+        <div class="vb-head-actions">
+            <button class="vb-btn vb-btn-ghost" style="margin:0; padding:6px 14px;" onclick="openHowItWorksModal()">ℹ️ Como funciona</button>
+            <a href="/video-bg/jobs" class="vb-btn vb-btn-ghost" style="margin:0; padding:6px 14px;">🗂️ Histórico</a>
+        </div>
     </div>
 
     <div class="vb-grid">
@@ -230,31 +350,39 @@
                 🎬 Gerar Vídeo
             </button>
 
-            <!-- Barra de progresso -->
-            <div id="vb-progress-box" class="vb-progress hidden">
-                <div class="bar"><div id="vb-progress-fill" class="fill"></div></div>
-                <p id="vb-progress-detail" class="muted" style="margin-top: 6px;"></p>
-            </div>
+            <!-- Fila de vídeos -->
+            <div id="vb-queue" class="vb-queue"></div>
         </section>
 
-        <!-- Coluna de informações -->
+        <!-- Coluna direita — Buscar Reddit -->
         <section class="vb-card">
-            <h2>ℹ️ Como funciona</h2>
-            <div style="font-size: .88rem; color: var(--text-secondary); line-height: 1.6;">
-                <p><strong>1.</strong> Faça upload de um <strong>vídeo de fundo</strong> (gameplay, natureza, cenários, etc.)</p>
-                <p><strong>2.</strong> Escolha a partir de qual <strong>segundo</strong> do vídeo usar</p>
-                <p><strong>3.</strong> Selecione o <strong>áudio</strong>: envie um arquivo ou gere na hora com OmniVoice</p>
-                <p><strong>4.</strong> O sistema combina tudo e gera <strong>legendas automáticas</strong></p>
-                <p style="margin-top: 16px; padding: 10px; background: rgba(124,58,237,.1); border-radius: 8px; border-left: 3px solid #7c3aed;">
-                    💡 O vídeo final terá <strong>sempre a duração do áudio</strong>. Se o vídeo de fundo for mais curto, ele será repetido em loop.
-                </p>
+            <h2>🔍 Buscar Reddit</h2>
+
+            <div class="reddit-search-bar">
+                <input type="text" id="reddit-sub-input" placeholder="r/desabafos, tifu, nosleep..." value="">
+                <button id="reddit-search-btn" onclick="searchReddit()">Buscar</button>
             </div>
 
-            <h3 class="sub" style="margin-top: 24px;">Formatos suportados</h3>
-            <div style="font-size: .85rem; color: var(--text-secondary);">
-                <p>📹 <strong>Vídeo:</strong> MP4, MOV, AVI, MKV, WEBM</p>
-                <p>🎵 <strong>Áudio:</strong> MP3, WAV, OGG, M4A, FLAC</p>
+            <div class="reddit-sort-row">
+                <button class="reddit-sort-chip active" data-sort="hot">🔥 Hot</button>
+                <button class="reddit-sort-chip" data-sort="new">🆕 New</button>
+                <button class="reddit-sort-chip" data-sort="top">⬆️ Top</button>
+                <button class="reddit-sort-chip" data-sort="rising">📈 Rising</button>
             </div>
+
+            <div class="reddit-chips">
+                <span class="reddit-chip" data-sub="desabafos">r/desabafos</span>
+                <span class="reddit-chip" data-sub="tifu">r/tifu</span>
+                <span class="reddit-chip" data-sub="nosleep">r/nosleep</span>
+                <span class="reddit-chip" data-sub="AmItheAsshole">r/AITA</span>
+                <span class="reddit-chip" data-sub="relationship_advice">r/relationship</span>
+            </div>
+
+            <div id="reddit-results" class="reddit-results">
+                <p class="muted" style="text-align: center; padding: 20px 0;">Busque um subreddit para ver histórias 👆</p>
+            </div>
+
+            <button id="reddit-load-more-btn" class="vb-btn vb-btn-ghost" style="width: 100%; margin-top: 10px; display: none;" onclick="loadMoreReddit()">Carregar mais</button>
 
             <h3 class="sub" style="margin-top: 24px;">Últimos vídeos</h3>
             <div id="vb-recent-jobs" style="font-size: .85rem; color: var(--text-secondary);">
@@ -263,13 +391,60 @@
         </section>
     </div>
 </div>
+
+<!-- ── Modal: Como funciona ── -->
+<div id="how-it-works-modal" class="vb-modal-overlay" onclick="if(event.target===this) closeHowItWorksModal()">
+    <div class="vb-modal">
+        <button class="close-btn" onclick="closeHowItWorksModal()">×</button>
+        <h2>ℹ️ Como funciona</h2>
+        <div style="font-size: .88rem; color: var(--text-secondary); line-height: 1.6;">
+            <p><strong>1.</strong> Faça upload de um <strong>vídeo de fundo</strong> (gameplay, natureza, cenários, etc.)</p>
+            <p><strong>2.</strong> Escolha a partir de qual <strong>segundo</strong> do vídeo usar</p>
+            <p><strong>3.</strong> Selecione o <strong>áudio</strong>: envie um arquivo ou gere na hora com OmniVoice</p>
+            <p><strong>4.</strong> O sistema combina tudo e gera <strong>legendas automáticas</strong></p>
+            <p style="margin-top: 16px; padding: 10px; background: rgba(124,58,237,.1); border-radius: 8px; border-left: 3px solid #7c3aed;">
+                💡 O vídeo final terá <strong>sempre a duração do áudio</strong>. Se o vídeo de fundo for mais curto, ele será repetido em loop.
+            </p>
+        </div>
+
+        <h3 style="font-size: .78rem; opacity: .6; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: .5px;">Formatos suportados</h3>
+        <div style="font-size: .85rem; color: var(--text-secondary);">
+            <p>📹 <strong>Vídeo:</strong> MP4, MOV, AVI, MKV, WEBM</p>
+            <p>🎵 <strong>Áudio:</strong> MP3, WAV, OGG, M4A, FLAC</p>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal: Detalhes do Post Reddit ── -->
+<div id="reddit-detail-modal" class="vb-modal-overlay" onclick="if(event.target===this) closeRedditDetailModal()">
+    <div class="vb-modal" style="max-width: 620px;">
+        <button class="close-btn" onclick="closeRedditDetailModal()">×</button>
+        <h2 id="reddit-detail-title" style="padding-right: 30px;"></h2>
+        <div style="font-size: .75rem; opacity: .5; margin-bottom: 8px;" id="reddit-detail-meta"></div>
+        <div id="reddit-detail-body" class="reddit-detail-body"></div>
+
+        <!-- Status da correção IA -->
+        <div id="correction-status" class="correction-status"></div>
+
+        <div class="reddit-detail-actions">
+            <button onclick="correctWithAI()" id="btn-correct-ai" style="background: linear-gradient(135deg, #7c3aed, #a855f7);">
+                🤖 Corrigir com IA
+            </button>
+            <button onclick="useInOmniVoice()" id="btn-use-omni" style="background: linear-gradient(135deg, #16a34a, #22c55e);">
+                🎙️ Usar no OmniVoice
+            </button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 {{ super() }}
 <script>
 (function() {
-    // ── Tabs de fonte de áudio ──
+    // ══════════════════════════════════════════════════════
+    //  Tabs de fonte de áudio
+    // ══════════════════════════════════════════════════════
     const tabs = document.querySelectorAll('.audio-tab');
     const panels = document.querySelectorAll('.audio-panel');
     let currentSource = 'upload';
@@ -285,7 +460,9 @@
         });
     });
 
-    // ── Preview de vídeo ──
+    // ══════════════════════════════════════════════════════
+    //  Preview de vídeo
+    // ══════════════════════════════════════════════════════
     const bgVideoInput = document.getElementById('vb-bg-video');
     const videoPreview = document.getElementById('vb-video-preview');
     const offsetSlider = document.getElementById('vb-offset-slider');
@@ -328,7 +505,9 @@
         if (videoPreview.src) videoPreview.currentTime = val;
     });
 
-    // ── Carregar vozes e presets do OmniVoice ──
+    // ══════════════════════════════════════════════════════
+    //  Carregar vozes e presets do OmniVoice
+    // ══════════════════════════════════════════════════════
     async function loadVoices() {
         try {
             const res = await fetch('/audio/api/voices');
@@ -368,7 +547,9 @@
     loadVoices();
     loadPresets();
 
-    // ── Seleção de cores + color picker RGB ──
+    // ══════════════════════════════════════════════════════
+    //  Seleção de cores + color picker RGB
+    // ══════════════════════════════════════════════════════
     const colorOptions = document.querySelectorAll('.color-option');
     const colorInput = document.getElementById('vb-intro-color');
     const colorPicker = document.getElementById('vb-intro-color-picker');
@@ -387,24 +568,28 @@
         colorInput.value = colorPicker.value;
     });
 
-    // ── Toggle de intro (mostra/esconde opções) ──
+    // ══════════════════════════════════════════════════════
+    //  Toggle de intro (mostra/esconde opções)
+    // ══════════════════════════════════════════════════════
     const introEnabled = document.getElementById('vb-intro-enabled');
     const introOptions = document.getElementById('vb-intro-options');
     introEnabled.addEventListener('change', () => {
         introOptions.style.display = introEnabled.checked ? 'block' : 'none';
     });
 
-    // ── Slider de duração da intro ──
+    // ══════════════════════════════════════════════════════
+    //  Slider de duração da intro
+    // ══════════════════════════════════════════════════════
     const introDur = document.getElementById('vb-intro-duration');
     const introDurSlider = document.getElementById('vb-intro-duration-slider');
     introDurSlider.addEventListener('input', () => { introDur.value = introDurSlider.value; });
     introDur.addEventListener('input', () => { introDurSlider.value = introDur.value; });
 
-    // ── Submit ──
+    // ══════════════════════════════════════════════════════
+    //  FILA DE VÍDEOS — Submit com queue
+    // ══════════════════════════════════════════════════════
     const submitBtn = document.getElementById('vb-submit-btn');
-    const progressBox = document.getElementById('vb-progress-box');
-    const progressFill = document.getElementById('vb-progress-fill');
-    const progressDetail = document.getElementById('vb-progress-detail');
+    const queueContainer = document.getElementById('vb-queue');
 
     submitBtn.addEventListener('click', async () => {
         const title = document.getElementById('vb-title').value.trim();
@@ -442,9 +627,6 @@
 
         submitBtn.disabled = true;
         submitBtn.textContent = '⏳ Enviando...';
-        progressBox.classList.remove('hidden');
-        progressFill.style.width = '10%';
-        progressDetail.textContent = 'Enviando arquivos...';
 
         try {
             const res = await fetch('/video-bg/render', { method: 'POST', body: form });
@@ -454,59 +636,429 @@
                 alert('Erro: ' + (data.error || 'Erro desconhecido'));
                 submitBtn.disabled = false;
                 submitBtn.textContent = '🎬 Gerar Vídeo';
-                progressBox.classList.add('hidden');
                 return;
             }
 
-            progressFill.style.width = '30%';
-            progressDetail.textContent = 'Job criado! Acompanhando progresso...';
+            // Adicionar à fila visual
+            addToQueue(data.job_id, title);
 
-            // SSE para progresso
+            // Resetar formulário para próximo vídeo
+            document.getElementById('vb-title').value = '';
+            if (currentSource === 'upload') {
+                document.getElementById('vb-audio-file').value = '';
+            } else {
+                document.getElementById('vb-omni-text').value = '';
+            }
+
+            submitBtn.disabled = false;
+            submitBtn.textContent = '🎬 Gerar Vídeo';
+
+        } catch(e) {
+            alert('Erro de rede: ' + e.message);
+            submitBtn.disabled = false;
+            submitBtn.textContent = '🎬 Gerar Vídeo';
+        }
+    });
+
+    function addToQueue(jobId, title) {
+        const item = document.createElement('div');
+        item.className = 'vb-queue-item';
+        item.id = `qi-${jobId}`;
+        item.innerHTML = `
+            <div class="qi-header">
+                <span class="qi-title">🎬 ${escapeHtml(title)}</span>
+                <span class="qi-status pending">⏳ Na fila</span>
+            </div>
+            <div class="vb-progress">
+                <div class="bar"><div class="fill" style="width: 5%;"></div></div>
+            </div>
+            <div class="qi-detail">Aguardando worker...</div>
+        `;
+        queueContainer.prepend(item);
+
+        // Conectar SSE para acompanhar progresso
+        trackJobProgress(jobId);
+    }
+
+    function trackJobProgress(jobId) {
+        const item = document.getElementById(`qi-${jobId}`);
+        if (!item) return;
+
+        const statusEl = item.querySelector('.qi-status');
+        const fillEl = item.querySelector('.fill');
+        const detailEl = item.querySelector('.qi-detail');
+
+        const evtSource = new EventSource(`/api/jobs/${jobId}/stream`);
+
+        evtSource.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.progress !== undefined) {
+                    fillEl.style.width = msg.progress + '%';
+                }
+                if (msg.detail) {
+                    detailEl.textContent = msg.detail;
+                }
+                if (msg.status === 'processing' || msg.status === 'rendering') {
+                    statusEl.className = 'qi-status processing';
+                    statusEl.textContent = '⚙️ Processando';
+                }
+                if (msg.status === 'done') {
+                    evtSource.close();
+                    fillEl.style.width = '100%';
+                    statusEl.className = 'qi-status done';
+                    statusEl.textContent = '✅ Pronto';
+                    detailEl.innerHTML = `<a href="/video-bg/video/${jobId}" class="qi-link">Ver detalhes →</a>`;
+                }
+                if (msg.status === 'error') {
+                    evtSource.close();
+                    fillEl.style.width = '0%';
+                    statusEl.className = 'qi-status error';
+                    statusEl.textContent = '❌ Erro';
+                    detailEl.textContent = msg.detail || 'Erro desconhecido';
+                }
+            } catch(e) {}
+        };
+
+        evtSource.onerror = () => {
+            evtSource.close();
+            detailEl.textContent = 'Conexão perdida. Verifique no histórico.';
+        };
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  MODAL — Como funciona
+    // ══════════════════════════════════════════════════════
+    window.openHowItWorksModal = function() {
+        document.getElementById('how-it-works-modal').classList.add('show');
+    };
+    window.closeHowItWorksModal = function() {
+        document.getElementById('how-it-works-modal').classList.remove('show');
+    };
+
+    // ══════════════════════════════════════════════════════
+    //  BUSCAR REDDIT
+    // ══════════════════════════════════════════════════════
+    let currentRedditSort = 'hot';
+    let currentRedditPosts = [];
+    let selectedPostText = '';
+    let currentRedditAfter = '';
+
+    // Sort chips
+    document.querySelectorAll('.reddit-sort-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            document.querySelectorAll('.reddit-sort-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+            currentRedditSort = chip.dataset.sort;
+        });
+    });
+
+    // Subreddit chips
+    document.querySelectorAll('.reddit-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            document.getElementById('reddit-sub-input').value = chip.dataset.sub;
+            searchReddit();
+        });
+    });
+
+    // Enter para buscar
+    document.getElementById('reddit-sub-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') searchReddit();
+    });
+
+    window.searchReddit = async function() {
+        const input = document.getElementById('reddit-sub-input');
+        const sub = input.value.trim();
+        if (!sub) return;
+
+        const btn = document.getElementById('reddit-search-btn');
+        const results = document.getElementById('reddit-results');
+        const loadMoreBtn = document.getElementById('reddit-load-more-btn');
+
+        btn.disabled = true;
+        btn.textContent = '⏳';
+        loadMoreBtn.style.display = 'none';
+        results.innerHTML = '<p class="muted" style="text-align:center; padding: 20px;">Buscando...</p>';
+        currentRedditAfter = '';
+        currentRedditPosts = [];
+
+        try {
+            const form = new FormData();
+            form.append('subreddit', sub);
+            form.append('sort', currentRedditSort);
+            form.append('limit', '25');
+            form.append('after', '');
+
+            const res = await fetch('/video-bg/reddit-search', { method: 'POST', body: form });
+            const data = await res.json();
+
+            if (!res.ok) {
+                results.innerHTML = `<p class="muted" style="text-align:center; padding: 20px; color: #ef4444;">❌ ${data.error || 'Erro ao buscar.'}</p>`;
+                return;
+            }
+
+            currentRedditPosts = data.posts || [];
+            currentRedditAfter = data.after || '';
+
+            if (currentRedditPosts.length === 0) {
+                results.innerHTML = '<p class="muted" style="text-align:center; padding: 20px;">Nenhum post de texto encontrado neste subreddit.</p>';
+                return;
+            }
+
+            results.innerHTML = currentRedditPosts.map((post, i) => `
+                <div class="reddit-post" onclick="openRedditPost(${i})">
+                    <div class="rp-title">${escapeHtml(post.title)}</div>
+                    <div class="rp-meta">
+                        <span>👤 u/${escapeHtml(post.author)}</span>
+                        <span>⬆️ ${post.score}</span>
+                        <span>💬 ${post.num_comments}</span>
+                    </div>
+                    <div class="rp-preview">${escapeHtml(post.selftext.substring(0, 200))}...</div>
+                </div>
+            `).join('');
+
+            if (currentRedditAfter) {
+                loadMoreBtn.style.display = 'block';
+            }
+
+        } catch(e) {
+            results.innerHTML = `<p class="muted" style="text-align:center; padding: 20px; color: #ef4444;">❌ Erro de rede: ${e.message}</p>`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Buscar';
+        }
+    };
+
+    window.loadMoreReddit = async function() {
+        const input = document.getElementById('reddit-sub-input');
+        const sub = input.value.trim();
+        if (!sub || !currentRedditAfter) return;
+
+        const loadMoreBtn = document.getElementById('reddit-load-more-btn');
+        const results = document.getElementById('reddit-results');
+
+        loadMoreBtn.disabled = true;
+        loadMoreBtn.textContent = '⏳ Carregando...';
+
+        try {
+            const form = new FormData();
+            form.append('subreddit', sub);
+            form.append('sort', currentRedditSort);
+            form.append('limit', '25');
+            form.append('after', currentRedditAfter);
+
+            const res = await fetch('/video-bg/reddit-search', { method: 'POST', body: form });
+            const data = await res.json();
+
+            if (!res.ok) {
+                alert('Erro ao carregar mais posts: ' + (data.error || 'Erro desconhecido'));
+                return;
+            }
+
+            const newPosts = data.posts || [];
+            const oldLength = currentRedditPosts.length;
+            currentRedditPosts = currentRedditPosts.concat(newPosts);
+            currentRedditAfter = data.after || '';
+
+            if (newPosts.length === 0) {
+                loadMoreBtn.style.display = 'none';
+                alert('Não há mais posts para carregar.');
+                return;
+            }
+
+            const newHtml = newPosts.map((post, i) => `
+                <div class="reddit-post" onclick="openRedditPost(${oldLength + i})">
+                    <div class="rp-title">${escapeHtml(post.title)}</div>
+                    <div class="rp-meta">
+                        <span>👤 u/${escapeHtml(post.author)}</span>
+                        <span>⬆️ ${post.score}</span>
+                        <span>💬 ${post.num_comments}</span>
+                    </div>
+                    <div class="rp-preview">${escapeHtml(post.selftext.substring(0, 200))}...</div>
+                </div>
+            `).join('');
+
+            results.insertAdjacentHTML('beforeend', newHtml);
+
+            if (currentRedditAfter) {
+                loadMoreBtn.style.display = 'block';
+            } else {
+                loadMoreBtn.style.display = 'none';
+            }
+
+        } catch(e) {
+            alert('Erro de rede ao carregar mais posts: ' + e.message);
+        } finally {
+            loadMoreBtn.disabled = false;
+            loadMoreBtn.textContent = 'Carregando mais';
+        }
+    };
+
+
+    // ══════════════════════════════════════════════════════
+    //  MODAL — Detalhes do Post Reddit
+    // ══════════════════════════════════════════════════════
+    window.openRedditPost = function(index) {
+        const post = currentRedditPosts[index];
+        if (!post) return;
+
+        selectedPostText = post.selftext;
+
+        document.getElementById('reddit-detail-title').textContent = post.title;
+        document.getElementById('reddit-detail-meta').textContent = `👤 u/${post.author} · ⬆️ ${post.score} · 💬 ${post.num_comments}`;
+        document.getElementById('reddit-detail-body').textContent = post.selftext;
+
+        // Reset correction status
+        const statusEl = document.getElementById('correction-status');
+        statusEl.className = 'correction-status';
+        statusEl.textContent = '';
+        document.getElementById('btn-correct-ai').disabled = false;
+        document.getElementById('btn-correct-ai').textContent = '🤖 Corrigir com IA';
+
+        document.getElementById('reddit-detail-modal').classList.add('show');
+    };
+
+    window.closeRedditDetailModal = function() {
+        document.getElementById('reddit-detail-modal').classList.remove('show');
+    };
+
+    // ══════════════════════════════════════════════════════
+    //  CORRIGIR COM IA
+    // ══════════════════════════════════════════════════════
+    window.correctWithAI = async function() {
+        const btn = document.getElementById('btn-correct-ai');
+        const statusEl = document.getElementById('correction-status');
+        const bodyEl = document.getElementById('reddit-detail-body');
+
+        if (!selectedPostText.trim()) return alert('Texto vazio.');
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Enviando...';
+        statusEl.className = 'correction-status active pending';
+        statusEl.textContent = '⏳ Enviando texto para a IA...';
+
+        try {
+            const form = new FormData();
+            form.append('raw_text', selectedPostText);
+
+            const res = await fetch('/video-bg/correct-text', { method: 'POST', body: form });
+            const data = await res.json();
+
+            if (!res.ok) {
+                statusEl.className = 'correction-status active error';
+                statusEl.textContent = '❌ ' + (data.error || 'Erro ao enviar.');
+                btn.disabled = false;
+                btn.textContent = '🤖 Corrigir com IA';
+                return;
+            }
+
+            statusEl.textContent = '⚙️ Processando correção...';
+
+            // SSE para acompanhar correção
             const jobId = data.job_id;
-            const evtSource = new EventSource(`/api/jobs/${jobId}/stream`);
+            const evtSource = new EventSource(`/api/correction/${jobId}/stream`);
 
             evtSource.onmessage = (event) => {
                 try {
                     const msg = JSON.parse(event.data);
-                    if (msg.progress !== undefined) {
-                        progressFill.style.width = msg.progress + '%';
+
+                    if (msg.status === 'processing') {
+                        statusEl.textContent = '⚙️ IA processando...';
                     }
-                    if (msg.detail) {
-                        progressDetail.textContent = msg.detail;
-                    }
+
                     if (msg.status === 'done') {
                         evtSource.close();
-                        progressFill.style.width = '100%';
-                        progressDetail.innerHTML = '✅ Vídeo pronto! <a href="/video-bg/video/' + jobId + '" style="color: #a855f7; font-weight: 600;">Ver detalhes →</a>';
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = '🎬 Gerar Vídeo';
+                        statusEl.className = 'correction-status active done';
+                        statusEl.textContent = '✅ Texto corrigido com sucesso!';
+
+                        // Buscar texto corrigido
+                        fetchCorrectedText(jobId, bodyEl, btn);
                     }
+
                     if (msg.status === 'error') {
                         evtSource.close();
-                        progressFill.style.width = '0%';
-                        progressDetail.textContent = '❌ Erro: ' + (msg.detail || 'Erro desconhecido');
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = '🎬 Gerar Vídeo';
+                        statusEl.className = 'correction-status active error';
+                        statusEl.textContent = '❌ ' + (msg.detail || 'Erro na correção.');
+                        btn.disabled = false;
+                        btn.textContent = '🤖 Corrigir com IA';
                     }
                 } catch(e) {}
             };
 
             evtSource.onerror = () => {
                 evtSource.close();
-                progressDetail.textContent = 'Conexão de progresso perdida. Verifique no histórico.';
-                submitBtn.disabled = false;
-                submitBtn.textContent = '🎬 Gerar Vídeo';
+                // Fallback: poll pelo resultado
+                setTimeout(() => fetchCorrectedText(jobId, bodyEl, btn), 2000);
             };
 
         } catch(e) {
-            alert('Erro de rede: ' + e.message);
-            submitBtn.disabled = false;
-            submitBtn.textContent = '🎬 Gerar Vídeo';
-            progressBox.classList.add('hidden');
+            statusEl.className = 'correction-status active error';
+            statusEl.textContent = '❌ Erro de rede: ' + e.message;
+            btn.disabled = false;
+            btn.textContent = '🤖 Corrigir com IA';
+        }
+    };
+
+    async function fetchCorrectedText(jobId, bodyEl, btn) {
+        try {
+            // Usa o endpoint de consulta do WhatsApp (mesmo sistema)
+            const res = await fetch(`/whatsapp/correct-text/${jobId}`);
+            const data = await res.json();
+            if (data.corrected_text) {
+                selectedPostText = data.corrected_text;
+                bodyEl.textContent = data.corrected_text;
+            }
+        } catch(e) {
+            console.warn('Erro ao buscar texto corrigido:', e);
+        }
+        btn.disabled = false;
+        btn.textContent = '🤖 Corrigir novamente';
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  USAR NO OMNIVOICE
+    // ══════════════════════════════════════════════════════
+    window.useInOmniVoice = function() {
+        const text = selectedPostText;
+        if (!text.trim()) return alert('Nenhum texto para usar.');
+
+        // Preencher textarea de narração
+        document.getElementById('vb-omni-text').value = text;
+
+        // Trocar para aba OmniVoice
+        tabs.forEach(t => t.classList.remove('active'));
+        panels.forEach(p => p.classList.remove('active'));
+        const omniTab = document.querySelector('[data-source="omni"]');
+        omniTab.classList.add('active');
+        document.querySelector('[data-panel="omni"]').classList.add('active');
+        currentSource = 'omni';
+
+        // Fechar modal
+        closeRedditDetailModal();
+
+        // Scroll para o textarea
+        document.getElementById('vb-omni-text').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+
+    // ══════════════════════════════════════════════════════
+    //  Esc para fechar modais
+    // ══════════════════════════════════════════════════════
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeHowItWorksModal();
+            closeRedditDetailModal();
         }
     });
 
-    // ── Carregar jobs recentes ──
+    // ══════════════════════════════════════════════════════
+    //  Carregar jobs recentes
+    // ══════════════════════════════════════════════════════
     async function loadRecentJobs() {
         try {
             const res = await fetch('/video-bg/jobs');

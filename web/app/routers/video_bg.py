@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import httpx
+
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -24,7 +26,9 @@ from app.auth import get_current_user
 from app.config import BASE_DIR, TEMPLATES_DIR
 from app.drive import get_drive
 from app.publisher import publish_job
+from app.publisher_agent import publish_correction_job
 from app.repositories import jobs as jobs_repo
+from app.repositories import text_corrections as corrections_repo
 from app.video_types import get_video_type
 
 logger = logging.getLogger(__name__)
@@ -269,4 +273,232 @@ async def render_video_bg(
 
     except Exception as e:
         logger.exception(f"Erro ao criar job video_bg: {e}")
+        return JSONResponse({"error": f"Erro interno: {e}"}, status_code=500)
+
+
+# ── Busca no Reddit (proxy) ──
+
+REDDIT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+              "image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Cache-Control": "max-age=0",
+}
+
+
+def _parse_reddit_listing(data: dict) -> tuple[list[dict], str | None]:
+    """Extrai posts de texto de um listing JSON do Reddit.
+
+    Retorna (posts, after_token) para paginação.
+    """
+    posts = []
+    after_token = data.get("data", {}).get("after")
+    for child in data.get("data", {}).get("children", []):
+        p = child.get("data", {})
+        if not p.get("selftext"):
+            continue
+        posts.append({
+            "id": p.get("id"),
+            "title": p.get("title", ""),
+            "selftext": p.get("selftext", ""),
+            "author": p.get("author", "[deleted]"),
+            "score": p.get("score", 0),
+            "num_comments": p.get("num_comments", 0),
+            "url": f"https://reddit.com{p.get('permalink', '')}",
+            "created_utc": p.get("created_utc", 0),
+        })
+    return posts, after_token
+
+
+async def _fetch_reddit_session(
+    subreddit: str, sort: str, limit: int, after: str = "",
+) -> tuple[list[dict], str | None] | None:
+    """Tenta buscar via sessão com cookies (simula navegador visitando a página)."""
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            follow_redirects=True,
+        ) as client:
+            # 1. Visita a página HTML primeiro para capturar cookies
+            page_url = f"https://old.reddit.com/r/{subreddit}"
+            await client.get(page_url, headers=REDDIT_HEADERS)
+
+            # 2. Agora busca o JSON com os cookies da sessão
+            json_headers = {**REDDIT_HEADERS, "Accept": "application/json"}
+            json_url = f"https://old.reddit.com/r/{subreddit}/{sort}.json?limit={limit}&raw_json=1"
+            if after:
+                json_url += f"&after={after}"
+            resp = await client.get(json_url, headers=json_headers)
+
+            if resp.status_code == 404:
+                return None
+            if resp.status_code in (403, 429):
+                logger.warning(f"Reddit sessão: {resp.status_code} para r/{subreddit}")
+                return None
+
+            resp.raise_for_status()
+            posts, after_token = _parse_reddit_listing(resp.json())
+            return posts, after_token
+
+    except Exception as e:
+        logger.warning(f"Reddit sessão falhou para r/{subreddit}: {e}")
+        return None
+
+
+async def _fetch_pullpush(
+    subreddit: str, sort: str, limit: int, after: str = "",
+) -> tuple[list[dict], str | None] | None:
+    """Fallback: usa Pullpush API (indexador de posts do Reddit, sem auth)."""
+    try:
+        offset = int(after) if after else 0
+        url = (
+            f"https://api.pullpush.io/reddit/search/submission/"
+            f"?subreddit={subreddit}&size={limit}&sort=desc"
+            f"&sort_type={'score' if sort in ('hot', 'top') else 'created_utc'}"
+            f"&is_self=true"
+        )
+        if offset:
+            url += f"&after={offset}"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url)
+
+        if resp.status_code != 200:
+            logger.warning(f"Pullpush retornou {resp.status_code} para r/{subreddit}")
+            return None
+
+        data = resp.json()
+        items = data.get("data", [])
+        if not items:
+            return None
+
+        posts = []
+        for p in items:
+            if not p.get("selftext") or p.get("selftext") in ("[removed]", "[deleted]"):
+                continue
+            posts.append({
+                "id": p.get("id", ""),
+                "title": p.get("title", ""),
+                "selftext": p.get("selftext", ""),
+                "author": p.get("author", "[deleted]"),
+                "score": p.get("score", 0),
+                "num_comments": p.get("num_comments", 0),
+                "url": f"https://reddit.com/r/{subreddit}/comments/{p.get('id', '')}/",
+                "created_utc": p.get("created_utc", 0),
+            })
+
+        # Próximo offset para paginação
+        next_after = str(offset + limit) if len(items) >= limit else None
+        return posts, next_after
+
+    except Exception as e:
+        logger.warning(f"Pullpush falhou para r/{subreddit}: {e}")
+        return None
+
+
+@router.post("/reddit-search")
+async def reddit_search(
+    request: Request,
+    subreddit: str = Form(...),
+    sort: str = Form("hot"),
+    limit: int = Form(50),
+    after: str = Form(""),
+):
+    """Busca posts no Reddit por subreddit e retorna JSON simplificado.
+
+    Suporta paginação via token 'after'. Estratégias:
+    1. Sessão com cookies — simula navegador visitando a página
+    2. Pullpush API — indexador alternativo (fallback)
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
+    subreddit = subreddit.strip().lstrip("r/").strip("/")
+    if not subreddit:
+        return JSONResponse({"error": "Subreddit vazio."}, status_code=400)
+
+    sort = sort if sort in ("hot", "new", "top", "rising") else "hot"
+    limit = max(1, min(limit, 100))
+
+    # Estratégia 1: Sessão com cookies
+    logger.info(f"Buscando r/{subreddit} ({sort}, after={after or 'none'}) — sessão...")
+    result = await _fetch_reddit_session(subreddit, sort, limit, after)
+
+    if result is not None:
+        posts, after_token = result
+        logger.info(f"r/{subreddit}: {len(posts)} posts via sessão")
+        return JSONResponse({
+            "subreddit": subreddit, "posts": posts,
+            "source": "reddit", "after": after_token,
+        })
+
+    # Estratégia 2: Pullpush API
+    logger.info(f"Sessão falhou, tentando Pullpush para r/{subreddit}...")
+    result = await _fetch_pullpush(subreddit, sort, limit, after)
+
+    if result is not None:
+        posts, after_token = result
+        logger.info(f"r/{subreddit}: {len(posts)} posts via Pullpush")
+        return JSONResponse({
+            "subreddit": subreddit, "posts": posts,
+            "source": "pullpush", "after": after_token,
+        })
+
+    # Tudo falhou
+    logger.error(f"Todas as estratégias falharam para r/{subreddit}")
+    return JSONResponse(
+        {"error": f"Não foi possível buscar r/{subreddit}. Tente outro subreddit ou aguarde alguns minutos."},
+        status_code=502,
+    )
+
+
+# ── Correção de Texto via IA ──
+
+@router.post("/correct-text")
+async def correct_text(
+    request: Request,
+    raw_text: str = Form(...),
+):
+    """Submete texto para correção via agente IA (Gemini).
+
+    Reutiliza o sistema de text_correction_jobs existente.
+    O frontend acompanha via SSE em /api/correction/{job_id}/stream.
+    """
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+    if PERM not in user.get("permissions", []):
+        return JSONResponse({"error": "Sem permissão"}, status_code=403)
+    if "use_ai" not in user.get("permissions", []):
+        return JSONResponse({"error": "Sem permissão para usar a IA"}, status_code=403)
+
+    try:
+        if not raw_text.strip():
+            return JSONResponse(
+                {"error": "Texto vazio."},
+                status_code=400,
+            )
+
+        provider = "gemini"
+        job_id = uuid.uuid4().hex[:8]
+
+        # Salvar no MySQL
+        corrections_repo.create_job(job_id, raw_text.strip(), provider, user_id=user["id"])
+
+        # Publicar na fila do agente
+        await publish_correction_job(job_id, raw_text.strip(), provider)
+
+        logger.info(f"[{job_id}] Job de correção (video_bg) criado → provider={provider}")
+        return JSONResponse({"job_id": job_id, "status": "queued"})
+
+    except Exception as e:
+        logger.exception(f"Erro ao criar job de correção: {e}")
         return JSONResponse({"error": f"Erro interno: {e}"}, status_code=500)
