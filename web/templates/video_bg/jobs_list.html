@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico — Vídeo com Fundo{% endblock %}
+
+{% block extra_css %}
+<style>
+    .back-link { display:inline-flex; align-items:center; gap:6px; color:var(--text-muted); text-decoration:none; font-size:14px; margin-bottom:20px; }
+    .back-link:hover { color:var(--text-primary); }
+    .jobs-grid { display:grid; gap:16px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="/video-bg" class="back-link">← Voltar para Vídeo com Fundo</a>
+
+<section class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <h2 class="card-title" style="margin-bottom: 0;">
+            <span class="card-icon">🎬</span>
+            Histórico de Vídeo com Fundo
+        </h2>
+        <div style="display: flex; gap: 12px; align-items: center;">
+            <input type="text" id="job-search" placeholder="Buscar por título ou ID..." 
+                   onkeyup="filterJobs()" 
+                   style="padding: 0.5rem 1rem; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: var(--text-primary); font-size: 0.9rem; min-width: 250px;">
+        </div>
+    </div>
+    <div class="jobs-list jobs-grid" id="jobs-list">
+        {% if jobs %}
+            {% for job in jobs %}
+            <div class="job-item" data-job-id="{{ job.job_id }}">
+                <div class="job-info">
+                    <span class="job-name">{{ job.title }}</span>
+                    <span class="job-id">#{{ job.job_id }}</span>
+                    <span class="job-type-badge">video_bg</span>
+                    <span class="job-status-badge {{ job.status }}" style="margin-left: 10px; font-size: 11px;">{{ job.status }}</span>
+                </div>
+                <div class="job-actions">
+                    <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 13px;" onclick="openRenameModal('{{ job.job_id }}', '{{ job.title | e }}')">✏️ Renomear</button>
+                    <a href="/video-bg/video/{{ job.job_id }}" class="btn btn-detail">🔍 Detalhes</a>
+                    <button class="btn btn-delete" onclick="deleteJob('{{ job.job_id }}')">🗑️</button>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="jobs-empty">
+                <span class="empty-icon">🎬</span>
+                <p>Nenhum vídeo gerado ainda</p>
+            </div>
+        {% endif %}
+    </div>
+</section>
+
+<!-- Modal Renomear -->
+<div id="rename-modal" class="modal-overlay" style="display:none; z-index: 9999;">
+    <div class="modal-content" style="max-width: 420px;">
+        <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <h2 style="margin:0;font-size:1.3rem;">✏️ Renomear Vídeo</h2>
+            <button type="button" style="background:none;border:none;color:white;font-size:24px;cursor:pointer;" onclick="closeRenameModal()">×</button>
+        </div>
+        <div class="modal-body" style="padding-top:16px;">
+            <div class="form-group">
+                <label style="display:block;margin-bottom:8px;color:var(--text-secondary);font-size:14px;">Novo título</label>
+                <input type="text" id="rename-input" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--bg-input);color:white;font-size:15px;box-sizing:border-box;">
+            </div>
+            <button id="btn-rename-confirm" class="btn-primary" style="width:100%;margin-top:16px;padding:12px;font-size:15px;border-radius:10px;border:none;cursor:pointer;" onclick="submitRename()">
+                Salvar
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Deleção -->
+<div id="delete-modal" class="modal-overlay" style="display:none; z-index: 9999;">
+    <div class="modal-content" style="max-width: 400px; text-align: center;">
+        <div class="modal-header" style="justify-content: center; border-bottom: none;">
+            <h2 style="margin: 0; font-size: 1.5rem;">🗑️ Excluir Vídeo</h2>
+        </div>
+        <div class="modal-body" style="padding-top: 0;">
+            <p style="color: var(--text-secondary); margin-bottom: 24px;">Tem certeza que deseja excluir este vídeo?</p>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <button class="btn btn-danger" style="width: 100%; justify-content: center; padding: 12px; background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="submitDelete()">
+                    🗑️ Excluir
+                </button>
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; background: transparent; border: none;" onclick="closeDeleteModal()">
+                    Cancelar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Filtrar jobs ──
+function filterJobs() {
+    const q = document.getElementById('job-search').value.toLowerCase();
+    document.querySelectorAll('.job-item').forEach(item => {
+        const name = item.querySelector('.job-name')?.textContent?.toLowerCase() || '';
+        const id = item.querySelector('.job-id')?.textContent?.toLowerCase() || '';
+        item.style.display = (name.includes(q) || id.includes(q)) ? '' : 'none';
+    });
+}
+
+// ── Deletar ──
+let deleteJobId = null;
+function deleteJob(jobId) {
+    deleteJobId = jobId;
+    document.getElementById('delete-modal').style.display = 'flex';
+}
+function closeDeleteModal() {
+    document.getElementById('delete-modal').style.display = 'none';
+    deleteJobId = null;
+}
+async function submitDelete() {
+    if (!deleteJobId) return;
+    try {
+        const res = await fetch(`/api/jobs/${deleteJobId}`, { method: 'DELETE' });
+        if (res.ok) {
+            const item = document.querySelector(`[data-job-id="${deleteJobId}"]`);
+            if (item) item.remove();
+            closeDeleteModal();
+        } else {
+            alert('Erro ao excluir.');
+        }
+    } catch(e) {
+        alert('Erro de rede.');
+    }
+}
+
+// ── Renomear ──
+let currentRenameJobId = null;
+
+function openRenameModal(jobId, currentTitle) {
+    currentRenameJobId = jobId;
+    document.getElementById('rename-input').value = currentTitle;
+    document.getElementById('rename-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('rename-input').focus(), 100);
+}
+
+function closeRenameModal() {
+    document.getElementById('rename-modal').style.display = 'none';
+    currentRenameJobId = null;
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && currentRenameJobId) submitRename();
+    if (e.key === 'Escape') { closeRenameModal(); closeDeleteModal(); }
+});
+
+async function submitRename() {
+    if (!currentRenameJobId) return;
+    const newTitle = document.getElementById('rename-input').value.trim();
+    if (!newTitle) return;
+
+    const btn = document.getElementById('btn-rename-confirm');
+    btn.disabled = true;
+    btn.textContent = 'Salvando...';
+
+    try {
+        const res = await fetch(`/api/jobs/${currentRenameJobId}/rename`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            const item = document.querySelector(`[data-job-id="${currentRenameJobId}"]`);
+            if (item) {
+                const nameEl = item.querySelector('.job-name');
+                if (nameEl) nameEl.textContent = newTitle;
+            }
+            closeRenameModal();
+        } else {
+            alert('Erro: ' + (data.error || ''));
+        }
+    } catch(e) {
+        alert('Erro de rede');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Salvar';
+    }
+}
+</script>
+{% endblock %}

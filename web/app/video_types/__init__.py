@@ -8,12 +8,14 @@ Para adicionar um novo tipo de vídeo:
 from .base import VideoTypeConfig
 from .whatsapp import WhatsAppVideoType
 from .whatsapp_extract import WhatsAppExtractVideoType
+from .video_bg import VideoBgVideoType
 
 # ── Registry ──
 # Para adicionar novos tipos: basta inserir aqui
 REGISTRY: dict[str, VideoTypeConfig] = {
     "whatsapp": WhatsAppVideoType(),
     "whatsapp_extract": WhatsAppExtractVideoType(),
+    "video_bg": VideoBgVideoType(),
     # Futuramente:
     # "reddit": RedditVideoType(),
     # "twitter": TwitterVideoType(),

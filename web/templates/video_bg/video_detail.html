@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}{{ job.title }} — Vídeo com Fundo{% endblock %}
+
+{% block extra_css %}
+<style>
+    .detail-header { display:flex; align-items:center; gap:16px; margin-bottom:24px; }
+    .detail-title { font-size:2rem; font-weight:800; background: linear-gradient(135deg, #7c3aed, #a855f7); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .action-row { display:flex; gap:12px; flex-wrap:wrap; margin-top:24px; }
+    .btn-primary-vb { background: linear-gradient(135deg, #7c3aed, #a855f7); color:#fff; border:none; padding:12px 24px; border-radius:12px; font-size:15px; font-weight:600; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:8px; }
+    .btn-secondary-vb { background:rgba(255, 255, 255, 0.03); border:1px solid rgba(255, 255, 255, 0.08); color:var(--text-primary); padding:12px 24px; border-radius:12px; font-size:15px; font-weight:600; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:8px; }
+    .btn-secondary-vb:hover, .btn-primary-vb:hover { opacity:.85; transform:translateY(-1px); }
+    .back-link { display:inline-flex; align-items:center; gap:6px; color:var(--text-muted); text-decoration:none; font-size:14px; margin-bottom:20px; }
+    .back-link:hover { color:var(--text-primary); }
+
+    .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px; }
+    .info-item { background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:14px; }
+    .info-item .label { font-size:.75rem; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted); margin-bottom:4px; }
+    .info-item .value { font-size:1rem; font-weight:600; }
+
+    .video-player { width:100%; max-width:720px; border-radius:12px; background:#000; margin:16px 0; }
+
+    @media (max-width: 768px) { .info-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="/video-bg/jobs" class="back-link">← Voltar para Histórico</a>
+
+<section class="card">
+    <div class="detail-header">
+        <div>
+            <div class="detail-title">{{ job.title }}</div>
+            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;">
+                <span class="job-type-badge">video_bg</span>
+                <span class="job-id">#{{ job.job_id }}</span>
+                <span style="font-size:12px;color:var(--text-muted);">Criado em: {{ job.get('created_at', '')[:16] }}</span>
+            </div>
+        </div>
+        <div style="margin-left:auto;">
+            <span id="status-badge" class="job-status-badge {{ job.status }}">{{ job.status }}</span>
+        </div>
+    </div>
+
+    <!-- Progresso -->
+    <div id="detail-progress" style="{% if job.status not in ['rendering','preparing','composing','pending','generating_audio','generating_subtitles'] %}display:none{% endif %}">
+        <div style="margin:16px 0;">
+            <div style="width: 100%; height: 8px; background: rgba(255, 255, 255, 0.06); border-radius: 4px; overflow: hidden; margin-bottom: 8px;">
+                <div id="detail-bar" style="width:{{ job.progress }}%; height: 100%; background: linear-gradient(90deg, #7c3aed, #a855f7); transition: width 0.3s ease;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-secondary);">
+                <span id="detail-detail">{{ job.detail }}</span>
+                <span id="detail-percent">{{ job.get('progress', 0)|int }}%</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Erro -->
+    {% if job.error %}
+    <div style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px;margin:12px 0;color:#f87171;">
+        ⚠️ {{ job.error }}
+    </div>
+    {% endif %}
+
+    <!-- Vídeo final -->
+    {% if job.video_url %}
+    <h3 style="margin:16px 0 8px; color:var(--text-primary);">🎬 Vídeo Gerado</h3>
+    <video class="video-player" controls>
+        <source src="{{ job.video_url }}" type="video/mp4">
+        Seu navegador não suporta a tag video.
+    </video>
+    {% endif %}
+
+    <!-- Ações -->
+    <div class="action-row" style="margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle);">
+        {% if job.video_url %}
+        <a href="https://drive.google.com/uc?export=download&id={{ job.video_drive_id }}" class="btn-primary-vb" download>⬇️ Baixar Vídeo</a>
+        <a href="{{ job.video_url }}" target="_blank" class="btn-secondary-vb">🔗 Abrir no Drive</a>
+        {% endif %}
+        {% if job.get('thumbnail_drive_id') %}
+        <a href="https://drive.google.com/uc?export=download&id={{ job.thumbnail_drive_id }}" class="btn-secondary-vb" download>🖼️ Baixar Thumbnail</a>
+        {% endif %}
+        <a href="{{ drive_link }}" target="_blank" class="btn-secondary-vb">📁 Pasta do Job</a>
+    </div>
+
+    <!-- Informações do Job -->
+    <h3 style="margin-bottom: 15px; color: var(--text-primary);">📋 Detalhes do Job</h3>
+    <div class="info-grid">
+        <div class="info-item">
+            <div class="label">Fonte de Áudio</div>
+            <div class="value">
+                {% if job.get('audio_source') == 'omni' %}
+                    🎙️ Gerado via OmniVoice
+                {% else %}
+                    📁 Upload direto
+                {% endif %}
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">Offset do Vídeo</div>
+            <div class="value">{{ job.get('bg_video_offset', 0) }}s</div>
+        </div>
+        <div class="info-item">
+            <div class="label">Legendas</div>
+            <div class="value">
+                {% if job.get('generate_subtitles') %}
+                    ✅ Ativadas
+                {% else %}
+                    ❌ Desativadas
+                {% endif %}
+            </div>
+        </div>
+        <div class="info-item">
+            <div class="label">Status</div>
+            <div class="value">{{ job.status }}</div>
+        </div>
+        {% if job.get('audio_source') == 'omni' and job.get('omni') %}
+        <div class="info-item" style="grid-column: span 2;">
+            <div class="label">Texto da Narração</div>
+            <div class="value" style="font-size:.88rem; font-weight:400; white-space:pre-wrap; max-height:200px; overflow-y:auto;">{{ job.omni.get('text', '') }}</div>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(function() {
+    const jobId = '{{ job.job_id }}';
+    const status = '{{ job.status }}';
+
+    if (['pending','rendering','preparing','composing','generating_audio','generating_subtitles'].includes(status)) {
+        const evtSource = new EventSource(`/api/jobs/${jobId}/stream`);
+        evtSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.progress !== undefined) {
+                    document.getElementById('detail-bar').style.width = data.progress + '%';
+                    document.getElementById('detail-percent').textContent = Math.round(data.progress) + '%';
+                }
+                if (data.detail) {
+                    document.getElementById('detail-detail').textContent = data.detail;
+                }
+                if (data.status) {
+                    document.getElementById('status-badge').textContent = data.status;
+                    document.getElementById('status-badge').className = 'job-status-badge ' + data.status;
+                }
+                if (data.status === 'done' || data.status === 'error') {
+                    evtSource.close();
+                    setTimeout(() => location.reload(), 1500);
+                }
+            } catch(e) {}
+        };
+        evtSource.onerror = () => {
+            evtSource.close();
+        };
+    }
+})();
+</script>
+{% endblock %}

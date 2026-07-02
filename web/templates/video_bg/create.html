@@ -1,0 +1,544 @@
+{% extends "base.html" %}
+
+{% block title %}Vídeo com Fundo — Criar{% endblock %}
+
+{% block extra_css %}
+<style>
+    .vb-wrap { max-width: 1120px; margin: 0 auto; padding: 24px 16px; }
+    .vb-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .vb-head h1 { font-size: 1.5rem; font-weight: 800; }
+    .vb-badge { background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; padding: 4px 10px; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+
+    .vb-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: start; }
+    .vb-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 20px; }
+    .vb-card h2 { font-size: 1.05rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .vb-card h3.sub { font-size: .78rem; opacity: .6; margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .5px; }
+
+    .vb-card label { display: block; font-size: .82rem; font-weight: 500; margin: 12px 0 6px; color: var(--text-secondary); }
+    .vb-card textarea, .vb-card input[type=text], .vb-card input[type=number], .vb-card input[type=file], .vb-card select {
+        width: 100%; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.12);
+        border-radius: 8px; color: inherit; padding: 10px 12px; font-family: inherit; font-size: .95rem;
+        box-sizing: border-box;
+    }
+    .vb-card textarea { resize: vertical; }
+    .vb-card input[type=range] { width: 100%; margin-top: 4px; accent-color: #7c3aed; }
+
+    /* Abas de fonte de áudio */
+    .audio-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+    .audio-tab { padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); cursor: pointer; font-size: .85rem; font-weight: 600; opacity: .7; transition: all .2s; }
+    .audio-tab.active { background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff; opacity: 1; border-color: #7c3aed; }
+    .audio-tab:hover:not(.active) { opacity: 1; border-color: rgba(255,255,255,.3); }
+    .audio-panel { display: none; }
+    .audio-panel.active { display: block; }
+
+    .vb-btn { margin-top: 16px; padding: 10px 18px; border: none; border-radius: 8px; font-weight: 600; font-size: .9rem; cursor: pointer; color: #fff; text-decoration: none; display: inline-block; transition: all .2s; }
+    .vb-btn-primary { background: linear-gradient(135deg, #7c3aed, #a855f7); }
+    .vb-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(124,58,237,.4); }
+    .vb-btn-ghost { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit; }
+    .vb-btn-ghost:hover { border-color: rgba(255,255,255,.4); }
+    .vb-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+    .vb-progress { margin-top: 16px; }
+    .vb-progress .bar { height: 8px; background: rgba(255,255,255,.1); border-radius: 999px; overflow: hidden; }
+    .vb-progress .fill { height: 100%; width: 0; background: linear-gradient(90deg, #7c3aed, #a855f7); transition: width .3s; border-radius: 999px; }
+
+    .muted { opacity: .6; font-size: .88rem; }
+    .hidden { display: none !important; }
+    .hint { font-size: .72rem; opacity: .5; margin-top: 2px; }
+
+    /* Preview do vídeo */
+    .video-preview { max-width: 100%; border-radius: 10px; margin-top: 10px; background: #000; display: none; }
+    .video-preview.show { display: block; }
+
+    /* Checkbox estilizado */
+    .toggle-row { display: flex; align-items: center; gap: 10px; margin: 14px 0; padding: 12px 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
+    .toggle-row input[type=checkbox] { width: 18px; height: 18px; accent-color: #7c3aed; cursor: pointer; }
+    .toggle-row label { margin: 0; cursor: pointer; font-size: .9rem; }
+
+    /* Offset display */
+    .offset-display { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .offset-display input[type=number] { width: 100px; }
+    .offset-value { font-size: .9rem; color: #a855f7; font-weight: 600; min-width: 60px; }
+
+    /* Chips (vozes/presets) */
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 6px 12px; font-size: .82rem; cursor: pointer; transition: all .2s; }
+    .chip:hover { border-color: #7c3aed; }
+    .chip.selected { border-color: #7c3aed; background: rgba(124,58,237,.15); }
+
+    /* Seletor de cores */
+    .color-option {
+        width: 50px;
+        height: 50px;
+        border-radius: 10px;
+        cursor: pointer;
+        border: 3px solid transparent;
+        transition: all .2s;
+        box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    }
+    .color-option:hover {
+        transform: scale(1.1);
+        box-shadow: 0 4px 12px rgba(0,0,0,.5);
+    }
+    .color-option.selected {
+        border-color: #7c3aed;
+        box-shadow: 0 0 0 2px rgba(124,58,237,.3);
+    }
+
+    /* Color picker RGB personalizado */
+    .color-picker-wrap {
+        position: relative;
+        width: 50px; height: 50px;
+        border-radius: 10px;
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        border: 2px dashed rgba(255,255,255,.3);
+        margin: 0 !important;
+        overflow: hidden;
+        transition: all .2s;
+    }
+    .color-picker-wrap:hover { border-color: #7c3aed; transform: scale(1.1); }
+    .color-picker-wrap span { font-size: 1.3rem; pointer-events: none; }
+    .color-picker-wrap input[type=color] {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        opacity: 0; cursor: pointer; padding: 0; border: none;
+    }
+
+    @media (max-width: 860px) { .vb-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="vb-wrap">
+    <div class="vb-head">
+        <h1>🎬 Vídeo com Fundo</h1>
+        <span class="vb-badge">Vídeo + Áudio + Legendas</span>
+        <a href="/video-bg/jobs" class="vb-btn vb-btn-ghost" style="margin:0 0 0 auto; padding:6px 14px;">🗂️ Histórico</a>
+    </div>
+
+    <div class="vb-grid">
+        <!-- Coluna principal -->
+        <section class="vb-card">
+            <h2>📋 Configuração do Vídeo</h2>
+
+            <label>Título do projeto</label>
+            <input type="text" id="vb-title" placeholder="Ex: Vídeo motivacional ep.1">
+
+            <!-- Configuração de intro estilo Reddit -->
+            <h3 class="sub">🎴 Intro estilo Reddit</h3>
+
+            <div class="toggle-row">
+                <input type="checkbox" id="vb-intro-enabled" checked>
+                <label for="vb-intro-enabled">Adicionar card de intro no início do vídeo</label>
+            </div>
+
+            <div id="vb-intro-options">
+                <label>Nome de usuário no card</label>
+                <input type="text" id="vb-intro-username" value="Anônimo" placeholder="Anônimo">
+
+                <label>Duração da intro</label>
+                <div class="offset-display">
+                    <input type="number" id="vb-intro-duration" value="2" min="0.5" max="10" step="0.5">
+                    <span>segundos</span>
+                </div>
+                <input type="range" id="vb-intro-duration-slider" min="0.5" max="10" step="0.5" value="2">
+
+                <label>Tema do card</label>
+                <select id="vb-intro-theme">
+                    <option value="light">Claro (card branco)</option>
+                    <option value="dark">Escuro (card preto)</option>
+                </select>
+
+                <label>Cor de destaque (avatar e borda)</label>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; align-items: center;">
+                    <div class="color-option selected" data-color="#FF4500" style="background: #FF4500;" title="Reddit"></div>
+                    <div class="color-option" data-color="#000000" style="background: #000000;" title="Preto"></div>
+                    <div class="color-option" data-color="#1e293b" style="background: #1e293b;" title="Azul Escuro"></div>
+                    <div class="color-option" data-color="#7c3aed" style="background: #7c3aed;" title="Roxo"></div>
+                    <div class="color-option" data-color="#dc2626" style="background: #dc2626;" title="Vermelho"></div>
+                    <div class="color-option" data-color="#ea580c" style="background: #ea580c;" title="Laranja"></div>
+                    <div class="color-option" data-color="#f59e0b" style="background: #f59e0b;" title="Âmbar"></div>
+                    <div class="color-option" data-color="#16a34a" style="background: #16a34a;" title="Verde"></div>
+                    <div class="color-option" data-color="#0891b2" style="background: #0891b2;" title="Ciano"></div>
+                    <div class="color-option" data-color="#2563eb" style="background: #2563eb;" title="Azul"></div>
+                    <div class="color-option" data-color="#db2777" style="background: #db2777;" title="Rosa"></div>
+                    <label class="color-picker-wrap" title="Cor personalizada (RGB)">
+                        <input type="color" id="vb-intro-color-picker" value="#FF4500">
+                        <span>🎨</span>
+                    </label>
+                </div>
+                <input type="hidden" id="vb-intro-color" value="#FF4500">
+                <div class="hint">Escolha uma cor pronta ou clique no 🎨 para um RGB personalizado.</div>
+            </div>
+
+            <!-- Upload de vídeo de fundo -->
+            <h3 class="sub">Vídeo de fundo</h3>
+            <label>Selecione o vídeo de fundo</label>
+            <input type="file" id="vb-bg-video" accept="video/*">
+            <video id="vb-video-preview" class="video-preview" controls muted></video>
+
+            <!-- Offset -->
+            <label>Segundo inicial (offset)</label>
+            <div class="offset-display">
+                <input type="number" id="vb-offset" value="0" min="0" step="0.5" placeholder="0">
+                <span>segundos</span>
+                <span class="offset-value" id="vb-offset-display">00:00</span>
+            </div>
+            <input type="range" id="vb-offset-slider" min="0" max="300" step="0.5" value="0">
+            <div class="hint">Arraste para definir a partir de qual segundo do vídeo de fundo usar.</div>
+
+            <!-- Legendas -->
+            <div class="toggle-row">
+                <input type="checkbox" id="vb-subtitles" checked>
+                <label for="vb-subtitles">📝 Gerar legendas automaticamente no vídeo</label>
+            </div>
+
+            <!-- Fonte de áudio -->
+            <h3 class="sub">Fonte de áudio</h3>
+            <div class="audio-tabs">
+                <div class="audio-tab active" data-source="upload">📁 Upload de áudio</div>
+                <div class="audio-tab" data-source="omni">🎙️ Gerar com OmniVoice</div>
+            </div>
+
+            <!-- Panel: Upload de áudio -->
+            <div class="audio-panel active" data-panel="upload">
+                <label>Arquivo de áudio</label>
+                <input type="file" id="vb-audio-file" accept="audio/*">
+                <div class="hint">Formatos suportados: MP3, WAV, OGG, M4A. O vídeo final terá a mesma duração do áudio.</div>
+            </div>
+
+            <!-- Panel: Gerar via OmniVoice -->
+            <div class="audio-panel" data-panel="omni">
+                <label>Voz salva</label>
+                <select id="vb-omni-voice">
+                    <option value="">Carregando vozes...</option>
+                </select>
+                <div class="hint">Selecione uma das suas vozes salvas no OmniVoice.</div>
+
+                <label>Configuração (preset)</label>
+                <select id="vb-omni-preset">
+                    <option value="">Padrão (sem preset)</option>
+                </select>
+                <div class="hint">Selecione uma configuração salva de parâmetros de geração.</div>
+
+                <label>Texto para narração</label>
+                <textarea id="vb-omni-text" rows="5" placeholder="Digite o texto que será narrado no vídeo..."></textarea>
+            </div>
+
+            <!-- Botão de submissão -->
+            <button class="vb-btn vb-btn-primary" id="vb-submit-btn" style="width: 100%; margin-top: 20px; padding: 14px; font-size: 1rem;">
+                🎬 Gerar Vídeo
+            </button>
+
+            <!-- Barra de progresso -->
+            <div id="vb-progress-box" class="vb-progress hidden">
+                <div class="bar"><div id="vb-progress-fill" class="fill"></div></div>
+                <p id="vb-progress-detail" class="muted" style="margin-top: 6px;"></p>
+            </div>
+        </section>
+
+        <!-- Coluna de informações -->
+        <section class="vb-card">
+            <h2>ℹ️ Como funciona</h2>
+            <div style="font-size: .88rem; color: var(--text-secondary); line-height: 1.6;">
+                <p><strong>1.</strong> Faça upload de um <strong>vídeo de fundo</strong> (gameplay, natureza, cenários, etc.)</p>
+                <p><strong>2.</strong> Escolha a partir de qual <strong>segundo</strong> do vídeo usar</p>
+                <p><strong>3.</strong> Selecione o <strong>áudio</strong>: envie um arquivo ou gere na hora com OmniVoice</p>
+                <p><strong>4.</strong> O sistema combina tudo e gera <strong>legendas automáticas</strong></p>
+                <p style="margin-top: 16px; padding: 10px; background: rgba(124,58,237,.1); border-radius: 8px; border-left: 3px solid #7c3aed;">
+                    💡 O vídeo final terá <strong>sempre a duração do áudio</strong>. Se o vídeo de fundo for mais curto, ele será repetido em loop.
+                </p>
+            </div>
+
+            <h3 class="sub" style="margin-top: 24px;">Formatos suportados</h3>
+            <div style="font-size: .85rem; color: var(--text-secondary);">
+                <p>📹 <strong>Vídeo:</strong> MP4, MOV, AVI, MKV, WEBM</p>
+                <p>🎵 <strong>Áudio:</strong> MP3, WAV, OGG, M4A, FLAC</p>
+            </div>
+
+            <h3 class="sub" style="margin-top: 24px;">Últimos vídeos</h3>
+            <div id="vb-recent-jobs" style="font-size: .85rem; color: var(--text-secondary);">
+                <p class="muted">Carregando...</p>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(function() {
+    // ── Tabs de fonte de áudio ──
+    const tabs = document.querySelectorAll('.audio-tab');
+    const panels = document.querySelectorAll('.audio-panel');
+    let currentSource = 'upload';
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.remove('active'));
+            panels.forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            const src = tab.dataset.source;
+            currentSource = src;
+            document.querySelector(`[data-panel="${src}"]`).classList.add('active');
+        });
+    });
+
+    // ── Preview de vídeo ──
+    const bgVideoInput = document.getElementById('vb-bg-video');
+    const videoPreview = document.getElementById('vb-video-preview');
+    const offsetSlider = document.getElementById('vb-offset-slider');
+    const offsetInput = document.getElementById('vb-offset');
+    const offsetDisplay = document.getElementById('vb-offset-display');
+
+    bgVideoInput.addEventListener('change', () => {
+        const file = bgVideoInput.files[0];
+        if (file) {
+            const url = URL.createObjectURL(file);
+            videoPreview.src = url;
+            videoPreview.classList.add('show');
+            videoPreview.addEventListener('loadedmetadata', () => {
+                const dur = Math.floor(videoPreview.duration);
+                offsetSlider.max = dur;
+                offsetInput.max = dur;
+            }, { once: true });
+        } else {
+            videoPreview.classList.remove('show');
+        }
+    });
+
+    function formatTime(seconds) {
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    offsetSlider.addEventListener('input', () => {
+        const val = parseFloat(offsetSlider.value);
+        offsetInput.value = val;
+        offsetDisplay.textContent = formatTime(val);
+        if (videoPreview.src) videoPreview.currentTime = val;
+    });
+
+    offsetInput.addEventListener('input', () => {
+        const val = parseFloat(offsetInput.value) || 0;
+        offsetSlider.value = val;
+        offsetDisplay.textContent = formatTime(val);
+        if (videoPreview.src) videoPreview.currentTime = val;
+    });
+
+    // ── Carregar vozes e presets do OmniVoice ──
+    async function loadVoices() {
+        try {
+            const res = await fetch('/audio/api/voices');
+            if (!res.ok) return;
+            const data = await res.json();
+            const sel = document.getElementById('vb-omni-voice');
+            sel.innerHTML = '<option value="">Selecione uma voz...</option>';
+            (data.custom || []).forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.id;
+                opt.textContent = v.name;
+                sel.appendChild(opt);
+            });
+        } catch(e) {
+            console.warn('Erro ao carregar vozes:', e);
+        }
+    }
+
+    async function loadPresets() {
+        try {
+            const res = await fetch('/audio/api/presets');
+            if (!res.ok) return;
+            const data = await res.json();
+            const sel = document.getElementById('vb-omni-preset');
+            sel.innerHTML = '<option value="">Padrão (sem preset)</option>';
+            (data.presets || []).forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.name + (p.description ? ' — ' + p.description : '');
+                sel.appendChild(opt);
+            });
+        } catch(e) {
+            console.warn('Erro ao carregar presets:', e);
+        }
+    }
+
+    loadVoices();
+    loadPresets();
+
+    // ── Seleção de cores + color picker RGB ──
+    const colorOptions = document.querySelectorAll('.color-option');
+    const colorInput = document.getElementById('vb-intro-color');
+    const colorPicker = document.getElementById('vb-intro-color-picker');
+
+    colorOptions.forEach(opt => {
+        opt.addEventListener('click', () => {
+            colorOptions.forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+            colorInput.value = opt.dataset.color;
+            colorPicker.value = opt.dataset.color;
+        });
+    });
+
+    colorPicker.addEventListener('input', () => {
+        colorOptions.forEach(o => o.classList.remove('selected'));
+        colorInput.value = colorPicker.value;
+    });
+
+    // ── Toggle de intro (mostra/esconde opções) ──
+    const introEnabled = document.getElementById('vb-intro-enabled');
+    const introOptions = document.getElementById('vb-intro-options');
+    introEnabled.addEventListener('change', () => {
+        introOptions.style.display = introEnabled.checked ? 'block' : 'none';
+    });
+
+    // ── Slider de duração da intro ──
+    const introDur = document.getElementById('vb-intro-duration');
+    const introDurSlider = document.getElementById('vb-intro-duration-slider');
+    introDurSlider.addEventListener('input', () => { introDur.value = introDurSlider.value; });
+    introDur.addEventListener('input', () => { introDurSlider.value = introDur.value; });
+
+    // ── Submit ──
+    const submitBtn = document.getElementById('vb-submit-btn');
+    const progressBox = document.getElementById('vb-progress-box');
+    const progressFill = document.getElementById('vb-progress-fill');
+    const progressDetail = document.getElementById('vb-progress-detail');
+
+    submitBtn.addEventListener('click', async () => {
+        const title = document.getElementById('vb-title').value.trim();
+        if (!title) return alert('Informe um título para o projeto.');
+
+        const bgFile = bgVideoInput.files[0];
+        if (!bgFile) return alert('Selecione um vídeo de fundo.');
+
+        const form = new FormData();
+        form.append('title', title);
+        form.append('bg_video', bgFile);
+        form.append('bg_video_offset', offsetInput.value || '0');
+        form.append('generate_subtitles', document.getElementById('vb-subtitles').checked ? 'on' : 'off');
+        form.append('audio_source', currentSource);
+        form.append('intro_enabled', document.getElementById('vb-intro-enabled').checked ? 'on' : 'off');
+        form.append('intro_duration', document.getElementById('vb-intro-duration').value || '2');
+        form.append('intro_theme', document.getElementById('vb-intro-theme').value);
+        form.append('intro_color', document.getElementById('vb-intro-color').value);
+        form.append('intro_username', document.getElementById('vb-intro-username').value.trim() || 'Anônimo');
+
+        if (currentSource === 'upload') {
+            const audioFile = document.getElementById('vb-audio-file').files[0];
+            if (!audioFile) return alert('Selecione um arquivo de áudio.');
+            form.append('audio_file', audioFile);
+        } else {
+            const voiceId = document.getElementById('vb-omni-voice').value;
+            const presetId = document.getElementById('vb-omni-preset').value;
+            const text = document.getElementById('vb-omni-text').value.trim();
+            if (!voiceId) return alert('Selecione uma voz para gerar o áudio.');
+            if (!text) return alert('Informe o texto para a narração.');
+            form.append('omni_voice_id', voiceId);
+            form.append('omni_preset_id', presetId);
+            form.append('omni_text', text);
+        }
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = '⏳ Enviando...';
+        progressBox.classList.remove('hidden');
+        progressFill.style.width = '10%';
+        progressDetail.textContent = 'Enviando arquivos...';
+
+        try {
+            const res = await fetch('/video-bg/render', { method: 'POST', body: form });
+            const data = await res.json();
+
+            if (!res.ok) {
+                alert('Erro: ' + (data.error || 'Erro desconhecido'));
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🎬 Gerar Vídeo';
+                progressBox.classList.add('hidden');
+                return;
+            }
+
+            progressFill.style.width = '30%';
+            progressDetail.textContent = 'Job criado! Acompanhando progresso...';
+
+            // SSE para progresso
+            const jobId = data.job_id;
+            const evtSource = new EventSource(`/api/jobs/${jobId}/stream`);
+
+            evtSource.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.progress !== undefined) {
+                        progressFill.style.width = msg.progress + '%';
+                    }
+                    if (msg.detail) {
+                        progressDetail.textContent = msg.detail;
+                    }
+                    if (msg.status === 'done') {
+                        evtSource.close();
+                        progressFill.style.width = '100%';
+                        progressDetail.innerHTML = '✅ Vídeo pronto! <a href="/video-bg/video/' + jobId + '" style="color: #a855f7; font-weight: 600;">Ver detalhes →</a>';
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = '🎬 Gerar Vídeo';
+                    }
+                    if (msg.status === 'error') {
+                        evtSource.close();
+                        progressFill.style.width = '0%';
+                        progressDetail.textContent = '❌ Erro: ' + (msg.detail || 'Erro desconhecido');
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = '🎬 Gerar Vídeo';
+                    }
+                } catch(e) {}
+            };
+
+            evtSource.onerror = () => {
+                evtSource.close();
+                progressDetail.textContent = 'Conexão de progresso perdida. Verifique no histórico.';
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🎬 Gerar Vídeo';
+            };
+
+        } catch(e) {
+            alert('Erro de rede: ' + e.message);
+            submitBtn.disabled = false;
+            submitBtn.textContent = '🎬 Gerar Vídeo';
+            progressBox.classList.add('hidden');
+        }
+    });
+
+    // ── Carregar jobs recentes ──
+    async function loadRecentJobs() {
+        try {
+            const res = await fetch('/video-bg/jobs');
+            const html = await res.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const jobs = doc.querySelectorAll('.job-item');
+            const container = document.getElementById('vb-recent-jobs');
+
+            if (jobs.length === 0) {
+                container.innerHTML = '<p class="muted">Nenhum vídeo gerado ainda.</p>';
+                return;
+            }
+
+            let html2 = '';
+            const max = Math.min(jobs.length, 5);
+            for (let i = 0; i < max; i++) {
+                const name = jobs[i].querySelector('.job-name')?.textContent || '';
+                const status = jobs[i].querySelector('.job-status-badge')?.textContent || '';
+                const jobId = jobs[i].dataset.jobId;
+                const statusColor = status === 'done' ? '#22c55e' : status === 'error' ? '#ef4444' : '#f59e0b';
+                html2 += `<div style="display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.06);">
+                    <a href="/video-bg/video/${jobId}" style="color:inherit; text-decoration:none; font-weight:500;">${name}</a>
+                    <span style="font-size:.75rem; color:${statusColor}; font-weight:600;">${status}</span>
+                </div>`;
+            }
+            container.innerHTML = html2;
+        } catch(e) {
+            document.getElementById('vb-recent-jobs').innerHTML = '<p class="muted">Erro ao carregar.</p>';
+        }
+    }
+    loadRecentJobs();
+})();
+</script>
+{% endblock %}

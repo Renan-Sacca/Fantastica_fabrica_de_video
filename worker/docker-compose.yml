@@ -5,6 +5,7 @@ services:
     volumes:
       - ../credentials.json:/app/credentials.json:ro
       - ../token.json:/app/token.json:ro
+      - ../tts3/data:/app/tts3_audio
     env_file:
       - .env
     environment:
