@@ -202,24 +202,85 @@ class VideoBgProcessor:
         self, metadata: dict, work_dir: Path,
         folder_id: str, metadata_file_id: str,
     ):
-        """Gera áudio via OmniVoice publicando na fila e esperando o resultado."""
-        import aio_pika
-        import uuid
+        """Gera áudio via OmniVoice.
 
+        Se `narrate_title` estiver ativo, gera dois áudios (título e conteúdo),
+        concatena-os (título + pequena pausa + conteúdo) e ajusta a intro para durar
+        exatamente o tempo da fala do título — o card fica na tela enquanto o título
+        é narrado.
+        """
         omni_config = metadata.get("omni", {})
         text = omni_config.get("text", "")
         ref_filename = omni_config.get("ref_filename")
         ref_text = omni_config.get("ref_text", "")
         gen_params = omni_config.get("gen_params", {})
+        narrate_title = omni_config.get("narrate_title", False)
+        title_text = (omni_config.get("title_text") or "").strip()
 
         if not text:
             raise ValueError("Texto para geração de áudio não fornecido.")
 
-        # Criar um sub-job de áudio
-        omni_job_id = uuid.uuid4().hex[:8]
-        logger.info(f"[{self.job_id}] Criando sub-job OmniVoice: {omni_job_id}")
+        # ── Modo: título narrado + conteúdo ──
+        if narrate_title and title_text:
+            await self._publish(self.job_id, "generating_audio", 8, "Gerando áudio do título...")
+            title_audio = await self._omni_generate_one(
+                title_text, ref_filename, ref_text, gen_params, folder_id, work_dir, "title_audio"
+            )
 
-        # Publicar na fila do OmniVoice
+            await self._publish(self.job_id, "generating_audio", 20, "Gerando áudio do conteúdo...")
+            content_audio = await self._omni_generate_one(
+                text, ref_filename, ref_text, gen_params, folder_id, work_dir, "content_audio"
+            )
+
+            # Concatenar título + pausa + conteúdo
+            title_dur = self._probe_duration(title_audio)
+            gap = 0.4
+            final_audio = work_dir / "audio.wav"
+            self._concat_audios(title_audio, content_audio, final_audio, gap)
+            metadata["files"]["audio_ext"] = ".wav"
+
+            audio_bytes = final_audio.read_bytes()
+            audio_file_id = self.drive.upload_bytes(
+                audio_bytes, "audio.wav", folder_id, "audio/wav"
+            )
+            metadata["files"]["audio"] = audio_file_id
+
+            # A intro (card) fica visível enquanto o título é falado (+ a pausa)
+            metadata["intro_enabled"] = True
+            metadata["intro_duration"] = round(title_dur + gap, 2)
+            self.drive.update_json(metadata_file_id, metadata)
+            logger.info(
+                f"[{self.job_id}] Título narrado ({title_dur:.2f}s) + conteúdo concatenados. "
+                f"Intro ajustada para {metadata['intro_duration']}s"
+            )
+            return
+
+        # ── Modo padrão: apenas o conteúdo ──
+        await self._publish(self.job_id, "generating_audio", 10, "Gerando áudio...")
+        out = await self._omni_generate_one(
+            text, ref_filename, ref_text, gen_params, folder_id, work_dir, "audio"
+        )
+        ext = out.suffix
+        metadata["files"]["audio_ext"] = ext
+        audio_bytes = out.read_bytes()
+        audio_file_id = self.drive.upload_bytes(
+            audio_bytes, f"audio{ext}", folder_id, "audio/wav"
+        )
+        metadata["files"]["audio"] = audio_file_id
+        self.drive.update_json(metadata_file_id, metadata)
+
+    async def _omni_generate_one(
+        self, text: str, ref_filename, ref_text: str, gen_params: dict,
+        folder_id: str, work_dir: Path, out_name: str,
+    ) -> Path:
+        """Publica um sub-job OmniVoice, aguarda concluir e retorna o path local do áudio.
+
+        O arquivo é salvo em work_dir/{out_name}{ext}.
+        """
+        import aio_pika
+        import uuid
+
+        omni_job_id = uuid.uuid4().hex[:8]
         rabbitmq_url = os.getenv("RABBITMQ_URL")
         omni_queue = os.getenv("RABBITMQ_OMNI_QUEUE", "omni_audio_jobs")
         omni_progress_exchange = os.getenv("RABBITMQ_OMNI_PROGRESS_EXCHANGE", "omni_audio_progress")
@@ -246,13 +307,11 @@ class VideoBgProcessor:
                 ),
                 routing_key=omni_queue,
             )
+        logger.info(f"[{self.job_id}] Sub-job OmniVoice publicado: {omni_job_id} ({out_name})")
 
-        logger.info(f"[{self.job_id}] Sub-job OmniVoice publicado: {omni_job_id}")
-
-        # Aguardar conclusão via SSE/polling no exchange de progresso
-        await self._publish(self.job_id, "generating_audio", 10, "Aguardando geração do áudio...")
-
+        # Aguardar conclusão via exchange de progresso
         connection2 = await aio_pika.connect_robust(rabbitmq_url)
+        audio_done = False
         try:
             channel2 = await connection2.channel()
             exchange = await channel2.declare_exchange(
@@ -267,11 +326,8 @@ class VideoBgProcessor:
             )
             await queue.bind(exchange, routing_key=omni_job_id)
 
-            # Esperar no máximo 5 minutos pelo áudio
             timeout = 300
             start_time = time.time()
-            audio_done = False
-
             async with queue.iterator() as q_iter:
                 async for message in q_iter:
                     async with message.process():
@@ -301,51 +357,55 @@ class VideoBgProcessor:
         if not audio_done:
             raise RuntimeError("Geração de áudio não concluída.")
 
-        # Buscar o áudio gerado na pasta do Drive
-        await self._publish(self.job_id, "generating_audio", 35, "Baixando áudio gerado...")
+        # Localizar o áudio gerado (local ou no Drive)
+        omni_outputs_dir = Path(os.getenv("OMNI_OUTPUTS_DIR", "/app/tts3_audio/outputs"))
+        for ext in [".wav", ".mp3", ".ogg"]:
+            candidate = omni_outputs_dir / f"{omni_job_id}{ext}"
+            if candidate.exists():
+                dest = work_dir / f"{out_name}{ext}"
+                shutil.copy2(candidate, dest)
+                logger.info(f"[{self.job_id}] Áudio '{out_name}' encontrado localmente: {candidate}")
+                return dest
 
-        # O OmniVoice salva o áudio na pasta com nome audio_<job_id>.wav
-        # Procurar pelo arquivo de áudio gerado
-        audio_file_id = None
-        try:
-            # Procurar em outputs (path compartilhado do OmniVoice)
-            omni_outputs_dir = Path(os.getenv("OMNI_OUTPUTS_DIR", "/app/tts3_audio/outputs"))
-            for ext in [".wav", ".mp3", ".ogg"]:
-                candidate = omni_outputs_dir / f"{omni_job_id}{ext}"
-                if candidate.exists():
-                    audio_dest = work_dir / f"audio{ext}"
-                    shutil.copy2(candidate, audio_dest)
-                    metadata["files"]["audio_ext"] = ext
-                    logger.info(f"[{self.job_id}] Áudio encontrado localmente: {candidate}")
-
-                    # Upload para a pasta do job no Drive
-                    audio_bytes = audio_dest.read_bytes()
-                    audio_file_id = self.drive.upload_bytes(
-                        audio_bytes, f"audio{ext}", folder_id, "audio/wav"
-                    )
-                    metadata["files"]["audio"] = audio_file_id
-                    self.drive.update_json(metadata_file_id, metadata)
-                    return
-        except Exception as e:
-            logger.warning(f"[{self.job_id}] Não encontrou áudio localmente: {e}")
-
-        # Tentar buscar no Drive (o OmniVoice pode ter feito upload)
-        try:
-            for ext in [".wav", ".mp3"]:
-                fname = f"audio_{omni_job_id}{ext}"
-                fid = self.drive.find_file_in_folder(folder_id, fname)
-                if fid:
-                    audio_dest = work_dir / f"audio{ext}"
-                    self.drive.download_file(fid, audio_dest)
-                    metadata["files"]["audio"] = fid
-                    metadata["files"]["audio_ext"] = ext
-                    self.drive.update_json(metadata_file_id, metadata)
-                    logger.info(f"[{self.job_id}] Áudio baixado do Drive: {fname}")
-                    return
-        except Exception as e:
-            logger.warning(f"[{self.job_id}] Não encontrou áudio no Drive: {e}")
+        for ext in [".wav", ".mp3"]:
+            fname = f"audio_{omni_job_id}{ext}"
+            fid = self.drive.find_file_in_folder(folder_id, fname)
+            if fid:
+                dest = work_dir / f"{out_name}{ext}"
+                self.drive.download_file(fid, dest)
+                logger.info(f"[{self.job_id}] Áudio '{out_name}' baixado do Drive: {fname}")
+                return dest
 
         raise RuntimeError("Não foi possível localizar o áudio gerado pelo OmniVoice.")
+
+    def _probe_duration(self, path: Path) -> float:
+        """Duração de um arquivo de mídia (segundos) via ffprobe."""
+        res = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        return float(json.loads(res.stdout)["format"]["duration"])
+
+    def _concat_audios(self, first: Path, second: Path, out: Path, gap: float = 0.4):
+        """Concatena dois áudios com uma pequena pausa de silêncio entre eles."""
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(first),
+            "-f", "lavfi", "-t", str(gap),
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+            "-i", str(second),
+            "-filter_complex",
+            "[0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0];"
+            "[1:a]aformat=sample_rates=44100:channel_layouts=stereo[a1];"
+            "[2:a]aformat=sample_rates=44100:channel_layouts=stereo[a2];"
+            "[a0][a1][a2]concat=n=3:v=0:a=1[a]",
+            "-map", "[a]",
+            str(out),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            raise RuntimeError(f"Falha ao concatenar áudios: {result.stderr[-400:]}")
+        logger.info(f"[{self.job_id}] Áudios concatenados (título + {gap}s + conteúdo): {out}")
 
     async def _publish(self, job_id: str, status: str, progress: float, detail: str):
         """Publica progresso."""

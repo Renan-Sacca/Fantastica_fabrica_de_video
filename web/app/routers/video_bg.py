@@ -139,6 +139,7 @@ async def render_video_bg(
     omni_voice_id: str = Form(""),
     omni_preset_id: str = Form(""),
     omni_text: str = Form(""),
+    narrate_title: str = Form("off"),
 ):
     """Recebe o formulário, sobe tudo no Drive e publica no RabbitMQ."""
     user = get_current_user(request)
@@ -246,6 +247,8 @@ async def render_video_bg(
                 "ref_text": voice_info.get("reference_text", ""),
                 "preset_id": omni_preset_id,
                 "text": omni_text.strip(),
+                "narrate_title": narrate_title in ("on", "true", "1", "yes"),
+                "title_text": title.strip(),
             }
 
             # Se tiver preset, carregar os parâmetros

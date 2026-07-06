@@ -343,6 +343,12 @@
 
                 <label>Texto para narração</label>
                 <textarea id="vb-omni-text" rows="5" placeholder="Digite o texto que será narrado no vídeo..."></textarea>
+
+                <div class="toggle-row">
+                    <input type="checkbox" id="vb-narrate-title">
+                    <label for="vb-narrate-title">🎤 Narrar o título também (fala o título antes do conteúdo)</label>
+                </div>
+                <div class="hint">Se ativado, a narração será <strong>título + conteúdo</strong> e o card do Reddit fica na tela enquanto o título é falado.</div>
             </div>
 
             <!-- Botão de submissão -->
@@ -623,6 +629,7 @@
             form.append('omni_voice_id', voiceId);
             form.append('omni_preset_id', presetId);
             form.append('omni_text', text);
+            form.append('narrate_title', document.getElementById('vb-narrate-title').checked ? 'on' : 'off');
         }
 
         submitBtn.disabled = true;
@@ -748,6 +755,7 @@
     let currentRedditSort = 'hot';
     let currentRedditPosts = [];
     let selectedPostText = '';
+    let selectedPostTitle = '';
     let currentRedditAfter = '';
 
     // Sort chips
@@ -909,6 +917,7 @@
         if (!post) return;
 
         selectedPostText = post.selftext;
+        selectedPostTitle = post.title;
 
         document.getElementById('reddit-detail-title').textContent = post.title;
         document.getElementById('reddit-detail-meta').textContent = `👤 u/${post.author} · ⬆️ ${post.score} · 💬 ${post.num_comments}`;
@@ -1030,6 +1039,11 @@
 
         // Preencher textarea de narração
         document.getElementById('vb-omni-text').value = text;
+
+        // Preencher o título do projeto com o título do post do Reddit
+        if (selectedPostTitle && selectedPostTitle.trim()) {
+            document.getElementById('vb-title').value = selectedPostTitle.trim();
+        }
 
         // Trocar para aba OmniVoice
         tabs.forEach(t => t.classList.remove('active'));

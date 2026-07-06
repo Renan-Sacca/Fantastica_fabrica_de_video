@@ -22,6 +22,7 @@ Instruções:
 5. Remova COMPLETAMENTE qualquer linha que contenha palavras ou termos incompreensíveis (em vez de marcar como [Incompreensível], delete a linha inteira).
 6. Mantenha a estrutura original do diálogo.
 7. Remova palavras ofensivas ou desnecessárias, não exclua a linha troque por palavras mais leves.
+8. Expanda abreviações de gênero + idade típicas de relatos: a letra "M" seguida de um número significa "mulher" e a letra "H" seguida de um número significa "homem", sendo o número a idade. Exemplos: "M21" vira "mulher de 21 anos"; "H22" vira "homem de 22 anos"; "(M30)" vira "(mulher de 30 anos)". Vale para maiúsculas e minúsculas. Remova qualquer marcação de asteriscos ao redor (ex.: "**M21 e H22**" vira "mulher de 21 anos e homem de 22 anos").
 
 Texto para correção:
 {text}"""

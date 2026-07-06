@@ -53,7 +53,7 @@ class VideoBgRenderer(BaseRenderer):
         intro_theme = job_data.get("intro_theme", "light")  # light ou dark
         intro_color = job_data.get("intro_color", "#FF4500")
         intro_username = job_data.get("intro_username", "Anônimo")
-        
+
         if not bg_video_path.exists():
             raise FileNotFoundError(f"Vídeo de fundo não encontrado: {bg_video_path}")
         if not audio_path.exists():
@@ -68,52 +68,43 @@ class VideoBgRenderer(BaseRenderer):
         bg_duration = self._get_duration(bg_video_path)
         logger.info(f"Duração do vídeo de fundo: {bg_duration:.2f}s, offset: {offset}s")
 
-        # 3. Preparar vídeo de fundo (fatiar + loop se necessário)
-        _progress("rendering", 20, "Preparando vídeo de fundo...")
-        prepared_video_path = work_dir / "bg_prepared.mp4"
-        self._prepare_bg_video(
-            bg_video_path, prepared_video_path,
-            offset, audio_duration, bg_duration
-        )
-
-        # 4. Gerar card estilo Reddit (PNG transparente) para intro/thumbnail
-        _progress("rendering", 28, "Gerando card estilo Reddit...")
+        # 3. Gerar card estilo Reddit (PNG transparente) para intro/thumbnail
+        _progress("rendering", 20, "Gerando card estilo Reddit...")
         card_png_path = work_dir / "reddit_card.png"
         self._generate_card(
             card_png_path, title, intro_username, intro_theme, intro_color
         )
 
-        # 5. Gerar thumbnail (primeiro frame + card)
-        _progress("rendering", 32, "Gerando thumbnail...")
+        # 4. Gerar thumbnail (primeiro frame do fundo + card)
+        _progress("rendering", 28, "Gerando thumbnail...")
         thumbnail_path = work_dir / "thumbnail.jpg"
-        self._generate_thumbnail(prepared_video_path, card_png_path, thumbnail_path)
+        self._generate_thumbnail(bg_video_path, card_png_path, thumbnail_path, offset)
 
-        # 6. Gerar legendas se solicitado
+        # 5. Gerar legendas se solicitado
         srt_path = None
         if generate_subtitles:
             _progress("generating_subtitles", 40, "Gerando legendas com Whisper...")
             srt_path = work_dir / "subtitles.srt"
             self._generate_subtitles(audio_path, srt_path, _progress)
 
-        # 7. Compor vídeo final (vídeo + áudio + legendas)
-        _progress("composing", 80, "Compondo vídeo final...")
-        if intro_enabled and title.strip():
-            # Compõe o vídeo completo (áudio + legendas) e sobrepõe o card estilo
-            # Reddit nos primeiros segundos — a narração já toca durante a intro.
-            composed_path = work_dir / "composed.mp4"
-            self._compose_final(prepared_video_path, audio_path, srt_path, composed_path)
-
-            _progress("composing", 90, "Adicionando card de intro...")
-            output_path = work_dir / "output.mp4"
-            self._overlay_intro_card(
-                composed_path, card_png_path, output_path, intro_duration, title
-            )
-        else:
-            # Sem intro
-            output_path = work_dir / "output.mp4"
-            self._compose_final(
-                prepared_video_path, audio_path, srt_path, output_path, title
-            )
+        # 6. Compor o vídeo final em UMA ÚNICA passagem de encode
+        #    (escala/crop/loop + card de intro + legendas + áudio). Isso evita
+        #    recodificar o vídeo Full HD 3x, o que era muito lento em vídeos longos.
+        _progress("composing", 60, "Compondo vídeo final...")
+        output_path = work_dir / "output.mp4"
+        use_card = bool(intro_enabled and title.strip())
+        self._compose_video(
+            bg_video_path=bg_video_path,
+            audio_path=audio_path,
+            srt_path=srt_path,
+            output_path=output_path,
+            offset=offset,
+            target_duration=audio_duration,
+            bg_duration=bg_duration,
+            card_png_path=card_png_path if use_card else None,
+            intro_duration=intro_duration if use_card else 0.0,
+            title=title,
+        )
 
         _progress("composing", 95, "Vídeo renderizado com sucesso!")
         return output_path
@@ -131,58 +122,6 @@ class VideoBgRenderer(BaseRenderer):
             raise RuntimeError(f"ffprobe falhou: {result.stderr}")
         data = json.loads(result.stdout)
         return float(data["format"]["duration"])
-
-    def _prepare_bg_video(
-        self,
-        input_path: Path,
-        output_path: Path,
-        offset: float,
-        target_duration: float,
-        bg_duration: float,
-    ):
-        """Prepara o vídeo de fundo: offset + loop se necessário + redimensiona para 1080x1920 (Full HD vertical)."""
-        available_duration = bg_duration - offset
-        
-        # Filtro para redimensionar e fazer crop centralizado para formato vertical (9:16)
-        # 1080x1920 é Full HD em formato vertical para celular
-        video_filter = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
-
-        if available_duration >= target_duration:
-            # Caso simples: vídeo é longo o suficiente, apenas fatiar
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(offset),
-                "-i", str(input_path),
-                "-t", str(target_duration),
-                "-vf", video_filter,
-                "-c:v", "libx264", "-preset", "fast",
-                "-an",  # remove áudio do vídeo de fundo
-                "-movflags", "+faststart",
-                str(output_path),
-            ]
-        else:
-            # Vídeo é curto: precisamos fazer loop
-            # Usar o filtro loop do ffmpeg
-            # Calcular quantas vezes precisamos repetir
-            loops_needed = int(target_duration / (bg_duration - offset)) + 2
-
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(offset),
-                "-stream_loop", str(loops_needed),
-                "-i", str(input_path),
-                "-t", str(target_duration),
-                "-vf", video_filter,
-                "-c:v", "libx264", "-preset", "fast",
-                "-an",
-                "-movflags", "+faststart",
-                str(output_path),
-            ]
-
-        logger.info(f"Preparando vídeo de fundo: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg falhou ao preparar vídeo: {result.stderr[-500:]}")
 
     def _generate_subtitles(self, audio_path: Path, srt_path: Path, _progress: Callable):
         """Gera legendas SRT a partir do áudio usando faster-whisper."""
@@ -305,66 +244,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ass_path.write_text(ass_content, encoding="utf-8")
         logger.info(f"Legendas animadas ASS geradas: {ass_path}")
 
-    def _compose_final(
-        self,
-        video_path: Path,
-        audio_path: Path,
-        srt_path: Optional[Path],
-        output_path: Path,
-        title: str = "",
-    ):
-        """Combina vídeo + áudio + legendas (se houver) no vídeo final.
-
-        Usa -map_metadata -1 para descartar os metadados do vídeo de fundo (evita que o
-        título original apareça em players como VLC/Windows) e grava o título do projeto.
-        """
-        meta_args = ["-map_metadata", "-1"]
-        if title:
-            meta_args += ["-metadata", f"title={title}"]
-
-        if srt_path and srt_path.exists() and srt_path.stat().st_size > 0:
-            # Tentar usar arquivo ASS (com animações) se existir, senão usar SRT
-            ass_path = srt_path.with_suffix(".ass")
-            subtitle_file = ass_path if ass_path.exists() else srt_path
-            
-            # Escapar path para o filtro (especialmente no Windows)
-            subtitle_escaped = str(subtitle_file).replace("\\", "/").replace(":", "\\:")
-
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", str(video_path),
-                "-i", str(audio_path),
-                "-vf", f"ass='{subtitle_escaped}'" if ass_path.exists() else f"subtitles='{subtitle_escaped}'",
-                "-c:v", "libx264", "-preset", "fast",
-                "-c:a", "aac", "-b:a", "192k",
-                "-map", "0:v:0", "-map", "1:a:0",
-                *meta_args,
-                "-shortest",
-                "-movflags", "+faststart",
-                str(output_path),
-            ]
-        else:
-            # Sem legendas: apenas combinar vídeo + áudio
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", str(video_path),
-                "-i", str(audio_path),
-                "-c:v", "libx264", "-preset", "fast",
-                "-c:a", "aac", "-b:a", "192k",
-                "-map", "0:v:0", "-map", "1:a:0",
-                *meta_args,
-                "-shortest",
-                "-movflags", "+faststart",
-                str(output_path),
-            ]
-
-        logger.info(f"Compondo vídeo final: {' '.join(cmd[:8])}...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
-        if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg falhou ao compor vídeo final: {result.stderr[-500:]}")
-
-        logger.info(f"Vídeo final gerado: {output_path} ({output_path.stat().st_size / 1024 / 1024:.1f} MB)")
-
     def _generate_card(
         self,
         card_png_path: Path,
@@ -388,78 +267,138 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def _generate_thumbnail(
         self,
-        video_path: Path,
+        bg_video_path: Path,
         card_png_path: Path,
         thumbnail_path: Path,
+        offset: float = 0.0,
     ):
-        """Gera thumbnail: primeiro frame do vídeo + card estilo Reddit sobreposto."""
+        """Gera thumbnail: frame do vídeo de fundo (no offset) + card sobreposto.
+
+        Lê direto do vídeo bruto (com -ss) e escala/corta para 1080x1920, evitando
+        depender de um vídeo intermediário já preparado.
+        """
         cmd = [
             "ffmpeg", "-y",
-            "-i", str(video_path),
+            "-ss", str(offset),
+            "-i", str(bg_video_path),
             "-i", str(card_png_path),
             "-filter_complex",
-            "[0:v]scale=1080:1920[bg];[bg][1:v]overlay=0:0",
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+            "crop=1080:1920[bg];[bg][1:v]overlay=0:0",
             "-frames:v", "1",
             "-q:v", "2",
             str(thumbnail_path),
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             logger.warning(f"Falha ao gerar thumbnail: {result.stderr[-300:]}")
         else:
             logger.info(f"Thumbnail gerada: {thumbnail_path}")
 
-    def _overlay_intro_card(
+    def _compose_video(
         self,
-        composed_path: Path,
-        card_png_path: Path,
+        bg_video_path: Path,
+        audio_path: Path,
+        srt_path: Optional[Path],
         output_path: Path,
-        duration: float,
+        offset: float,
+        target_duration: float,
+        bg_duration: float,
+        card_png_path: Optional[Path] = None,
+        intro_duration: float = 0.0,
         title: str = "",
     ):
-        """Sobrepõe o card estilo Reddit nos primeiros segundos do vídeo já composto.
+        """Compõe o vídeo final em uma única passagem de ffmpeg.
 
-        A narração e as legendas continuam tocando normalmente por baixo — o card
-        apenas aparece (com fade-in) e some (com fade-out) durante os primeiros
-        `duration` segundos. A duração total do vídeo não muda.
+        Faz tudo de uma vez para não recodificar o vídeo Full HD várias vezes:
+        - offset (-ss) + loop (-stream_loop) do vídeo de fundo
+        - escala/crop para 1080x1920 (vertical)
+        - overlay do card estilo Reddit nos primeiros `intro_duration` segundos (opcional)
+        - queima das legendas ASS/SRT (opcional)
+        - junção com o áudio da narração
+        - remoção dos metadados originais + gravação do título
         """
-        duration = max(0.5, float(duration))
-        fade = 0.3
-        fade_out_start = max(0.0, duration - fade)
+        # Entrada de vídeo: offset e loop (se o fundo for mais curto que o áudio)
+        available = bg_duration - offset
+        video_input_args = ["-ss", str(offset)]
+        if available < target_duration:
+            loops_needed = int(target_duration / max(0.1, available)) + 2
+            video_input_args = ["-ss", str(offset), "-stream_loop", str(loops_needed)]
 
-        # IMPORTANTE: a imagem do card é um único frame. Para o fade funcionar ao longo
-        # do tempo, transformamos o PNG em um stream de vídeo com "-loop 1 -t duration".
-        # Sem isso, o fade-in deixaria o único frame com alpha 0 (card invisível).
-        filter_complex = (
-            f"[1:v]format=rgba,"
-            f"fade=t=in:st=0:d={fade}:alpha=1,"
-            f"fade=t=out:st={fade_out_start:.2f}:d={fade}:alpha=1[card];"
-            f"[0:v][card]overlay=0:0:enable='between(t,0,{duration})':eof_action=pass,"
-            f"format=yuv420p[outv]"
+        inputs = ["-y", *video_input_args, "-i", str(bg_video_path), "-i", str(audio_path)]
+
+        use_card = bool(card_png_path and card_png_path.exists() and intro_duration > 0)
+        if use_card:
+            inputs += ["-loop", "1", "-t", str(intro_duration), "-i", str(card_png_path)]
+
+        # Filtro de legenda (ASS animado tem prioridade sobre SRT)
+        sub_filter = None
+        if srt_path and srt_path.exists() and srt_path.stat().st_size > 0:
+            ass_path = srt_path.with_suffix(".ass")
+            subtitle_file = ass_path if ass_path.exists() else srt_path
+            subtitle_escaped = str(subtitle_file).replace("\\", "/").replace(":", "\\:")
+            sub_filter = (
+                f"ass='{subtitle_escaped}'" if ass_path.exists()
+                else f"subtitles='{subtitle_escaped}'"
+            )
+
+        # Montar o filtergraph
+        scale_crop = (
+            "scale=1080:1920:force_original_aspect_ratio=increase,"
+            "crop=1080:1920,setsar=1"
         )
+        fc = [f"[0:v]{scale_crop},format=yuv420p[bg]"]
+        cur = "bg"
 
-        # Descarta metadados originais e grava o título do projeto
+        if use_card:
+            fade = 0.3
+            fade_out_start = max(0.0, intro_duration - fade)
+            fc.append(
+                f"[2:v]format=rgba,"
+                f"fade=t=in:st=0:d={fade}:alpha=1,"
+                f"fade=t=out:st={fade_out_start:.2f}:d={fade}:alpha=1[card]"
+            )
+            fc.append(
+                f"[{cur}][card]overlay=0:0:enable='between(t,0,{intro_duration})':"
+                f"eof_action=pass,format=yuv420p[vcard]"
+            )
+            cur = "vcard"
+
+        if sub_filter:
+            fc.append(f"[{cur}]{sub_filter}[vout]")
+            cur = "vout"
+
+        filter_complex = ";".join(fc)
+
         meta_args = ["-map_metadata", "-1"]
         if title:
             meta_args += ["-metadata", f"title={title}"]
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", str(composed_path),
-            "-loop", "1", "-t", str(duration), "-i", str(card_png_path),
+            "ffmpeg", *inputs,
             "-filter_complex", filter_complex,
-            "-map", "[outv]",
-            "-map", "0:a",  # mantém a narração original intacta
-            "-c:v", "libx264", "-preset", "fast",
-            "-c:a", "copy",
+            "-map", f"[{cur}]",
+            "-map", "1:a:0",
+            "-c:v", "libx264", "-preset", "veryfast",
+            "-c:a", "aac", "-b:a", "192k",
             *meta_args,
+            "-t", str(target_duration),
+            "-shortest",
             "-movflags", "+faststart",
             str(output_path),
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        logger.info(f"Compondo vídeo final (passagem única, {target_duration:.0f}s)...")
+        # Timeout proporcional à duração (encode em CPU pode ser lento em vídeos longos)
+        timeout = max(1800, int(target_duration * 8))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
-            raise RuntimeError(f"Falha ao sobrepor card de intro: {result.stderr[-500:]}")
+            raise RuntimeError(f"ffmpeg falhou ao compor vídeo final: {result.stderr[-600:]}")
 
-        logger.info(f"Card de intro sobreposto ({duration}s) — narração preservada")
+        logger.info(
+            f"Vídeo final gerado: {output_path} "
+            f"({output_path.stat().st_size / 1024 / 1024:.1f} MB)"
+        )
+
+
 
