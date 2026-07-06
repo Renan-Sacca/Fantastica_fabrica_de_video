@@ -119,6 +119,10 @@ class VideoWorker:
                 from renderers.video_bg.processor import VideoBgProcessor
                 processor = VideoBgProcessor(payload, self.drive, self._publish_progress)
                 await processor.process()
+            elif video_type == "video_compositor":
+                from renderers.video_compositor.processor import VideoCompositorProcessor
+                processor = VideoCompositorProcessor(payload, self.drive, self._publish_progress)
+                await processor.process()
             else:
                 logger.error(f"Video type '{video_type}' não suportado ou sem processador específico.")
 

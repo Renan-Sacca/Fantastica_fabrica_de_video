@@ -20,6 +20,9 @@
             {% if user is defined and user and 'video_bg' in user.permissions %}
             <a href="/video-bg" class="nav-link" style="color: var(--text-primary); text-decoration: none; font-weight: 500;">Vídeo Fundo</a>
             {% endif %}
+            {% if user is defined and user and 'video_compositor' in user.permissions %}
+            <a href="/video-compositor" class="nav-link" style="color: var(--text-primary); text-decoration: none; font-weight: 500;">Compositor</a>
+            {% endif %}
             {% if user is defined and user %}
             <div style="display: flex; align-items: center; gap: 12px; border-left: 1px solid var(--border-subtle); padding-left: 20px;">
                 {% if user.is_admin %}

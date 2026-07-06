@@ -3,6 +3,7 @@ services:
     build: .
     container_name: fabrica-worker
     volumes:
+      - .:/app
       - ../credentials.json:/app/credentials.json:ro
       - ../token.json:/app/token.json:ro
       - ../tts3/data:/app/tts3_audio

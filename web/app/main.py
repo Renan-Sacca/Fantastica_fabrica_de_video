@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import STATIC_DIR, TEMPLATES_DIR, OMNI_OUTPUTS_DIR
 from app.database import init_db
-from app.routers import audio, auth, dashboard, drive, jobs, progress, video_bg, whatsapp
+from app.routers import audio, auth, dashboard, drive, jobs, progress, video_bg, video_compositor, whatsapp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ app.include_router(dashboard.router)
 app.include_router(whatsapp.router)
 app.include_router(audio.router)
 app.include_router(video_bg.router)
+app.include_router(video_compositor.router)
 app.include_router(jobs.router)
 app.include_router(drive.router)
 app.include_router(progress.router)

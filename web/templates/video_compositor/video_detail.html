@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Vídeo Compositor — {{ job.title or job.job_id }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .vc-wrap { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+    .vc-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .vc-head h1 { font-size: 1.5rem; font-weight: 800; }
+    .vc-badge { background: linear-gradient(135deg, #e040fb, #7c4dff); color: #fff; padding: 4px 10px; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+    .vc-btn { padding: 10px 18px; border: none; border-radius: 8px; font-weight: 600; font-size: .9rem; cursor: pointer; color: #fff; text-decoration: none; display: inline-block; transition: all .2s; }
+    .vc-btn-primary { background: linear-gradient(135deg, #e040fb, #7c4dff); }
+    .vc-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(224,64,251,.4); }
+    .vc-btn-ghost { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit; }
+    .vc-btn-ghost:hover { border-color: rgba(255,255,255,.4); }
+
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .detail-item { padding: 14px; background: rgba(255,255,255,.03); border-radius: 10px; border: 1px solid rgba(255,255,255,.08); }
+    .detail-item .label { font-size: .78rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .5px; }
+    .detail-item .value { font-size: 1rem; font-weight: 600; }
+
+    @media (max-width: 600px) { .detail-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="vc-wrap">
+    <div class="vc-head">
+        <a href="/video-compositor/jobs" class="vc-btn vc-btn-ghost" style="font-size: .85rem;">← Voltar</a>
+        <h1>{{ job.title or job.job_id }}</h1>
+        <span class="vc-badge">COMPOSITOR</span>
+    </div>
+
+    <!-- Status e Progresso -->
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="card-title">📊 Status do Job</div>
+
+        {% set status = job.status or 'pending' %}
+        {% set progress = job.progress or 0 %}
+
+        <div class="progress-bar-wrapper">
+            <div class="progress-bar-track">
+                <div class="progress-bar-fill" style="width: {{ progress }}%"></div>
+            </div>
+            <div class="progress-info">
+                <span>
+                    <span class="job-status-badge {{ status }}">{{ status }}</span>
+                    {% if job.detail %} — {{ job.detail }}{% endif %}
+                </span>
+                <span>{{ progress }}%</span>
+            </div>
+        </div>
+
+        {% if job.error %}
+        <div class="progress-error" style="margin-top: 12px;">
+            ❌ {{ job.error }}
+        </div>
+        {% endif %}
+
+        {% if status == 'done' and job.video_url %}
+        <div style="margin-top: 16px; display: flex; gap: 12px; flex-wrap: wrap;">
+            <a href="{{ job.video_url }}" target="_blank" class="vc-btn vc-btn-primary">📥 Ver Vídeo no Drive</a>
+            {% if drive_link %}
+            <a href="{{ drive_link }}" target="_blank" class="vc-btn vc-btn-ghost">📂 Abrir Pasta</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Detalhes da composição -->
+    <div class="card">
+        <div class="card-title">🎨 Detalhes da Composição</div>
+        <div class="detail-grid">
+            <div class="detail-item">
+                <div class="label">Job ID</div>
+                <div class="value" style="font-family: monospace;">{{ job.job_id }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">Criado em</div>
+                <div class="value">{{ job.created_at or '—' }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">Resolução</div>
+                <div class="value">
+                    {% if job.resolution %}
+                        {{ job.resolution.width }}×{{ job.resolution.height }}
+                    {% else %}
+                        1080×1920
+                    {% endif %}
+                </div>
+            </div>
+            <div class="detail-item">
+                <div class="label">Áudio</div>
+                <div class="value">{{ job.audio_source or 'upload' }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">Posição Overlay</div>
+                <div class="value">{{ job.overlay_position or '—' }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="label">Vol. Secundário</div>
+                <div class="value">{{ job.secondary_audio_volume or 0 }}%</div>
+            </div>
+        </div>
+
+        {% if job.animations %}
+        <div style="margin-top: 16px;">
+            <div class="label" style="font-size:.78rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px;">Animações</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                {% for anim in job.animations %}
+                <span style="background: rgba(224,64,251,.15); color: #e040fb; padding: 4px 10px; border-radius: 999px; font-size: .82rem; font-weight: 600;">{{ anim }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if job.elements %}
+        <div style="margin-top: 16px;">
+            <div class="label" style="font-size:.78rem; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px;">Elementos</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                {% for elem in job.elements %}
+                <span style="background: rgba(124,77,255,.15); color: #7c4dff; padding: 4px 10px; border-radius: 999px; font-size: .82rem; font-weight: 600;">{{ elem }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if (job.status or 'pending') not in ('done', 'error') %}
+<script>
+    // Auto-refresh para acompanhar o progresso
+    const jobId = '{{ job.job_id }}';
+    const es = new EventSource(`/api/progress/${jobId}/stream`);
+    es.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.status === 'done' || data.status === 'error') {
+                es.close();
+                location.reload();
+            } else {
+                // Atualizar barra de progresso
+                const fill = document.querySelector('.progress-bar-fill');
+                if (fill) fill.style.width = `${data.progress}%`;
+                const info = document.querySelector('.progress-info span:last-child');
+                if (info) info.textContent = `${data.progress}%`;
+            }
+        } catch(e) {}
+    };
+    es.onerror = () => { es.close(); setTimeout(() => location.reload(), 10000); };
+</script>
+{% endif %}
+{% endblock %}

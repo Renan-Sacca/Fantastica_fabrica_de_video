@@ -1,0 +1,571 @@
+{% extends "base.html" %}
+
+{% block title %}Vídeo Compositor — Criar{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* ═══ Vídeo Compositor — Premium Dark Theme ═══ */
+    .vc-wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px; }
+    .vc-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .vc-head h1 { font-size: 1.5rem; font-weight: 800; }
+    .vc-badge { background: linear-gradient(135deg, #e040fb, #7c4dff); color: #fff; padding: 4px 10px; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+    .vc-head-actions { display: flex; gap: 8px; margin-left: auto; }
+    .vc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    .vc-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+    .vc-card h2 { font-size: 1.05rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .vc-card h3.sub { font-size: .78rem; opacity: .6; margin: 16px 0 8px; text-transform: uppercase; letter-spacing: .5px; }
+    .vc-card label { display: block; font-size: .82rem; font-weight: 500; margin: 8px 0 4px; color: var(--text-secondary); }
+    .vc-card textarea, .vc-card input[type=text], .vc-card input[type=number], .vc-card input[type=file], .vc-card select {
+        width: 100%; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.12);
+        border-radius: 8px; color: inherit; padding: 10px 12px; font-family: inherit; font-size: .95rem; box-sizing: border-box;
+    }
+    .vc-card input[type=range] { width: 100%; margin-top: 4px; accent-color: #e040fb; }
+    .vc-btn { margin-top: 10px; padding: 10px 18px; border: none; border-radius: 8px; font-weight: 600; font-size: .9rem; cursor: pointer; color: #fff; text-decoration: none; display: inline-block; transition: all .2s; }
+    .vc-btn-primary { background: linear-gradient(135deg, #e040fb, #7c4dff); }
+    .vc-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(224,64,251,.4); }
+    .vc-btn-ghost { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit; }
+    .vc-btn-ghost:hover { border-color: rgba(255,255,255,.4); }
+    .vc-btn-danger { background: rgba(239,68,68,.15); border: 1px solid rgba(239,68,68,.3); color: #ef4444; }
+    .vc-btn-sm { padding: 5px 10px; font-size: .78rem; margin-top: 0; }
+    .vc-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+</style>
+
+<style>
+    /* Audio source tabs */
+    .audio-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+    .audio-tab { padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); cursor: pointer; font-size: .85rem; font-weight: 600; opacity: .7; transition: all .2s; }
+    .audio-tab.active { background: linear-gradient(135deg, #e040fb, #7c4dff); color: #fff; opacity: 1; border-color: #7c4dff; }
+    .audio-tab:hover:not(.active) { opacity: 1; border-color: rgba(255,255,255,.3); }
+    .audio-panel { display: none; }
+    .audio-panel.active { display: block; }
+
+    /* Audio items list */
+    .audio-item {
+        border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 14px;
+        margin-bottom: 10px; background: rgba(255,255,255,.02); position: relative;
+    }
+    .audio-item-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .audio-item-num { background: linear-gradient(135deg,#e040fb,#7c4dff); color:#fff; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700; flex-shrink:0; }
+    .audio-item-title { flex:1; font-size:.9rem; font-weight:600; }
+    .audio-item-remove { background:none; border:none; color:rgba(239,68,68,.7); cursor:pointer; font-size:1rem; padding:2px 6px; border-radius:4px; }
+    .audio-item-remove:hover { color:#ef4444; background:rgba(239,68,68,.1); }
+
+    /* Image segment list */
+    .img-segment {
+        border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 14px;
+        margin-bottom: 10px; background: rgba(255,255,255,.02); position: relative;
+    }
+    .img-segment-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .img-segment-num { background: rgba(124,77,255,.3); border: 1px solid rgba(124,77,255,.5); color:#a78bfa; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700; flex-shrink:0; }
+    .img-segment-remove { background:none; border:none; color:rgba(239,68,68,.7); cursor:pointer; font-size:1rem; padding:2px 6px; border-radius:4px; }
+    .img-segment-remove:hover { color:#ef4444; background:rgba(239,68,68,.1); }
+    .seg-time-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px; }
+    .seg-time-hint { font-size:.7rem; opacity:.45; margin-top:3px; }
+
+    /* File drop */
+    .vc-file-drop { border: 2px dashed rgba(255,255,255,.15); border-radius: 12px; padding: 18px; text-align: center; cursor: pointer; transition: all .2s; position: relative; overflow: hidden; }
+    .vc-file-drop:hover { border-color: #e040fb; background: rgba(224,64,251,.06); }
+    .vc-file-drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 2; }
+    .vc-file-drop .icon { font-size: 2rem; margin-bottom: 6px; opacity: .5; }
+    .vc-file-drop .text { font-size: .82rem; color: var(--text-secondary); }
+    .vc-file-drop .hint { font-size: .68rem; color: var(--text-muted); margin-top: 3px; }
+    .vc-file-drop .preview { max-width: 100%; max-height: 160px; border-radius: 8px; margin-top: 8px; display: none; }
+    .vc-file-drop .file-name { font-size: .78rem; color: #e040fb; margin-top: 6px; display: none; }
+
+    /* Position grid */
+    .position-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; max-width: 200px; }
+    .position-grid button { padding: 8px; background: rgba(255,255,255,.05); border: 2px solid rgba(255,255,255,.1); border-radius: 8px; color: var(--text-secondary); cursor: pointer; font-size: .68rem; font-weight: 600; transition: all .2s; text-align: center; }
+    .position-grid button:hover { border-color: #e040fb; color: #e040fb; }
+    .position-grid button.active { background: rgba(224,64,251,.15); border-color: #e040fb; color: #e040fb; }
+
+    /* Gallery */
+    .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; }
+    .gallery-item { background: rgba(255,255,255,.04); border: 2px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px 6px; text-align: center; cursor: pointer; transition: all .2s; }
+    .gallery-item:hover { border-color: rgba(224,64,251,.4); transform: translateY(-2px); }
+    .gallery-item.selected { border-color: #e040fb; background: rgba(224,64,251,.1); }
+    .gallery-item .gi-icon { font-size: 1.6rem; margin-bottom: 4px; display: block; }
+    .gallery-item .gi-name { font-size: .68rem; color: var(--text-secondary); font-weight: 500; }
+
+    /* Layers */
+    .layers-list { display: flex; flex-direction: column; gap: 6px; }
+    .layer-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; cursor: grab; transition: all .2s; user-select: none; }
+    .layer-item:hover { border-color: rgba(224,64,251,.3); }
+    .layer-item.dragging { opacity: .5; border-color: #e040fb; }
+    .layer-item .layer-drag { font-size: 1.1rem; color: var(--text-muted); cursor: grab; }
+    .layer-item .layer-name { flex: 1; font-size: .88rem; font-weight: 500; }
+
+    /* Preview canvas */
+    .preview-canvas { width: 100%; aspect-ratio: 9/16; background: #0a0a14; border-radius: 14px; border: 1px solid rgba(255,255,255,.08); overflow: hidden; position: relative; display: flex; align-items: center; justify-content: center; }
+    .preview-canvas .preview-bg { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
+    .preview-canvas .preview-overlay { position: absolute; object-fit: contain; z-index: 2; max-width: 50%; max-height: 40%; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .preview-canvas .preview-placeholder { color: var(--text-muted); font-size: .9rem; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .preview-canvas .preview-placeholder .ph-icon { font-size: 3rem; opacity: .3; }
+    .preview-anim-badge { position: absolute; bottom: 10px; right: 10px; z-index: 5; display: flex; gap: 4px; flex-wrap: wrap; }
+    .preview-anim-badge span { background: rgba(224,64,251,.2); border: 1px solid rgba(224,64,251,.4); padding: 2px 8px; border-radius: 999px; font-size: .65rem; color: #e040fb; font-weight: 600; }
+
+    /* Volume control */
+    .volume-control { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: rgba(255,255,255,.03); border-radius: 10px; margin-top: 8px; }
+    .volume-control label { margin: 0; min-width: 40px; font-size: .82rem; }
+    .volume-control input[type=range] { flex: 1; margin: 0; }
+    .volume-control .vol-value { min-width: 40px; text-align: center; font-weight: 600; font-size: .88rem; color: #e040fb; }
+
+    /* Resolution chips */
+    .res-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .res-chip { padding: 8px 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); cursor: pointer; font-size: .85rem; font-weight: 600; opacity: .7; transition: all .2s; background: transparent; color: inherit; }
+    .res-chip.active { background: linear-gradient(135deg, #e040fb, #7c4dff); color: #fff; opacity: 1; border-color: #7c4dff; }
+    .res-chip:hover:not(.active) { opacity: 1; border-color: rgba(255,255,255,.3); }
+
+    /* Progress / result */
+    .vc-progress { margin-top: 16px; }
+    .vc-progress .bar { height: 8px; background: rgba(255,255,255,.1); border-radius: 999px; overflow: hidden; }
+    .vc-progress .fill { height: 100%; width: 0; background: linear-gradient(90deg, #e040fb, #7c4dff); transition: width .3s; border-radius: 999px; }
+
+    /* OmniVoice inside compositor */
+    .omni-params-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .omni-check { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .omni-check input[type=checkbox] { width: auto; accent-color: #e040fb; }
+
+    /* Accordion */
+    .section-header { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 0; margin-bottom: 12px; }
+    .section-header h2 { margin: 0; }
+    .section-header .chevron { transition: transform .2s; font-size: .8rem; }
+    .section-header.collapsed .chevron { transform: rotate(-90deg); }
+    .section-body { overflow: hidden; }
+    .section-body.collapsed { display: none; }
+
+    .muted { opacity: .6; font-size: .88rem; }
+    .hidden { display: none !important; }
+    .hint { font-size: .72rem; opacity: .5; margin-top: 2px; }
+    .add-btn { display: flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px dashed rgba(255,255,255,.2); border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: .85rem; font-weight: 600; transition: all .2s; margin-top: 8px; }
+    .add-btn:hover { border-color: #e040fb; color: #e040fb; }
+
+    /* Botão aplicar controle fino */
+    .overlay-apply-btn { padding: 7px 14px; border: none; border-radius: 8px; background: linear-gradient(135deg,#e040fb,#7c4dff); color:#fff; font-weight:600; font-size:.85rem; cursor:pointer; transition: all .2s; margin-top:2px; }
+    .overlay-apply-btn:hover { transform:translateY(-1px); box-shadow:0 3px 12px rgba(224,64,251,.4); }
+
+    @media (max-width: 900px) { .vc-grid { grid-template-columns: 1fr; } .omni-params-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="vc-wrap">
+    <!-- Cabeçalho -->
+    <div class="vc-head">
+        <h1>🎨 Vídeo Compositor</h1>
+        <span class="vc-badge">NOVO</span>
+        <div class="vc-head-actions">
+            <a href="/video-compositor/jobs" class="vc-btn vc-btn-ghost" style="margin-top:0;">📋 Meus Vídeos</a>
+        </div>
+    </div>
+
+    <form id="compositorForm" enctype="multipart/form-data">
+        <!-- Título e Resolução -->
+        <div class="vc-card">
+            <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end;">
+                <div>
+                    <label for="title">Título do Vídeo</label>
+                    <input type="text" id="title" name="title" placeholder="Ex: Meu vídeo personalizado" required>
+                </div>
+                <div>
+                    <label>Resolução</label>
+                    <div class="res-chips">
+                        <button type="button" class="res-chip active" data-res="1080x1920" onclick="selectResolution(this)">📱 Vertical<br><small>1080×1920</small></button>
+                        <button type="button" class="res-chip" data-res="1920x1080" onclick="selectResolution(this)">🖥️ Horizontal<br><small>1920×1080</small></button>
+                        <button type="button" class="res-chip" data-res="1080x1080" onclick="selectResolution(this)">⬜ Quadrado<br><small>1080×1080</small></button>
+                    </div>
+                    <input type="hidden" name="resolution" id="resolution" value="1080x1920">
+                </div>
+            </div>
+        </div>
+
+        <div class="vc-grid">
+            <!-- ═══ Coluna Esquerda — Configurações ═══ -->
+            <div class="vc-col-config">
+
+                <!-- 🎵 Áudio Principal (múltiplos) -->
+                <div class="vc-card">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="chevron">▼</span>
+                        <h2>🎵 Áudios Principais</h2>
+                    </div>
+                    <div class="section-body">
+                        <p class="muted" style="margin-bottom:10px;">Adicione um ou mais áudios. Eles serão concatenados em sequência no vídeo final.</p>
+                        <div id="audioItemsList"></div>
+                        <button type="button" class="add-btn" onclick="addAudioItem()">➕ Adicionar áudio</button>
+                    </div>
+                </div>
+
+                <!-- 🎶 Áudio Secundário (fundo) -->
+                <div class="vc-card">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="chevron">▼</span>
+                        <h2>🎶 Áudio Secundário <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
+                    </div>
+                    <div class="section-body">
+                        <div class="vc-file-drop" id="secAudioDropZone">
+                            <input type="file" name="secondary_audio_file" id="secondary_audio_file" accept="audio/*">
+                            <div class="icon">🎶</div>
+                            <div class="text">Música de fundo ou efeito sonoro</div>
+                            <div class="hint">Reproduzido ao longo de todo o vídeo</div>
+                            <div class="file-name" id="secAudioFileName"></div>
+                        </div>
+                        <div class="volume-control">
+                            <label>🔈 Vol</label>
+                            <input type="range" min="0" max="100" value="20" name="secondary_audio_volume" id="secVolume" oninput="updateVolDisplay(this,'secVolValue')">
+                            <span class="vol-value" id="secVolValue">20%</span>
+                        </div>
+                        <p class="hint">💡 Ex: Voz 100%, música ambiente 20%</p>
+                    </div>
+                </div>
+
+                <!-- 🖼️ Imagens de Fundo (por segmento) -->
+                <div class="vc-card">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="chevron">▼</span>
+                        <h2>🖼️ Imagens de Fundo</h2>
+                    </div>
+                    <div class="section-body">
+                        <p class="muted" style="margin-bottom:10px;">
+                            Adicione uma ou mais imagens de fundo. Cada uma pode ter início/fim em segundos para aparecer no momento certo do áudio.
+                            <br><span class="hint">Ex: Áudio de 20s → Imagem 1 de 0 a 15s, Imagem 2 de 15 a 20s</span>
+                        </p>
+                        <div id="bgSegmentsList"></div>
+                        <button type="button" class="add-btn" onclick="addBgSegment()">➕ Adicionar imagem de fundo</button>
+                    </div>
+                </div>
+
+                <!-- 📸 Imagens Sobrepostas (por segmento) -->
+                <div class="vc-card">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="chevron">▼</span>
+                        <h2>📸 Imagens Sobrepostas <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
+                    </div>
+                    <div class="section-body">
+                        <p class="muted" style="margin-bottom:10px;">
+                            Personagem, logo ou qualquer imagem sobre o fundo. Defina o intervalo de tempo de cada uma.
+                        </p>
+                        <div id="overlaySegmentsList"></div>
+                        <button type="button" class="add-btn" onclick="addOverlaySegment()">➕ Adicionar imagem sobreposta</button>
+                    </div>
+                </div>
+
+                <!-- ✨ Elementos Decorativos -->
+                <div class="vc-card">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="chevron">▼</span>
+                        <h2>✨ Elementos Decorativos <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
+                    </div>
+                    <div class="section-body">
+                        <div class="gallery" id="elementsGallery">
+                            <div class="gallery-item" data-element="moldura_gold" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">🖼️</span><span class="gi-name">Moldura Dourada</span></div>
+                            <div class="gallery-item" data-element="moldura_neon" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">💜</span><span class="gi-name">Moldura Neon</span></div>
+                            <div class="gallery-item" data-element="barra_inferior" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">▬</span><span class="gi-name">Barra Inferior</span></div>
+                            <div class="gallery-item" data-element="caixa_texto" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">💬</span><span class="gi-name">Caixa de Texto</span></div>
+                            <div class="gallery-item" data-element="gradiente_top" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">🌅</span><span class="gi-name">Gradiente Sup.</span></div>
+                            <div class="gallery-item" data-element="gradiente_bottom" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">🌆</span><span class="gi-name">Gradiente Inf.</span></div>
+                            <div class="gallery-item" data-element="sombra_vinheta" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">🔲</span><span class="gi-name">Vinheta</span></div>
+                            <div class="gallery-item" data-element="sombra_radial" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">⭕</span><span class="gi-name">Sombra Radial</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 🎬 Animações -->
+                <div class="vc-card">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="chevron">▼</span>
+                        <h2>🎬 Animações <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
+                    </div>
+                    <div class="section-body">
+                        <div class="gallery" id="animationsGallery">
+                            <div class="gallery-item" data-animation="particulas" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">✨</span><span class="gi-name">Partículas</span></div>
+                            <div class="gallery-item" data-animation="fumaca" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">🌫️</span><span class="gi-name">Fumaça</span></div>
+                            <div class="gallery-item" data-animation="brilho" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">💎</span><span class="gi-name">Brilho</span></div>
+                            <div class="gallery-item" data-animation="fogo" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">🔥</span><span class="gi-name">Fogo</span></div>
+                            <div class="gallery-item" data-animation="chuva" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">🌧️</span><span class="gi-name">Chuva</span></div>
+                            <div class="gallery-item" data-animation="neve" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">❄️</span><span class="gi-name">Neve</span></div>
+                            <div class="gallery-item" data-animation="faiscas" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">⚡</span><span class="gi-name">Faíscas</span></div>
+                            <div class="gallery-item" data-animation="explosao" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">💥</span><span class="gi-name">Explosão</span></div>
+                            <div class="gallery-item" data-animation="luz" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">💡</span><span class="gi-name">Efeito de Luz</span></div>
+                            <div class="gallery-item" data-animation="loop_bg" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">🔄</span><span class="gi-name">Loop Fundo</span></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div><!-- /vc-col-config -->
+
+            <!-- ═══ Coluna Direita — Preview & Camadas ═══ -->
+            <div class="vc-col-preview" style="position: sticky; top: 100px;">
+                <!-- Pré-visualização -->
+                <div class="vc-card">
+                    <h2>👁️ Pré-visualização</h2>
+                    <div class="preview-canvas" id="previewCanvas">
+                        <img class="preview-bg" id="previewBg" style="display:none;" alt="">
+                        <img class="preview-overlay" id="previewOverlay" style="display:none;" alt="">
+                        <div class="preview-placeholder" id="previewPlaceholder">
+                            <span class="ph-icon">🎨</span>
+                            <span>Adicione uma imagem de fundo para ver a prévia</span>
+                        </div>
+                        <div class="preview-anim-badge" id="previewAnimBadges"></div>
+                    </div>
+                    <div style="margin-top:10px; padding:10px 12px; background:rgba(255,255,255,.03); border-radius:10px;">
+                        <div style="font-size:.78rem; color:var(--text-secondary); margin-bottom:4px;">🎵 Áudios</div>
+                        <div style="font-size:.82rem; font-weight:600; color:#e040fb;" id="previewAudioCount">—</div>
+                    </div>
+                </div>
+
+                <!-- 📐 Camadas -->
+                <div class="vc-card">
+                    <h2>📐 Camadas</h2>
+                    <p class="muted" style="margin-bottom: 12px;">Arraste para reordenar</p>
+                    <div class="layers-list" id="layersList"></div>
+                </div>
+
+                <!-- Botão Gerar -->
+                <button type="button" class="vc-btn vc-btn-primary" id="btnGenerate" style="width:100%; padding:16px; font-size:1.1rem; margin-top:0;" onclick="submitCompositor()">
+                    🚀 Gerar Vídeo
+                </button>
+
+                <div class="vc-progress hidden" id="progressSection" style="margin-top:12px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                        <span style="font-size:.88rem; font-weight:600;" id="progressLabel">Preparando...</span>
+                        <span style="font-size:.88rem; font-weight:700; color:#e040fb;" id="progressPercent">0%</span>
+                    </div>
+                    <div class="bar"><div class="fill" id="progressFill"></div></div>
+                    <p class="hint" style="margin-top:6px;" id="progressDetail">Aguardando worker...</p>
+                </div>
+
+                <div class="hidden" id="resultSection" style="margin-top:12px;">
+                    <div class="vc-card" style="border-color:rgba(224,64,251,.3); text-align:center; padding:30px;">
+                        <span style="font-size:3rem; display:block; margin-bottom:12px;">🎉</span>
+                        <h2 style="margin-bottom:8px;">Vídeo Pronto!</h2>
+                        <a id="resultLink" href="#" target="_blank" class="vc-btn vc-btn-primary" style="margin-top:8px;">📥 Ver no Drive</a>
+                    </div>
+                </div>
+            </div>
+        </div><!-- /vc-grid -->
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Template: item de áudio (upload) -->
+<template id="tplAudioUpload">
+<div class="audio-panel active" data-panel-type="upload">
+    <div class="vc-file-drop">
+        <input type="file" accept="audio/*" class="audio-file-input">
+        <div class="icon">🎵</div>
+        <div class="text">Arraste ou clique para enviar o áudio</div>
+        <div class="hint">MP3, WAV, OGG — Máx 50MB</div>
+        <div class="file-name"></div>
+    </div>
+    <div class="volume-control" style="margin-top:8px;">
+        <label>🔊 Vol</label>
+        <input type="range" min="0" max="100" value="100" class="audio-vol-range">
+        <span class="vol-value audio-vol-display">100%</span>
+    </div>
+</div>
+</template>
+
+<!-- Template: item de áudio (OmniVoice / IA) -->
+<template id="tplAudioOmni">
+<div class="audio-panel active" data-panel-type="omni">
+    <label>Texto para narração</label>
+    <textarea rows="3" style="font-family:inherit; font-size:.9rem; min-height:80px;" class="omni-text-input" placeholder="Digite o texto que será narrado pela IA..."></textarea>
+
+    <label style="margin-top:10px;">Modo de voz</label>
+    <div class="audio-tabs" style="margin-bottom:8px;">
+        <button type="button" class="audio-tab active omni-mode-tab" data-mode="clone" onclick="switchOmniMode(this)">🎙️ Clonar voz</button>
+        <button type="button" class="audio-tab omni-mode-tab" data-mode="design" onclick="switchOmniMode(this)">🎨 Voice Design</button>
+        <button type="button" class="audio-tab omni-mode-tab" data-mode="auto" onclick="switchOmniMode(this)">🤖 Auto</button>
+    </div>
+
+    <!-- Clone panel -->
+    <div class="omni-sub-panel active" data-sub="clone">
+        <label>Voz de referência</label>
+        <select class="omni-voice-select">
+            <option value="">Carregando vozes...</option>
+        </select>
+        <p class="hint" style="margin-top:4px;">Gerencie vozes em <a href="/audio" target="_blank" style="color:#e040fb;">Gerar Áudio</a></p>
+    </div>
+
+    <!-- Voice Design panel -->
+    <div class="omni-sub-panel" data-sub="design" style="display:none;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px;">
+            <div><label>Gênero</label>
+                <select class="omni-d-gender">
+                    <option value="">—</option><option value="male">Masculino</option><option value="female">Feminino</option>
+                </select></div>
+            <div><label>Idade</label>
+                <select class="omni-d-age">
+                    <option value="">—</option><option value="child">child</option><option value="teenager">teenager</option>
+                    <option value="young adult">young adult</option><option value="middle-aged">middle-aged</option><option value="elderly">elderly</option>
+                </select></div>
+            <div><label>Tom</label>
+                <select class="omni-d-pitch">
+                    <option value="">—</option><option value="very low pitch">Muito grave</option><option value="low pitch">Grave</option>
+                    <option value="moderate pitch">Moderado</option><option value="high pitch">Agudo</option><option value="very high pitch">Muito agudo</option>
+                </select></div>
+            <div><label>Estilo</label>
+                <select class="omni-d-style">
+                    <option value="">—</option><option value="whisper">whisper</option>
+                </select></div>
+        </div>
+        <label style="margin-top:8px;">Instruct livre (sobrescreve acima)</label>
+        <input type="text" class="omni-d-free" placeholder='ex: female, young adult, british accent'>
+    </div>
+
+    <!-- Auto panel -->
+    <div class="omni-sub-panel" data-sub="auto" style="display:none;">
+        <p class="muted" style="font-size:.82rem;">Voz escolhida automaticamente pelo modelo.</p>
+    </div>
+
+    <details style="margin-top:10px; border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:8px 12px;">
+        <summary style="cursor:pointer; font-weight:600; font-size:.85rem;">⚙️ Parâmetros avançados</summary>
+        <div style="margin-top:8px;">
+            <label>Preset salvo</label>
+            <select class="omni-preset-select" style="margin-bottom:8px;">
+                <option value="">Selecione um preset...</option>
+            </select>
+            <div class="omni-params-grid">
+                <div><label>num_step</label><input type="number" class="omni-p num_step" placeholder="32" step="1" min="1"><div class="hint">Passos de difusão (16–64)</div></div>
+                <div><label>guidance_scale</label><input type="number" class="omni-p guidance_scale" placeholder="2.0" step="0.1"><div class="hint">Força do guia (0–5)</div></div>
+                <div><label>speed</label><input type="number" class="omni-p speed" placeholder="1.0" step="0.1" min="0.5" max="2.0"><div class="hint">Velocidade da fala</div></div>
+                <div><label>language_id</label><input type="text" class="omni-p language_id" placeholder="pt-BR"><div class="hint">Idioma (auto se vazio)</div></div>
+                <div><label>position_temperature</label><input type="number" class="omni-p position_temperature" placeholder="5.0" step="0.1"></div>
+                <div><label>class_temperature</label><input type="number" class="omni-p class_temperature" placeholder="0.0" step="0.1"></div>
+            </div>
+            <div class="omni-check"><input type="checkbox" class="omni-p-denoise" checked><label style="margin:0; font-size:.82rem;">🔇 denoise</label></div>
+            <div class="omni-check"><input type="checkbox" class="omni-p-preprocess" checked><label style="margin:0; font-size:.82rem;">🧹 preprocess_prompt</label></div>
+            <div class="omni-check"><input type="checkbox" class="omni-p-postprocess" checked><label style="margin:0; font-size:.82rem;">✂️ postprocess_output</label></div>
+        </div>
+    </details>
+    <div class="volume-control" style="margin-top:8px;">
+        <label>🔊 Vol</label>
+        <input type="range" min="0" max="100" value="100" class="audio-vol-range">
+        <span class="vol-value audio-vol-display">100%</span>
+    </div>
+</div>
+</template>
+
+<!-- Template: segmento de imagem de fundo -->
+<template id="tplBgSegment">
+<div class="img-segment">
+    <div class="img-segment-header">
+        <div class="img-segment-num"></div>
+        <span style="flex:1; font-size:.88rem; font-weight:600;">Imagem de Fundo</span>
+        <button type="button" class="img-segment-remove" onclick="removeBgSegment(this)" title="Remover">✕</button>
+    </div>
+    <div class="vc-file-drop">
+        <input type="file" accept="image/*" class="bg-img-input">
+        <div class="icon">🖼️</div>
+        <div class="text">Clique ou arraste a imagem de fundo</div>
+        <div class="hint">PNG, JPG, WEBP</div>
+        <img class="preview" alt="">
+        <div class="file-name"></div>
+    </div>
+    <div class="seg-time-row" style="margin-top:10px;">
+        <div>
+            <label>Início (segundos)</label>
+            <input type="number" class="seg-start" min="0" step="0.1" placeholder="0" value="0">
+            <div class="seg-time-hint">Segundo do vídeo em que esta imagem aparece</div>
+        </div>
+        <div>
+            <label>Fim (segundos)</label>
+            <input type="number" class="seg-end" min="0" step="0.1" placeholder="(fim do vídeo)">
+            <div class="seg-time-hint">Deixe vazio para usar até o fim do vídeo</div>
+        </div>
+    </div>
+</div>
+</template>
+
+<!-- Template: segmento de imagem sobreposta -->
+<template id="tplOverlaySegment">
+<div class="img-segment">
+    <div class="img-segment-header">
+        <div class="img-segment-num"></div>
+        <span style="flex:1; font-size:.88rem; font-weight:600;">Imagem Sobreposta</span>
+        <button type="button" class="img-segment-remove" onclick="removeOverlaySegment(this)" title="Remover">✕</button>
+    </div>
+    <div class="vc-file-drop">
+        <input type="file" accept="image/*" class="overlay-img-input">
+        <div class="icon">📸</div>
+        <div class="text">Personagem, logo, print...</div>
+        <div class="hint">Será posicionada sobre o fundo</div>
+        <img class="preview" alt="">
+        <div class="file-name"></div>
+    </div>
+    <div class="seg-time-row" style="margin-top:10px;">
+        <div>
+            <label>Início (segundos)</label>
+            <input type="number" class="seg-start" min="0" step="0.1" placeholder="0" value="0">
+        </div>
+        <div>
+            <label>Fim (segundos)</label>
+            <input type="number" class="seg-end" min="0" step="0.1" placeholder="(fim do vídeo)">
+        </div>
+    </div>
+
+    <!-- Posição rápida 3×3 -->
+    <div style="margin-top:12px;">
+        <label>Posição rápida</label>
+        <div class="position-grid overlay-pos-grid">
+            <button type="button" data-pos="superior esquerda" onclick="selectOvPos(this)">↖ Sup.Esq.</button>
+            <button type="button" data-pos="superior" onclick="selectOvPos(this)">↑ Superior</button>
+            <button type="button" data-pos="superior direita" onclick="selectOvPos(this)">↗ Sup.Dir.</button>
+            <button type="button" data-pos="esquerda" onclick="selectOvPos(this)">← Esq.</button>
+            <button type="button" data-pos="centro" class="active" onclick="selectOvPos(this)">● Centro</button>
+            <button type="button" data-pos="direita" onclick="selectOvPos(this)">Dir. →</button>
+            <button type="button" data-pos="inferior esquerda" onclick="selectOvPos(this)">↙ Inf.Esq.</button>
+            <button type="button" data-pos="inferior" onclick="selectOvPos(this)">↓ Inferior</button>
+            <button type="button" data-pos="inferior direita" onclick="selectOvPos(this)">↘ Inf.Dir.</button>
+        </div>
+    </div>
+
+    <!-- Tamanho por percentual (slider rápido) -->
+    <div style="margin-top:10px;">
+        <label>Tamanho rápido (%)</label>
+        <div class="volume-control" style="margin-top:0;">
+            <label>📐</label>
+            <input type="range" min="10" max="100" value="50" class="overlay-scale-range">
+            <span class="vol-value">50%</span>
+        </div>
+    </div>
+
+    <!-- Controle fino: tamanho em px e posição X, Y -->
+    <details class="overlay-fine-ctrl" style="margin-top:10px; border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:8px 12px;">
+        <summary style="cursor:pointer; font-weight:600; font-size:.85rem; user-select:none;">
+            🎯 Controle fino (tamanho e posição em pixels)
+        </summary>
+        <p class="hint" style="margin:6px 0 10px;">Baseado na resolução de saída. Deixe em branco para usar os controles rápidos acima.</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+            <div>
+                <label>Largura (px)</label>
+                <input type="number" class="overlay-px-w" min="1" step="1" placeholder="auto">
+                <div class="hint">Largura da imagem em pixels</div>
+            </div>
+            <div>
+                <label>Altura (px)</label>
+                <input type="number" class="overlay-px-h" min="1" step="1" placeholder="auto">
+                <div class="hint">Altura da imagem em pixels</div>
+            </div>
+            <div>
+                <label>Posição X (px)</label>
+                <input type="number" class="overlay-px-x" step="1" placeholder="(centro)">
+                <div class="hint">Distância da borda esquerda</div>
+            </div>
+            <div>
+                <label>Posição Y (px)</label>
+                <input type="number" class="overlay-px-y" step="1" placeholder="(centro)">
+                <div class="hint">Distância da borda superior</div>
+            </div>
+        </div>
+        <button type="button" class="overlay-apply-btn" onclick="applyFinePosition(this)">
+            ▶ Aplicar ao preview
+        </button>
+        <p class="hint" style="margin-top:6px;" id="">💡 Clique em "Aplicar" para ver no preview. Os valores em px têm prioridade sobre os controles rápidos.</p>
+    </details>
+</div>
+</template>
+
+<script src="/static/video_compositor.js?v=5"></script>
+{% endblock %}

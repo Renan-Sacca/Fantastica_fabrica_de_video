@@ -9,12 +9,14 @@ from __future__ import annotations
 from renderers.base import BaseRenderer
 from renderers.whatsapp import WhatsAppRenderer
 from renderers.video_bg import VideoBgRenderer
+from renderers.video_compositor import VideoCompositorRenderer
 
 # ── Registry ──
 # Mapeamento: video_type → classe do renderer
 RENDERER_REGISTRY: dict[str, type[BaseRenderer]] = {
     "whatsapp": WhatsAppRenderer,
     "video_bg": VideoBgRenderer,
+    "video_compositor": VideoCompositorRenderer,
     # Futuramente:
     # "reddit": RedditRenderer,
     # "twitter": TwitterRenderer,

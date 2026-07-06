@@ -28,4 +28,5 @@ class Permission(Base):
         "use_ai",
         "omnivoice_audio",
         "video_bg",
+        "video_compositor",
     ]

@@ -1,0 +1,977 @@
+/**
+ * Vídeo Compositor — Lógica do editor visual v2
+ * Suporta: múltiplos áudios, OmniVoice com seleção de voz/preset/configuração,
+ *          imagens de fundo por segmento de tempo, imagens sobrepostas por segmento.
+ */
+
+// ══════════════════════════════════════════
+// Estado global
+// ══════════════════════════════════════════
+const state = {
+    selectedAnimations: [],
+    selectedElements: [],
+    layers: [],
+    resolution: '1080x1920',
+    audioItems: [],       // [{type:'upload'|'omni', file:File|null, omni:{...}, volume:100}]
+    bgSegments: [],       // [{file:File, previewUrl:str, startSec:num, endSec:num|null}]
+    overlaySegments: [],  // [{file:File, previewUrl:str, startSec:num, endSec:num|null, position:str, scale:num}]
+    jobId: null,
+    eventSource: null,
+    // OmniVoice shared data
+    omniVoices: [],
+    omniPresets: [],
+};
+
+let audioItemCounter = 0;
+let bgSegmentCounter = 0;
+let overlaySegmentCounter = 0;
+
+// ══════════════════════════════════════════
+// Resolução
+// ══════════════════════════════════════════
+function selectResolution(btn) {
+    document.querySelectorAll('.res-chip').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    state.resolution = btn.dataset.res;
+    document.getElementById('resolution').value = state.resolution;
+    const canvas = document.getElementById('previewCanvas');
+    const [w, h] = state.resolution.split('x').map(Number);
+    canvas.style.aspectRatio = `${w}/${h}`;
+}
+
+// ══════════════════════════════════════════
+// Volume display
+// ══════════════════════════════════════════
+function updateVolDisplay(input, spanId) {
+    document.getElementById(spanId).textContent = `${input.value}%`;
+}
+
+// ══════════════════════════════════════════
+// Accordion
+// ══════════════════════════════════════════
+function toggleSection(header) {
+    const body = header.nextElementSibling;
+    header.classList.toggle('collapsed');
+    body.classList.toggle('collapsed');
+}
+
+// ══════════════════════════════════════════
+// OmniVoice: carregar vozes e presets compartilhados
+// ══════════════════════════════════════════
+async function loadOmniVoices() {
+    try {
+        const res = await fetch('/audio/api/voices');
+        if (!res.ok) return;
+        const data = await res.json();
+        state.omniVoices = data.custom || [];
+        refreshAllVoiceSelects();
+    } catch (e) { /* silencioso */ }
+}
+
+async function loadOmniPresets() {
+    try {
+        const res = await fetch('/audio/api/presets');
+        if (!res.ok) return;
+        const data = await res.json();
+        state.omniPresets = data.presets || [];
+        refreshAllPresetSelects();
+    } catch (e) { /* silencioso */ }
+}
+
+function refreshAllVoiceSelects() {
+    document.querySelectorAll('.omni-voice-select').forEach(sel => {
+        const current = sel.value;
+        if (state.omniVoices.length) {
+            sel.innerHTML = state.omniVoices
+                .map(v => `<option value="${v.id}"${v.id === current ? ' selected' : ''}>${v.name}</option>`)
+                .join('');
+        } else {
+            sel.innerHTML = '<option value="">Nenhuma voz — crie em Gerar Áudio</option>';
+        }
+    });
+}
+
+function refreshAllPresetSelects() {
+    document.querySelectorAll('.omni-preset-select').forEach(sel => {
+        const current = sel.value;
+        sel.innerHTML = '<option value="">Selecione um preset...</option>' +
+            state.omniPresets.map(p =>
+                `<option value="${p.preset_id}"${p.preset_id === current ? ' selected' : ''}>${p.name}</option>`
+            ).join('');
+        sel.onchange = () => applyPresetToBlock(sel);
+    });
+}
+
+function applyPresetToBlock(sel) {
+    const presetId = sel.value;
+    if (!presetId) return;
+    const preset = state.omniPresets.find(p => p.preset_id === presetId);
+    if (!preset || !preset.params) return;
+    const block = sel.closest('.audio-panel');
+    if (!block) return;
+    const params = preset.params;
+    ['num_step','guidance_scale','speed','language_id','position_temperature','class_temperature'].forEach(k => {
+        const el = block.querySelector(`.omni-p.${k}`);
+        if (el && params[k] != null) el.value = params[k];
+    });
+    const denoise = block.querySelector('.omni-p-denoise');
+    const pre = block.querySelector('.omni-p-preprocess');
+    const post = block.querySelector('.omni-p-postprocess');
+    if (denoise && params.denoise != null) denoise.checked = !!params.denoise;
+    if (pre && params.preprocess_prompt != null) pre.checked = !!params.preprocess_prompt;
+    if (post && params.postprocess_output != null) post.checked = !!params.postprocess_output;
+    showToast(`Preset "${preset.name}" aplicado!`, 'success');
+}
+
+// ══════════════════════════════════════════
+// Áudio: OmniVoice mode toggle dentro de um item
+// ══════════════════════════════════════════
+function switchOmniMode(btn) {
+    const block = btn.closest('.audio-panel');
+    block.querySelectorAll('.omni-mode-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    const mode = btn.dataset.mode;
+    block.querySelectorAll('.omni-sub-panel').forEach(p => {
+        p.style.display = p.dataset.sub === mode ? 'block' : 'none';
+    });
+}
+
+// ══════════════════════════════════════════
+// Áudio: Adicionar/Remover itens
+// ══════════════════════════════════════════
+function addAudioItem() {
+    audioItemCounter++;
+    const idx = audioItemCounter;
+    const container = document.getElementById('audioItemsList');
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'audio-item';
+    wrapper.dataset.idx = idx;
+
+    wrapper.innerHTML = `
+        <div class="audio-item-header">
+            <div class="audio-item-num">${container.querySelectorAll('.audio-item').length + 1}</div>
+            <span class="audio-item-title">Áudio ${container.querySelectorAll('.audio-item').length + 1}</span>
+            <div style="display:flex; gap:6px;">
+                <div class="audio-tabs" style="margin:0;">
+                    <button type="button" class="audio-tab active" onclick="switchAudioType(this,'upload')">📁 Arquivo</button>
+                    <button type="button" class="audio-tab" onclick="switchAudioType(this,'omni')">🤖 IA</button>
+                </div>
+                <button type="button" class="audio-item-remove" onclick="removeAudioItem(this)" title="Remover áudio">✕</button>
+            </div>
+        </div>
+        <div class="audio-panels-wrap"></div>
+    `;
+
+    const panelsWrap = wrapper.querySelector('.audio-panels-wrap');
+
+    // Upload panel
+    const uploadTpl = document.getElementById('tplAudioUpload').content.cloneNode(true);
+    panelsWrap.appendChild(uploadTpl);
+
+    // Omni panel
+    const omniTpl = document.getElementById('tplAudioOmni').content.cloneNode(true);
+    const omniPanel = omniTpl.querySelector('.audio-panel');
+    omniPanel.classList.remove('active');
+    panelsWrap.appendChild(omniTpl);
+
+    container.appendChild(wrapper);
+
+    // Setup file input for upload panel
+    const fileInput = wrapper.querySelector('.audio-file-input');
+    const fileName = wrapper.querySelector('.audio-panel[data-panel-type=upload] .file-name');
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files[0]) {
+            fileName.textContent = '✅ ' + fileInput.files[0].name;
+            fileName.style.display = 'block';
+        }
+        updateAudioPreview();
+    });
+
+    // Volume display for all range inputs in this item
+    wrapper.querySelectorAll('.audio-vol-range').forEach(range => {
+        range.addEventListener('input', () => {
+            range.nextElementSibling.textContent = range.value + '%';
+        });
+    });
+
+    // Populate voice/preset selects
+    const voiceSel = wrapper.querySelector('.omni-voice-select');
+    if (state.omniVoices.length) {
+        voiceSel.innerHTML = state.omniVoices.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+    } else {
+        voiceSel.innerHTML = '<option value="">Nenhuma voz — crie em Gerar Áudio</option>';
+    }
+
+    const presetSel = wrapper.querySelector('.omni-preset-select');
+    presetSel.innerHTML = '<option value="">Selecione um preset...</option>' +
+        state.omniPresets.map(p => `<option value="${p.preset_id}">${p.name}</option>`).join('');
+    presetSel.addEventListener('change', () => applyPresetToBlock(presetSel));
+
+    renumberAudioItems();
+    updateAudioPreview();
+    updateLayers();
+}
+
+function switchAudioType(btn, type) {
+    const item = btn.closest('.audio-item');
+    item.querySelectorAll('.audio-item-header .audio-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    item.querySelectorAll('.audio-panel').forEach(p => {
+        p.classList.toggle('active', p.dataset.panelType === type);
+    });
+}
+
+function removeAudioItem(btn) {
+    const item = btn.closest('.audio-item');
+    item.remove();
+    renumberAudioItems();
+    updateAudioPreview();
+    updateLayers();
+}
+
+function renumberAudioItems() {
+    document.querySelectorAll('#audioItemsList .audio-item').forEach((item, i) => {
+        item.querySelector('.audio-item-num').textContent = i + 1;
+        item.querySelector('.audio-item-title').textContent = `Áudio ${i + 1}`;
+    });
+}
+
+function updateAudioPreview() {
+    const count = document.querySelectorAll('#audioItemsList .audio-item').length;
+    document.getElementById('previewAudioCount').textContent =
+        count === 0 ? '—' : `${count} áudio${count > 1 ? 's' : ''} configurado${count > 1 ? 's' : ''}`;
+}
+
+// ══════════════════════════════════════════
+// Imagens de Fundo: Adicionar/Remover
+// ══════════════════════════════════════════
+function addBgSegment() {
+    bgSegmentCounter++;
+    const container = document.getElementById('bgSegmentsList');
+    const tpl = document.getElementById('tplBgSegment').content.cloneNode(true);
+    const seg = tpl.querySelector('.img-segment');
+    seg.dataset.bgIdx = bgSegmentCounter;
+
+    container.appendChild(tpl);
+
+    const added = container.querySelector(`[data-bg-idx="${bgSegmentCounter}"]`);
+    setupImageSegment(added, 'bg');
+    renumberBgSegments();
+    updateLayers();
+}
+
+function removeBgSegment(btn) {
+    btn.closest('.img-segment').remove();
+    renumberBgSegments();
+    updatePreview();
+    updateLayers();
+}
+
+function renumberBgSegments() {
+    document.querySelectorAll('#bgSegmentsList .img-segment').forEach((seg, i) => {
+        seg.querySelector('.img-segment-num').textContent = i + 1;
+    });
+}
+
+// ══════════════════════════════════════════
+// Imagens Sobrepostas: Adicionar/Remover
+// ══════════════════════════════════════════
+function addOverlaySegment() {
+    overlaySegmentCounter++;
+    const container = document.getElementById('overlaySegmentsList');
+    const tpl = document.getElementById('tplOverlaySegment').content.cloneNode(true);
+    const seg = tpl.querySelector('.img-segment');
+    seg.dataset.ovIdx = overlaySegmentCounter;
+
+    container.appendChild(tpl);
+
+    const added = container.querySelector(`[data-ov-idx="${overlaySegmentCounter}"]`);
+    setupImageSegment(added, 'overlay');
+
+    // Atualiza preview ao mudar posição ou escala, e sincroniza campos px
+    added.querySelectorAll('.overlay-pos-grid button').forEach(btn => {
+        btn.addEventListener('click', () => updatePreview());
+    });
+    const scaleRange = added.querySelector('.overlay-scale-range');
+    if (scaleRange) {
+        scaleRange.addEventListener('input', () => {
+            scaleRange.nextElementSibling.textContent = scaleRange.value + '%';
+            _syncFineFromQuick(added);
+            updatePreview();
+        });
+    }
+
+    renumberOverlaySegments();
+    updateLayers();
+}
+
+function removeOverlaySegment(btn) {
+    btn.closest('.img-segment').remove();
+    renumberOverlaySegments();
+    updatePreview();
+    updateLayers();
+}
+
+function renumberOverlaySegments() {
+    document.querySelectorAll('#overlaySegmentsList .img-segment').forEach((seg, i) => {
+        seg.querySelector('.img-segment-num').textContent = i + 1;
+    });
+}
+
+// ══════════════════════════════════════════
+// Posição da imagem sobreposta dentro de um segmento
+// ══════════════════════════════════════════
+
+/**
+ * Converte escala % → largura/altura em pixels de saída,
+ * respeitando a proporção da imagem se já estiver carregada.
+ */
+function _scaleToPx(seg, scalePercent) {
+    const [outW, outH] = state.resolution.split('x').map(Number);
+    const imgEl = seg.querySelector('.preview');
+    const hasImg = imgEl && imgEl.naturalWidth > 0;
+
+    let w, h;
+    if (hasImg) {
+        const ratio = imgEl.naturalWidth / imgEl.naturalHeight;
+        // Usa a largura de saída como 100%
+        w = Math.round(outW * scalePercent / 100);
+        h = Math.round(w / ratio);
+        // Se ultrapassar a altura, limita pela altura
+        if (h > outH) {
+            h = Math.round(outH * scalePercent / 100);
+            w = Math.round(h * ratio);
+        }
+    } else {
+        // Sem imagem: escala baseada apenas na largura de saída
+        w = Math.round(outW * scalePercent / 100);
+        h = null; // não preenche altura sem saber o ratio
+    }
+    return { w, h };
+}
+
+/**
+ * Converte posição semântica + dimensões → X, Y em pixels (canto superior-esquerdo da imagem).
+ */
+function _posToPx(posKey, imgW, imgH) {
+    const [outW, outH] = state.resolution.split('x').map(Number);
+    const w = imgW || 0;
+    const h = imgH || 0;
+    const pad = Math.round(outW * 0.05); // 5% de padding lateral
+
+    const map = {
+        'centro':            { x: Math.round((outW - w) / 2),          y: Math.round((outH - h) / 2) },
+        'superior':          { x: Math.round((outW - w) / 2),          y: pad },
+        'inferior':          { x: Math.round((outW - w) / 2),          y: outH - h - pad },
+        'esquerda':          { x: pad,                                  y: Math.round((outH - h) / 2) },
+        'direita':           { x: outW - w - pad,                       y: Math.round((outH - h) / 2) },
+        'superior esquerda': { x: pad,                                  y: pad },
+        'superior direita':  { x: outW - w - pad,                       y: pad },
+        'inferior esquerda': { x: pad,                                  y: outH - h - pad },
+        'inferior direita':  { x: outW - w - pad,                       y: outH - h - pad },
+    };
+    return map[posKey] || map['centro'];
+}
+
+/** Preenche os campos px do controle fino a partir dos controles rápidos. */
+function _syncFineFromQuick(seg) {
+    const scaleRange = seg.querySelector('.overlay-scale-range');
+    const activePos  = seg.querySelector('.overlay-pos-grid button.active');
+    if (!scaleRange || !activePos) return;
+
+    const scale  = parseInt(scaleRange.value);
+    const posKey = activePos.dataset.pos || 'centro';
+    const { w, h } = _scaleToPx(seg, scale);
+    const { x, y } = _posToPx(posKey, w, h || 0);
+
+    const pxW = seg.querySelector('.overlay-px-w');
+    const pxH = seg.querySelector('.overlay-px-h');
+    const pxX = seg.querySelector('.overlay-px-x');
+    const pxY = seg.querySelector('.overlay-px-y');
+
+    if (pxW) pxW.value = w;
+    if (pxH && h !== null) pxH.value = h;
+    if (pxX) pxX.value = x;
+    if (pxY) pxY.value = y;
+}
+
+function selectOvPos(btn) {
+    const grid = btn.closest('.overlay-pos-grid');
+    grid.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const seg = btn.closest('.img-segment');
+    if (seg) _syncFineFromQuick(seg);
+    updatePreview();
+}
+
+// ══════════════════════════════════════════
+// Controle fino: aplica tamanho/posição px ao preview
+// ══════════════════════════════════════════
+function applyFinePosition(btn) {
+    const seg = btn.closest('.img-segment');
+    if (!seg) return;
+
+    const pxW = seg.querySelector('.overlay-px-w')?.value.trim();
+    const pxH = seg.querySelector('.overlay-px-h')?.value.trim();
+    const pxX = seg.querySelector('.overlay-px-x')?.value.trim();
+    const pxY = seg.querySelector('.overlay-px-y')?.value.trim();
+
+    const overlayEl = document.getElementById('previewOverlay');
+    if (!overlayEl || overlayEl.style.display === 'none') {
+        showToast('Adicione uma imagem sobreposta primeiro.', 'error');
+        return;
+    }
+
+    const canvas = document.getElementById('previewCanvas');
+    const canvasRect = canvas.getBoundingClientRect();
+
+    // Resolução de saída (ex: 1080x1920)
+    const [outW, outH] = state.resolution.split('x').map(Number);
+
+    // Escala: pixels de saída → pixels do canvas de preview
+    const scaleX = canvasRect.width  / outW;
+    const scaleY = canvasRect.height / outH;
+
+    // Reseta todos os posicionamentos
+    overlayEl.style.top    = 'auto';
+    overlayEl.style.left   = 'auto';
+    overlayEl.style.right  = 'auto';
+    overlayEl.style.bottom = 'auto';
+    overlayEl.style.transform = 'none';
+    overlayEl.style.maxWidth  = 'none';
+    overlayEl.style.maxHeight = 'none';
+    overlayEl.style.width  = 'auto';
+    overlayEl.style.height = 'auto';
+
+    // Tamanho
+    if (pxW) overlayEl.style.width  = `${parseFloat(pxW) * scaleX}px`;
+    if (pxH) overlayEl.style.height = `${parseFloat(pxH) * scaleY}px`;
+
+    // Posição
+    if (pxX !== '' && pxX !== undefined) {
+        overlayEl.style.left = `${parseFloat(pxX) * scaleX}px`;
+    } else {
+        // sem X definido: centraliza horizontalmente
+        overlayEl.style.left = '50%';
+        overlayEl.style.transform = overlayEl.style.transform === 'none'
+            ? 'translateX(-50%)' : overlayEl.style.transform;
+    }
+    if (pxY !== '' && pxY !== undefined) {
+        overlayEl.style.top = `${parseFloat(pxY) * scaleY}px`;
+    } else {
+        overlayEl.style.top = '50%';
+        // complementa transform
+        if (overlayEl.style.left === '50%') {
+            overlayEl.style.transform = 'translate(-50%,-50%)';
+        } else {
+            overlayEl.style.transform = 'translateY(-50%)';
+        }
+    }
+
+    showToast('Preview atualizado!', 'success');
+}
+
+// ══════════════════════════════════════════
+// Setup genérico de segmento de imagem (file input + preview + time)
+// ══════════════════════════════════════════
+function setupImageSegment(seg, type) {
+    const fileInput = seg.querySelector(`input[type=file]`);
+    const preview = seg.querySelector('.preview');
+    const fileName = seg.querySelector('.file-name');
+
+    fileInput.addEventListener('change', () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+        fileName.textContent = '✅ ' + file.name;
+        fileName.style.display = 'block';
+        const reader = new FileReader();
+        reader.onload = ev => {
+            preview.src = ev.target.result;
+            preview.style.display = 'block';
+            if (type === 'bg') updatePreview(ev.target.result);
+            else if (type === 'overlay') {
+                // Espera o elemento carregar para ter naturalWidth/Height
+                preview.onload = () => {
+                    _syncFineFromQuick(seg);
+                };
+                updatePreview(null, ev.target.result);
+            }
+        };
+        reader.readAsDataURL(file);
+        updateLayers();
+    });
+}
+
+// ══════════════════════════════════════════
+// Preview
+// ══════════════════════════════════════════
+function updatePreview(bgUrl, overlayUrl) {
+    const bgEl = document.getElementById('previewBg');
+    const overlayEl = document.getElementById('previewOverlay');
+    const placeholder = document.getElementById('previewPlaceholder');
+
+    // Usa a primeira imagem de fundo como preview
+    if (bgUrl === undefined) {
+        const firstBgInput = document.querySelector('#bgSegmentsList .bg-img-input');
+        const firstBgPreview = document.querySelector('#bgSegmentsList .preview');
+        bgUrl = firstBgPreview && firstBgPreview.src && firstBgPreview.style.display !== 'none'
+            ? firstBgPreview.src : null;
+    }
+    if (overlayUrl === undefined) {
+        const firstOvPreview = document.querySelector('#overlaySegmentsList .preview');
+        overlayUrl = firstOvPreview && firstOvPreview.src && firstOvPreview.style.display !== 'none'
+            ? firstOvPreview.src : null;
+    }
+
+    if (bgUrl) {
+        bgEl.src = bgUrl;
+        bgEl.style.display = 'block';
+        placeholder.style.display = 'none';
+    } else {
+        bgEl.style.display = 'none';
+        placeholder.style.display = 'flex';
+    }
+
+    if (overlayUrl) {
+        // Pega posição e escala do primeiro segmento sobreposto ativo
+        const firstOvSeg = document.querySelector('#overlaySegmentsList .img-segment');
+        const activePos = firstOvSeg
+            ? firstOvSeg.querySelector('.overlay-pos-grid button.active')
+            : null;
+        const scaleRange = firstOvSeg
+            ? firstOvSeg.querySelector('.overlay-scale-range')
+            : null;
+        const scale = scaleRange ? parseInt(scaleRange.value) : 50;
+        const pos = activePos ? activePos.dataset.pos : 'centro';
+
+        // Mapa de posição → estilo
+        const posMap = {
+            'centro':            { top:'50%',    left:'50%',   right:'auto', bottom:'auto', transform:'translate(-50%,-50%)' },
+            'superior':          { top:'5%',     left:'50%',   right:'auto', bottom:'auto', transform:'translateX(-50%)' },
+            'inferior':          { top:'auto',   left:'50%',   right:'auto', bottom:'5%',   transform:'translateX(-50%)' },
+            'esquerda':          { top:'50%',    left:'5%',    right:'auto', bottom:'auto', transform:'translateY(-50%)' },
+            'direita':           { top:'50%',    left:'auto',  right:'5%',   bottom:'auto', transform:'translateY(-50%)' },
+            'superior esquerda': { top:'5%',     left:'5%',    right:'auto', bottom:'auto', transform:'none' },
+            'superior direita':  { top:'5%',     left:'auto',  right:'5%',   bottom:'auto', transform:'none' },
+            'inferior esquerda': { top:'auto',   left:'5%',    right:'auto', bottom:'5%',   transform:'none' },
+            'inferior direita':  { top:'auto',   left:'auto',  right:'5%',   bottom:'5%',   transform:'none' },
+        };
+        const p = posMap[pos] || posMap['centro'];
+
+        overlayEl.src = overlayUrl;
+        overlayEl.style.display = 'block';
+        overlayEl.style.maxWidth  = `${scale}%`;
+        overlayEl.style.maxHeight = `${scale}%`;
+        overlayEl.style.top       = p.top;
+        overlayEl.style.left      = p.left;
+        overlayEl.style.right     = p.right;
+        overlayEl.style.bottom    = p.bottom;
+        overlayEl.style.transform = p.transform;
+    } else {
+        overlayEl.style.display = 'none';
+    }
+
+    // Animações badges
+    document.getElementById('previewAnimBadges').innerHTML = state.selectedAnimations
+        .map(a => `<span>${getAnimName(a)}</span>`).join('');
+}
+
+function getAnimName(key) {
+    const map = {
+        particulas:'✨ Partículas', fumaca:'🌫️ Fumaça', brilho:'💎 Brilho',
+        fogo:'🔥 Fogo', chuva:'🌧️ Chuva', neve:'❄️ Neve',
+        faiscas:'⚡ Faíscas', explosao:'💥 Explosão', luz:'💡 Luz', loop_bg:'🔄 Loop'
+    };
+    return map[key] || key;
+}
+
+function getElemName(key) {
+    const map = {
+        moldura_gold:'🖼️ Moldura', moldura_neon:'💜 Neon', barra_inferior:'▬ Barra',
+        caixa_texto:'💬 Caixa', gradiente_top:'🌅 Grad.Sup', gradiente_bottom:'🌆 Grad.Inf',
+        sombra_vinheta:'🔲 Vinheta', sombra_radial:'⭕ Radial'
+    };
+    return map[key] || key;
+}
+
+// ══════════════════════════════════════════
+// Gallery toggle
+// ══════════════════════════════════════════
+function toggleGalleryItem(el, type) {
+    el.classList.toggle('selected');
+    const value = el.getAttribute(type === 'animation' ? 'data-animation' : 'data-element');
+    if (type === 'animation') {
+        const idx = state.selectedAnimations.indexOf(value);
+        if (idx >= 0) state.selectedAnimations.splice(idx, 1); else state.selectedAnimations.push(value);
+    } else {
+        const idx = state.selectedElements.indexOf(value);
+        if (idx >= 0) state.selectedElements.splice(idx, 1); else state.selectedElements.push(value);
+    }
+    updateLayers();
+    updatePreview();
+}
+
+// ══════════════════════════════════════════
+// Camadas (drag & drop)
+// ══════════════════════════════════════════
+function updateLayers() {
+    const list = [];
+    const bgCount = document.querySelectorAll('#bgSegmentsList .img-segment').length;
+    if (bgCount > 0) list.push({ id:'bg', icon:'🖼️', name:`Fundo (${bgCount} imagem${bgCount>1?'s':''})`, type:'background' });
+    state.selectedElements.forEach(e => list.push({ id:`elem_${e}`, icon:'✨', name:getElemName(e), type:'element' }));
+    state.selectedAnimations.forEach(a => list.push({ id:`anim_${a}`, icon:'🎬', name:getAnimName(a), type:'animation' }));
+    const ovCount = document.querySelectorAll('#overlaySegmentsList .img-segment').length;
+    if (ovCount > 0) list.push({ id:'overlay', icon:'📸', name:`Sobrepostas (${ovCount})`, type:'overlay' });
+    state.layers = list;
+    renderLayers();
+}
+
+function renderLayers() {
+    const container = document.getElementById('layersList');
+    if (!container) return;
+    if (state.layers.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding:20px; opacity:.5;"><span style="font-size:2rem; display:block; margin-bottom:8px;">📐</span><span style="font-size:.85rem;">Adicione elementos para ver as camadas</span></div>`;
+        return;
+    }
+    container.innerHTML = state.layers.map((layer, i) => `
+        <div class="layer-item" draggable="true"
+             ondragstart="dragStart(event,${i})" ondragover="dragOver(event)"
+             ondrop="dropLayer(event,${i})" ondragend="dragEnd(event)">
+            <span class="layer-drag">⠿</span>
+            <span style="font-size:1.1rem;">${layer.icon}</span>
+            <span class="layer-name">${layer.name}</span>
+            <span style="font-size:.65rem; opacity:.4; text-transform:uppercase;">${i===0?'TRÁS':i===state.layers.length-1?'FRENTE':''}</span>
+        </div>`).join('');
+}
+
+let dragIdx = null;
+function dragStart(e, idx) { dragIdx = idx; e.currentTarget.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+function dragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+function dropLayer(e, targetIdx) {
+    e.preventDefault();
+    if (dragIdx === null || dragIdx === targetIdx) return;
+    const [item] = state.layers.splice(dragIdx, 1);
+    state.layers.splice(targetIdx, 0, item);
+    dragIdx = null;
+    renderLayers();
+}
+function dragEnd(e) { e.currentTarget.classList.remove('dragging'); dragIdx = null; }
+
+// ══════════════════════════════════════════
+// Coleta de dados para submissão
+// ══════════════════════════════════════════
+
+/** Coleta metadados de cada item de áudio (sem o File, que vai via FormData separadamente) */
+function collectAudioMeta() {
+    const items = [];
+    document.querySelectorAll('#audioItemsList .audio-item').forEach((item, i) => {
+        const activePanel = item.querySelector('.audio-panel.active');
+        const type = activePanel ? activePanel.dataset.panelType : 'upload';
+        const volRange = activePanel ? activePanel.querySelector('.audio-vol-range') : null;
+        const volume = volRange ? parseInt(volRange.value) : 100;
+
+        if (type === 'upload') {
+            const fileInput = activePanel.querySelector('.audio-file-input');
+            items.push({
+                index: i,
+                type: 'upload',
+                volume,
+                has_file: !!(fileInput && fileInput.files[0]),
+            });
+        } else {
+            // OmniVoice
+            const text = (activePanel.querySelector('.omni-text-input')?.value || '').trim();
+            const activeModeTabs = activePanel.querySelectorAll('.omni-mode-tab.active');
+            const mode = activeModeTabs.length ? activeModeTabs[0].dataset.mode : 'clone';
+            const voiceId = activePanel.querySelector('.omni-voice-select')?.value || '';
+            const presetId = activePanel.querySelector('.omni-preset-select')?.value || '';
+
+            // Voice Design instruct
+            let instruct = '';
+            if (mode === 'design') {
+                const free = activePanel.querySelector('.omni-d-free')?.value.trim() || '';
+                if (free) {
+                    instruct = free;
+                } else {
+                    const parts = [
+                        activePanel.querySelector('.omni-d-gender')?.value,
+                        activePanel.querySelector('.omni-d-age')?.value,
+                        activePanel.querySelector('.omni-d-pitch')?.value,
+                        activePanel.querySelector('.omni-d-style')?.value,
+                    ].filter(Boolean);
+                    instruct = parts.join(', ');
+                }
+            }
+
+            // Gen params
+            const genParams = {};
+            ['num_step','guidance_scale','speed','language_id','position_temperature','class_temperature'].forEach(k => {
+                const el = activePanel.querySelector(`.omni-p.${k}`);
+                if (el && el.value.trim() !== '') {
+                    genParams[k] = k === 'language_id' ? el.value.trim() : parseFloat(el.value);
+                }
+            });
+            const denoise = activePanel.querySelector('.omni-p-denoise');
+            const pre = activePanel.querySelector('.omni-p-preprocess');
+            const post = activePanel.querySelector('.omni-p-postprocess');
+            if (denoise) genParams.denoise = denoise.checked;
+            if (pre) genParams.preprocess_prompt = pre.checked;
+            if (post) genParams.postprocess_output = post.checked;
+
+            items.push({
+                index: i,
+                type: 'omni',
+                volume,
+                text,
+                mode,
+                voice_id: voiceId,
+                instruct,
+                preset_id: presetId,
+                gen_params: genParams,
+            });
+        }
+    });
+    return items;
+}
+
+/** Coleta metadados de cada segmento de imagem de fundo */
+function collectBgMeta() {
+    const segs = [];
+    document.querySelectorAll('#bgSegmentsList .img-segment').forEach((seg, i) => {
+        const startInput = seg.querySelector('.seg-start');
+        const endInput = seg.querySelector('.seg-end');
+        const fileInput = seg.querySelector('.bg-img-input');
+        segs.push({
+            index: i,
+            start_sec: startInput && startInput.value !== '' ? parseFloat(startInput.value) : 0,
+            end_sec: endInput && endInput.value !== '' ? parseFloat(endInput.value) : null,
+            has_file: !!(fileInput && fileInput.files[0]),
+        });
+    });
+    return segs;
+}
+
+/** Coleta metadados de cada segmento de imagem sobreposta */
+function collectOverlayMeta() {
+    const segs = [];
+    document.querySelectorAll('#overlaySegmentsList .img-segment').forEach((seg, i) => {
+        const startInput = seg.querySelector('.seg-start');
+        const endInput = seg.querySelector('.seg-end');
+        const fileInput = seg.querySelector('.overlay-img-input');
+        const activePos = seg.querySelector('.overlay-pos-grid button.active');
+        const scaleRange = seg.querySelector('.overlay-scale-range');
+        // Campos px (controle fino)
+        const pxW = seg.querySelector('.overlay-px-w')?.value.trim();
+        const pxH = seg.querySelector('.overlay-px-h')?.value.trim();
+        const pxX = seg.querySelector('.overlay-px-x')?.value.trim();
+        const pxY = seg.querySelector('.overlay-px-y')?.value.trim();
+
+        const entry = {
+            index: i,
+            start_sec: startInput && startInput.value !== '' ? parseFloat(startInput.value) : 0,
+            end_sec: endInput && endInput.value !== '' ? parseFloat(endInput.value) : null,
+            position: activePos ? activePos.dataset.pos : 'centro',
+            scale: scaleRange ? parseInt(scaleRange.value) : 50,
+            has_file: !!(fileInput && fileInput.files[0]),
+        };
+        // Só envia campos px se preenchidos
+        if (pxW) entry.px_width  = parseInt(pxW);
+        if (pxH) entry.px_height = parseInt(pxH);
+        if (pxX !== '') entry.px_x = parseInt(pxX);
+        if (pxY !== '') entry.px_y = parseInt(pxY);
+
+        segs.push(entry);
+    });
+    return segs;
+}
+
+// ══════════════════════════════════════════
+// Submit
+// ══════════════════════════════════════════
+async function submitCompositor() {
+    const btn = document.getElementById('btnGenerate');
+    const progressSection = document.getElementById('progressSection');
+    const resultSection = document.getElementById('resultSection');
+
+    const title = document.getElementById('title').value.trim();
+    if (!title) { showToast('Informe o título do vídeo.', 'error'); return; }
+
+    // Validar áudios
+    const audioItems = document.querySelectorAll('#audioItemsList .audio-item');
+    if (audioItems.length === 0) { showToast('Adicione ao menos um áudio principal.', 'error'); return; }
+
+    let hasAudioError = false;
+    audioItems.forEach((item, i) => {
+        if (hasAudioError) return;
+        const activePanel = item.querySelector('.audio-panel.active');
+        const type = activePanel?.dataset.panelType;
+        if (type === 'upload') {
+            const fileInput = activePanel.querySelector('.audio-file-input');
+            if (!fileInput?.files[0]) { showToast(`Áudio ${i+1}: envie um arquivo de áudio.`, 'error'); hasAudioError = true; }
+        } else if (type === 'omni') {
+            const text = activePanel.querySelector('.omni-text-input')?.value.trim();
+            if (!text) { showToast(`Áudio ${i+1}: informe o texto para a IA.`, 'error'); hasAudioError = true; }
+            const mode = activePanel.querySelector('.omni-mode-tab.active')?.dataset.mode;
+            if (mode === 'clone' && !activePanel.querySelector('.omni-voice-select')?.value) {
+                showToast(`Áudio ${i+1}: selecione uma voz para clonagem.`, 'error'); hasAudioError = true;
+            }
+        }
+    });
+    if (hasAudioError) return;
+
+    // Validar imagens de fundo
+    const bgSegs = document.querySelectorAll('#bgSegmentsList .img-segment');
+    if (bgSegs.length === 0) { showToast('Adicione ao menos uma imagem de fundo.', 'error'); return; }
+
+    let hasBgError = false;
+    bgSegs.forEach((seg, i) => {
+        if (hasBgError) return;
+        const fileInput = seg.querySelector('.bg-img-input');
+        if (!fileInput?.files[0]) { showToast(`Fundo ${i+1}: envie uma imagem.`, 'error'); hasBgError = true; }
+    });
+    if (hasBgError) return;
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Enviando...';
+    progressSection.classList.remove('hidden');
+    resultSection.classList.add('hidden');
+
+    // Montar FormData
+    const formData = new FormData();
+    formData.set('title', title);
+    formData.set('resolution', state.resolution);
+
+    // Metadados JSON
+    const audioMeta = collectAudioMeta();
+    const bgMeta = collectBgMeta();
+    const overlayMeta = collectOverlayMeta();
+    formData.set('audio_items_json', JSON.stringify(audioMeta));
+    formData.set('bg_segments_json', JSON.stringify(bgMeta));
+    formData.set('overlay_segments_json', JSON.stringify(overlayMeta));
+    formData.set('animations_json', JSON.stringify(state.selectedAnimations));
+    formData.set('elements_json', JSON.stringify(state.selectedElements));
+    formData.set('layers_json', JSON.stringify(state.layers));
+
+    // Arquivos de áudio
+    document.querySelectorAll('#audioItemsList .audio-item').forEach((item, i) => {
+        const activePanel = item.querySelector('.audio-panel.active');
+        if (activePanel?.dataset.panelType === 'upload') {
+            const fileInput = activePanel.querySelector('.audio-file-input');
+            if (fileInput?.files[0]) formData.append(`audio_file_${i}`, fileInput.files[0]);
+        }
+    });
+
+    // Arquivos de imagem de fundo
+    document.querySelectorAll('#bgSegmentsList .img-segment').forEach((seg, i) => {
+        const fileInput = seg.querySelector('.bg-img-input');
+        if (fileInput?.files[0]) formData.append(`bg_image_${i}`, fileInput.files[0]);
+    });
+
+    // Arquivos de imagem sobreposta
+    document.querySelectorAll('#overlaySegmentsList .img-segment').forEach((seg, i) => {
+        const fileInput = seg.querySelector('.overlay-img-input');
+        if (fileInput?.files[0]) formData.append(`overlay_image_${i}`, fileInput.files[0]);
+    });
+
+    // Áudio secundário
+    const secFile = document.getElementById('secondary_audio_file')?.files[0];
+    if (secFile) formData.append('secondary_audio_file', secFile);
+    formData.set('secondary_audio_volume', document.getElementById('secVolume')?.value || '20');
+
+    try {
+        const response = await fetch('/video-compositor/render', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Erro ao enviar');
+        state.jobId = data.job_id;
+        showToast(`Job ${data.job_id} criado com sucesso!`, 'success');
+        updateProgress('pending', 0, 'Job enviado, aguardando worker...');
+        startProgressStream(data.job_id);
+    } catch (err) {
+        showToast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '🚀 Gerar Vídeo';
+        progressSection.classList.add('hidden');
+    }
+}
+
+function startProgressStream(jobId) {
+    if (state.eventSource) state.eventSource.close();
+    const es = new EventSource(`/api/progress/${jobId}/stream`);
+    state.eventSource = es;
+    es.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            updateProgress(data.status, data.progress, data.detail);
+            if (data.status === 'done') { es.close(); showResult(data); }
+            else if (data.status === 'error') {
+                es.close();
+                showToast(`Erro: ${data.detail}`, 'error');
+                document.getElementById('btnGenerate').disabled = false;
+                document.getElementById('btnGenerate').textContent = '🚀 Gerar Vídeo';
+            }
+        } catch (e) { /* ignore heartbeat */ }
+    };
+    es.onerror = () => {
+        es.close();
+        setTimeout(() => { if (state.jobId) startProgressStream(state.jobId); }, 5000);
+    };
+}
+
+function updateProgress(status, progress, detail) {
+    const statusMap = {
+        pending:'⏳ Na fila', preparing:'📦 Preparando', generating_audio:'🎵 Gerando áudio',
+        rendering:'🎬 Renderizando', composing:'🎨 Compondo', done:'✅ Concluído', error:'❌ Erro',
+    };
+    document.getElementById('progressFill').style.width = `${progress}%`;
+    document.getElementById('progressLabel').textContent = statusMap[status] || status;
+    document.getElementById('progressPercent').textContent = `${Math.round(progress)}%`;
+    document.getElementById('progressDetail').textContent = detail || '';
+}
+
+function showResult(data) {
+    const resultSection = document.getElementById('resultSection');
+    resultSection.classList.remove('hidden');
+    const link = document.getElementById('resultLink');
+    link.href = data.video_url || `/video-compositor/video/${state.jobId}`;
+    document.getElementById('btnGenerate').disabled = false;
+    document.getElementById('btnGenerate').textContent = '🚀 Gerar Outro Vídeo';
+}
+
+// ══════════════════════════════════════════
+// Toasts
+// ══════════════════════════════════════════
+function showToast(msg, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+}
+
+// ══════════════════════════════════════════
+// Init
+// ══════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+    // Secondary audio file name display
+    const secInput = document.getElementById('secondary_audio_file');
+    if (secInput) {
+        secInput.addEventListener('change', () => {
+            const fn = document.getElementById('secAudioFileName');
+            if (fn && secInput.files[0]) { fn.textContent = '✅ ' + secInput.files[0].name; fn.style.display = 'block'; }
+        });
+    }
+
+    // Carregar vozes e presets da OmniVoice
+    loadOmniVoices();
+    loadOmniPresets();
+
+    // Adicionar um áudio e um fundo por padrão
+    addAudioItem();
+    addBgSegment();
+
+    updateLayers();
+    updatePreview();
+});

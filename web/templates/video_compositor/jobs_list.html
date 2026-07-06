@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Vídeo Compositor — Meus Vídeos{% endblock %}
+
+{% block extra_css %}
+<style>
+    .vc-wrap { max-width: 1000px; margin: 0 auto; padding: 24px 16px; }
+    .vc-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .vc-head h1 { font-size: 1.5rem; font-weight: 800; }
+    .vc-badge { background: linear-gradient(135deg, #e040fb, #7c4dff); color: #fff; padding: 4px 10px; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+    .vc-btn { padding: 10px 18px; border: none; border-radius: 8px; font-weight: 600; font-size: .9rem; cursor: pointer; color: #fff; text-decoration: none; display: inline-block; transition: all .2s; }
+    .vc-btn-primary { background: linear-gradient(135deg, #e040fb, #7c4dff); }
+    .vc-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(224,64,251,.4); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="vc-wrap">
+    <div class="vc-head">
+        <h1>📋 Meus Vídeos</h1>
+        <span class="vc-badge">COMPOSITOR</span>
+        <div style="margin-left: auto;">
+            <a href="/video-compositor" class="vc-btn vc-btn-primary" style="font-size: .85rem;">+ Novo Vídeo</a>
+        </div>
+    </div>
+
+    <div class="card">
+        {% if jobs %}
+        <div class="jobs-list">
+            {% for job in jobs %}
+            <a href="/video-compositor/video/{{ job.job_id }}" style="text-decoration:none; color:inherit;">
+                <div class="job-item">
+                    <div class="job-info">
+                        <span class="job-type-badge" style="background: rgba(224,64,251,.15); color: #e040fb;">🎨 compositor</span>
+                        <span class="job-name">{{ job.title or job.job_id }}</span>
+                        <span class="job-id">#{{ job.job_id }}</span>
+                    </div>
+                    <span class="job-status-badge {{ job.status }}">{{ job.status }}</span>
+                    {% if job.detail %}
+                    <div class="job-detail">{{ job.detail }}</div>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="jobs-empty">
+            <span class="empty-icon">🎨</span>
+            <p>Nenhum vídeo compositor criado ainda.</p>
+            <a href="/video-compositor" class="vc-btn vc-btn-primary" style="margin-top: 16px;">Criar Primeiro Vídeo</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Sem scripts específicos -->
+{% endblock %}
