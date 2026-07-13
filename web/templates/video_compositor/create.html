@@ -143,6 +143,103 @@
     .overlay-apply-btn { padding: 7px 14px; border: none; border-radius: 8px; background: linear-gradient(135deg,#e040fb,#7c4dff); color:#fff; font-weight:600; font-size:.85rem; cursor:pointer; transition: all .2s; margin-top:2px; }
     .overlay-apply-btn:hover { transform:translateY(-1px); box-shadow:0 3px 12px rgba(224,64,251,.4); }
 
+    /* ── Audio Player embutido ── */
+    .audio-player-wrap {
+        margin-top: 10px; padding: 10px 14px; background: rgba(255,255,255,.04);
+        border: 1px solid rgba(255,255,255,.1); border-radius: 10px;
+        display: none; /* mostrado via JS */
+    }
+    .audio-player-wrap.visible { display: block; }
+    .audio-player-wrap .audio-player-header {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .audio-player-wrap .audio-player-header .player-icon { font-size: 1.1rem; }
+    .audio-player-wrap .audio-player-header .player-label {
+        font-size: .78rem; font-weight: 600; color: #e040fb; flex: 1;
+    }
+    .audio-player-wrap .audio-player-header .player-duration {
+        font-size: .72rem; color: var(--text-secondary); font-weight: 500;
+        background: rgba(224,64,251,.12); padding: 2px 8px; border-radius: 999px;
+    }
+    .audio-player-wrap audio {
+        width: 100%; height: 36px; border-radius: 8px; outline: none;
+    }
+    /* Webkit audio player dark theme */
+    .audio-player-wrap audio::-webkit-media-controls-panel {
+        background: rgba(0,0,0,.4); border-radius: 8px;
+    }
+
+    /* ── Trim controls ── */
+    .audio-trim-wrap {
+        margin-top: 8px; padding: 10px 14px; background: rgba(124,77,255,.06);
+        border: 1px solid rgba(124,77,255,.15); border-radius: 10px;
+        display: none; /* mostrado via JS quando tem áudio */
+    }
+    .audio-trim-wrap.visible { display: block; }
+    .audio-trim-header {
+        display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+        font-size: .82rem; font-weight: 600; color: #a78bfa;
+    }
+    .audio-trim-row {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    }
+    .audio-trim-row label { font-size: .78rem; color: var(--text-secondary); margin-bottom: 2px; }
+    .audio-trim-row input[type=number] {
+        width: 100%; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.12);
+        border-radius: 8px; color: inherit; padding: 7px 10px; font-family: inherit; font-size: .85rem; box-sizing: border-box;
+    }
+    .audio-trim-hint { font-size: .68rem; opacity: .45; margin-top: 4px; }
+
+    /* ── Omni Generate Button ── */
+    .omni-gen-section { margin-top: 12px; }
+    .omni-gen-btn {
+        width: 100%; padding: 12px 18px; border: none; border-radius: 10px;
+        font-weight: 700; font-size: .92rem; cursor: pointer; color: #fff;
+        background: linear-gradient(135deg, #00c853, #00bfa5);
+        transition: all .25s; display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .omni-gen-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(0,200,83,.35); }
+    .omni-gen-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+    .omni-gen-btn.generating {
+        background: linear-gradient(135deg, #f9a825, #ff8f00);
+        animation: omniPulse 1.5s ease-in-out infinite;
+    }
+    .omni-gen-btn.done {
+        background: linear-gradient(135deg, #e040fb, #7c4dff);
+    }
+    @keyframes omniPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: .7; }
+    }
+
+    /* Omni inline progress */
+    .omni-progress-wrap {
+        margin-top: 8px; display: none;
+    }
+    .omni-progress-wrap.visible { display: block; }
+    .omni-progress-bar {
+        height: 6px; background: rgba(255,255,255,.1); border-radius: 999px; overflow: hidden;
+    }
+    .omni-progress-fill {
+        height: 100%; width: 0; border-radius: 999px;
+        background: linear-gradient(90deg, #00c853, #00bfa5);
+        transition: width .3s;
+    }
+    .omni-progress-text {
+        display: flex; justify-content: space-between; margin-top: 4px;
+        font-size: .72rem; color: var(--text-secondary);
+    }
+
+    /* Omni status badge */
+    .omni-status-badge {
+        display: inline-flex; align-items: center; gap: 4px;
+        padding: 3px 10px; border-radius: 999px; font-size: .7rem; font-weight: 600;
+        margin-top: 6px;
+    }
+    .omni-status-badge.pending { background: rgba(249,168,37,.15); color: #f9a825; border: 1px solid rgba(249,168,37,.3); }
+    .omni-status-badge.done { background: rgba(0,200,83,.12); color: #00c853; border: 1px solid rgba(0,200,83,.3); }
+    .omni-status-badge.error { background: rgba(239,68,68,.12); color: #ef4444; border: 1px solid rgba(239,68,68,.3); }
+
     @media (max-width: 900px) { .vc-grid { grid-template-columns: 1fr; } .omni-params-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
@@ -358,6 +455,30 @@
         <div class="hint">MP3, WAV, OGG — Máx 50MB</div>
         <div class="file-name"></div>
     </div>
+    <!-- Player de preview -->
+    <div class="audio-player-wrap">
+        <div class="audio-player-header">
+            <span class="player-icon">🎧</span>
+            <span class="player-label">Preview do áudio</span>
+            <span class="player-duration"></span>
+        </div>
+        <audio controls preload="metadata" class="audio-preview-el"></audio>
+    </div>
+    <!-- Trim controls -->
+    <div class="audio-trim-wrap">
+        <div class="audio-trim-header">✂️ Recortar áudio</div>
+        <div class="audio-trim-row">
+            <div>
+                <label>Início (segundos)</label>
+                <input type="number" class="trim-start" min="0" step="0.1" placeholder="0" value="">
+            </div>
+            <div>
+                <label>Fim (segundos)</label>
+                <input type="number" class="trim-end" min="0" step="0.1" placeholder="(até o final)">
+            </div>
+        </div>
+        <div class="audio-trim-hint">💡 Deixe vazio para usar o áudio inteiro</div>
+    </div>
     <div class="volume-control" style="margin-top:8px;">
         <label>🔊 Vol</label>
         <input type="range" min="0" max="100" value="100" class="audio-vol-range">
@@ -439,6 +560,50 @@
             <div class="omni-check"><input type="checkbox" class="omni-p-postprocess" checked><label style="margin:0; font-size:.82rem;">✂️ postprocess_output</label></div>
         </div>
     </details>
+
+    <!-- ═══ Gerar Áudio IA ═══ -->
+    <div class="omni-gen-section">
+        <button type="button" class="omni-gen-btn" onclick="generateOmniAudio(this)">
+            🎵 Gerar Áudio IA
+        </button>
+        <!-- Progresso inline -->
+        <div class="omni-progress-wrap">
+            <div class="omni-progress-bar"><div class="omni-progress-fill"></div></div>
+            <div class="omni-progress-text">
+                <span class="omni-progress-label">Aguardando...</span>
+                <span class="omni-progress-percent">0%</span>
+            </div>
+        </div>
+        <!-- Status badge -->
+        <div class="omni-status-area"></div>
+    </div>
+
+    <!-- Player de preview do áudio gerado -->
+    <div class="audio-player-wrap">
+        <div class="audio-player-header">
+            <span class="player-icon">🎧</span>
+            <span class="player-label">Áudio gerado pela IA</span>
+            <span class="player-duration"></span>
+        </div>
+        <audio controls preload="metadata" class="audio-preview-el"></audio>
+    </div>
+
+    <!-- Trim controls -->
+    <div class="audio-trim-wrap">
+        <div class="audio-trim-header">✂️ Recortar áudio</div>
+        <div class="audio-trim-row">
+            <div>
+                <label>Início (segundos)</label>
+                <input type="number" class="trim-start" min="0" step="0.1" placeholder="0" value="">
+            </div>
+            <div>
+                <label>Fim (segundos)</label>
+                <input type="number" class="trim-end" min="0" step="0.1" placeholder="(até o final)">
+            </div>
+        </div>
+        <div class="audio-trim-hint">💡 Deixe vazio para usar o áudio inteiro</div>
+    </div>
+
     <div class="volume-control" style="margin-top:8px;">
         <label>🔊 Vol</label>
         <input type="range" min="0" max="100" value="100" class="audio-vol-range">
@@ -567,5 +732,5 @@
 </div>
 </template>
 
-<script src="/static/video_compositor.js?v=5"></script>
+<script src="/static/video_compositor.js?v=6"></script>
 {% endblock %}

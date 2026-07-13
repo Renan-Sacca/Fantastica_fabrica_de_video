@@ -147,6 +147,9 @@ function addAudioItem() {
     const wrapper = document.createElement('div');
     wrapper.className = 'audio-item';
     wrapper.dataset.idx = idx;
+    // Estado do áudio IA pré-gerado
+    wrapper._omniGenerated = null; // {job_id, audio_url, blob}
+    wrapper._omniEventSource = null;
 
     wrapper.innerHTML = `
         <div class="audio-item-header">
@@ -177,13 +180,16 @@ function addAudioItem() {
 
     container.appendChild(wrapper);
 
-    // Setup file input for upload panel
+    // Setup file input for upload panel — com player de preview
     const fileInput = wrapper.querySelector('.audio-file-input');
     const fileName = wrapper.querySelector('.audio-panel[data-panel-type=upload] .file-name');
+    const uploadPanel = wrapper.querySelector('.audio-panel[data-panel-type=upload]');
     fileInput.addEventListener('change', () => {
         if (fileInput.files[0]) {
             fileName.textContent = '✅ ' + fileInput.files[0].name;
             fileName.style.display = 'block';
+            // Criar preview de áudio
+            setupAudioPreviewFromFile(uploadPanel, fileInput.files[0]);
         }
         updateAudioPreview();
     });
@@ -224,6 +230,16 @@ function switchAudioType(btn, type) {
 
 function removeAudioItem(btn) {
     const item = btn.closest('.audio-item');
+    // Fechar EventSource se existir
+    if (item._omniEventSource) {
+        item._omniEventSource.close();
+        item._omniEventSource = null;
+    }
+    // Revogar ObjectURL se existir
+    const audioEl = item.querySelector('.audio-preview-el');
+    if (audioEl && audioEl.src && audioEl.src.startsWith('blob:')) {
+        URL.revokeObjectURL(audioEl.src);
+    }
     item.remove();
     renumberAudioItems();
     updateAudioPreview();
@@ -671,65 +687,92 @@ function collectAudioMeta() {
         const volRange = activePanel ? activePanel.querySelector('.audio-vol-range') : null;
         const volume = volRange ? parseInt(volRange.value) : 100;
 
+        // Trim values (comuns a upload e omni)
+        const trimStart = activePanel.querySelector('.trim-start')?.value.trim();
+        const trimEnd = activePanel.querySelector('.trim-end')?.value.trim();
+
         if (type === 'upload') {
             const fileInput = activePanel.querySelector('.audio-file-input');
-            items.push({
+            const entry = {
                 index: i,
                 type: 'upload',
                 volume,
                 has_file: !!(fileInput && fileInput.files[0]),
-            });
+            };
+            if (trimStart) entry.trim_start = parseFloat(trimStart);
+            if (trimEnd) entry.trim_end = parseFloat(trimEnd);
+            items.push(entry);
         } else {
-            // OmniVoice
-            const text = (activePanel.querySelector('.omni-text-input')?.value || '').trim();
-            const activeModeTabs = activePanel.querySelectorAll('.omni-mode-tab.active');
-            const mode = activeModeTabs.length ? activeModeTabs[0].dataset.mode : 'clone';
-            const voiceId = activePanel.querySelector('.omni-voice-select')?.value || '';
-            const presetId = activePanel.querySelector('.omni-preset-select')?.value || '';
+            // OmniVoice — checar se já foi pré-gerado
+            const omniGenData = item._omniGenerated;
 
-            // Voice Design instruct
-            let instruct = '';
-            if (mode === 'design') {
-                const free = activePanel.querySelector('.omni-d-free')?.value.trim() || '';
-                if (free) {
-                    instruct = free;
-                } else {
-                    const parts = [
-                        activePanel.querySelector('.omni-d-gender')?.value,
-                        activePanel.querySelector('.omni-d-age')?.value,
-                        activePanel.querySelector('.omni-d-pitch')?.value,
-                        activePanel.querySelector('.omni-d-style')?.value,
-                    ].filter(Boolean);
-                    instruct = parts.join(', ');
+            if (omniGenData && omniGenData.audio_url) {
+                // Áudio IA já gerado — enviar como pré-gerado
+                const entry = {
+                    index: i,
+                    type: 'omni_pregenerated',
+                    volume,
+                    audio_url: omniGenData.audio_url,
+                    job_id: omniGenData.job_id,
+                };
+                if (trimStart) entry.trim_start = parseFloat(trimStart);
+                if (trimEnd) entry.trim_end = parseFloat(trimEnd);
+                items.push(entry);
+            } else {
+                // Não gerado ainda — enviar dados crus para gerar no worker
+                const text = (activePanel.querySelector('.omni-text-input')?.value || '').trim();
+                const activeModeTabs = activePanel.querySelectorAll('.omni-mode-tab.active');
+                const mode = activeModeTabs.length ? activeModeTabs[0].dataset.mode : 'clone';
+                const voiceId = activePanel.querySelector('.omni-voice-select')?.value || '';
+                const presetId = activePanel.querySelector('.omni-preset-select')?.value || '';
+
+                // Voice Design instruct
+                let instruct = '';
+                if (mode === 'design') {
+                    const free = activePanel.querySelector('.omni-d-free')?.value.trim() || '';
+                    if (free) {
+                        instruct = free;
+                    } else {
+                        const parts = [
+                            activePanel.querySelector('.omni-d-gender')?.value,
+                            activePanel.querySelector('.omni-d-age')?.value,
+                            activePanel.querySelector('.omni-d-pitch')?.value,
+                            activePanel.querySelector('.omni-d-style')?.value,
+                        ].filter(Boolean);
+                        instruct = parts.join(', ');
+                    }
                 }
+
+                // Gen params
+                const genParams = {};
+                ['num_step','guidance_scale','speed','language_id','position_temperature','class_temperature'].forEach(k => {
+                    const el = activePanel.querySelector(`.omni-p.${k}`);
+                    if (el && el.value.trim() !== '') {
+                        genParams[k] = k === 'language_id' ? el.value.trim() : parseFloat(el.value);
+                    }
+                });
+                const denoise = activePanel.querySelector('.omni-p-denoise');
+                const pre = activePanel.querySelector('.omni-p-preprocess');
+                const post = activePanel.querySelector('.omni-p-postprocess');
+                if (denoise) genParams.denoise = denoise.checked;
+                if (pre) genParams.preprocess_prompt = pre.checked;
+                if (post) genParams.postprocess_output = post.checked;
+
+                const entry = {
+                    index: i,
+                    type: 'omni',
+                    volume,
+                    text,
+                    mode,
+                    voice_id: voiceId,
+                    instruct,
+                    preset_id: presetId,
+                    gen_params: genParams,
+                };
+                if (trimStart) entry.trim_start = parseFloat(trimStart);
+                if (trimEnd) entry.trim_end = parseFloat(trimEnd);
+                items.push(entry);
             }
-
-            // Gen params
-            const genParams = {};
-            ['num_step','guidance_scale','speed','language_id','position_temperature','class_temperature'].forEach(k => {
-                const el = activePanel.querySelector(`.omni-p.${k}`);
-                if (el && el.value.trim() !== '') {
-                    genParams[k] = k === 'language_id' ? el.value.trim() : parseFloat(el.value);
-                }
-            });
-            const denoise = activePanel.querySelector('.omni-p-denoise');
-            const pre = activePanel.querySelector('.omni-p-preprocess');
-            const post = activePanel.querySelector('.omni-p-postprocess');
-            if (denoise) genParams.denoise = denoise.checked;
-            if (pre) genParams.preprocess_prompt = pre.checked;
-            if (post) genParams.postprocess_output = post.checked;
-
-            items.push({
-                index: i,
-                type: 'omni',
-                volume,
-                text,
-                mode,
-                voice_id: voiceId,
-                instruct,
-                preset_id: presetId,
-                gen_params: genParams,
-            });
         }
     });
     return items;
@@ -810,11 +853,13 @@ async function submitCompositor() {
             const fileInput = activePanel.querySelector('.audio-file-input');
             if (!fileInput?.files[0]) { showToast(`Áudio ${i+1}: envie um arquivo de áudio.`, 'error'); hasAudioError = true; }
         } else if (type === 'omni') {
-            const text = activePanel.querySelector('.omni-text-input')?.value.trim();
-            if (!text) { showToast(`Áudio ${i+1}: informe o texto para a IA.`, 'error'); hasAudioError = true; }
-            const mode = activePanel.querySelector('.omni-mode-tab.active')?.dataset.mode;
-            if (mode === 'clone' && !activePanel.querySelector('.omni-voice-select')?.value) {
-                showToast(`Áudio ${i+1}: selecione uma voz para clonagem.`, 'error'); hasAudioError = true;
+            // Se o áudio IA já foi gerado, está ok
+            if (item._omniGenerated && item._omniGenerated.audio_url) {
+                // OK — áudio já pronto
+            } else {
+                // Não foi gerado — bloquear e pedir para gerar primeiro
+                showToast(`Áudio ${i+1}: gere o áudio IA antes de criar o vídeo. Clique em "🎵 Gerar Áudio IA".`, 'error');
+                hasAudioError = true;
             }
         }
     });
@@ -853,12 +898,17 @@ async function submitCompositor() {
     formData.set('elements_json', JSON.stringify(state.selectedElements));
     formData.set('layers_json', JSON.stringify(state.layers));
 
-    // Arquivos de áudio
+    // Arquivos de áudio (upload + IA pré-gerada como blob)
     document.querySelectorAll('#audioItemsList .audio-item').forEach((item, i) => {
         const activePanel = item.querySelector('.audio-panel.active');
         if (activePanel?.dataset.panelType === 'upload') {
             const fileInput = activePanel.querySelector('.audio-file-input');
             if (fileInput?.files[0]) formData.append(`audio_file_${i}`, fileInput.files[0]);
+        } else if (activePanel?.dataset.panelType === 'omni') {
+            // Se tem blob do áudio IA pré-gerado, envia como arquivo
+            if (item._omniGenerated && item._omniGenerated.blob) {
+                formData.append(`audio_file_${i}`, item._omniGenerated.blob, `omni_audio_${i}.wav`);
+            }
         }
     });
 
@@ -949,6 +999,237 @@ function showToast(msg, type = 'info') {
     toast.textContent = msg;
     container.appendChild(toast);
     setTimeout(() => toast.remove(), 5000);
+}
+
+// ══════════════════════════════════════════
+// Audio Preview: criar player para arquivo selecionado
+// ══════════════════════════════════════════
+function setupAudioPreviewFromFile(panel, file) {
+    const playerWrap = panel.querySelector('.audio-player-wrap');
+    const audioEl = panel.querySelector('.audio-preview-el');
+    const durationEl = panel.querySelector('.player-duration');
+    const trimWrap = panel.querySelector('.audio-trim-wrap');
+    if (!playerWrap || !audioEl) return;
+
+    // Revogar URL anterior se existir
+    if (audioEl.src && audioEl.src.startsWith('blob:')) {
+        URL.revokeObjectURL(audioEl.src);
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    audioEl.src = objectUrl;
+    playerWrap.classList.add('visible');
+    if (trimWrap) trimWrap.classList.add('visible');
+
+    // Mostrar duração quando carregada
+    audioEl.addEventListener('loadedmetadata', () => {
+        if (durationEl && isFinite(audioEl.duration)) {
+            const dur = audioEl.duration;
+            const min = Math.floor(dur / 60);
+            const sec = Math.floor(dur % 60);
+            durationEl.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
+        }
+    }, { once: true });
+}
+
+function setupAudioPreviewFromUrl(panel, url) {
+    const playerWrap = panel.querySelector('.audio-player-wrap');
+    const audioEl = panel.querySelector('.audio-preview-el');
+    const durationEl = panel.querySelector('.player-duration');
+    const trimWrap = panel.querySelector('.audio-trim-wrap');
+    if (!playerWrap || !audioEl) return;
+
+    audioEl.src = url;
+    playerWrap.classList.add('visible');
+    if (trimWrap) trimWrap.classList.add('visible');
+
+    audioEl.addEventListener('loadedmetadata', () => {
+        if (durationEl && isFinite(audioEl.duration)) {
+            const dur = audioEl.duration;
+            const min = Math.floor(dur / 60);
+            const sec = Math.floor(dur % 60);
+            durationEl.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
+        }
+    }, { once: true });
+}
+
+// ══════════════════════════════════════════
+// Gerar Áudio IA na página (OmniVoice inline)
+// ══════════════════════════════════════════
+async function generateOmniAudio(btn) {
+    const audioItem = btn.closest('.audio-item');
+    const panel = btn.closest('.audio-panel');
+    if (!audioItem || !panel) return;
+
+    // Coletar dados do formulário omni
+    const text = (panel.querySelector('.omni-text-input')?.value || '').trim();
+    if (!text) { showToast('Informe o texto para a IA gerar o áudio.', 'error'); return; }
+
+    const activeModeTabs = panel.querySelectorAll('.omni-mode-tab.active');
+    const mode = activeModeTabs.length ? activeModeTabs[0].dataset.mode : 'clone';
+    const voiceId = panel.querySelector('.omni-voice-select')?.value || '';
+
+    if (mode === 'clone' && !voiceId) {
+        showToast('Selecione uma voz para clonagem.', 'error');
+        return;
+    }
+
+    // Voice Design instruct
+    let instruct = '';
+    if (mode === 'design') {
+        const free = panel.querySelector('.omni-d-free')?.value.trim() || '';
+        if (free) {
+            instruct = free;
+        } else {
+            const parts = [
+                panel.querySelector('.omni-d-gender')?.value,
+                panel.querySelector('.omni-d-age')?.value,
+                panel.querySelector('.omni-d-pitch')?.value,
+                panel.querySelector('.omni-d-style')?.value,
+            ].filter(Boolean);
+            instruct = parts.join(', ');
+        }
+        if (!instruct) {
+            showToast('Descreva os atributos da voz (Voice Design).', 'error');
+            return;
+        }
+    }
+
+    // Gen params
+    const formParams = new FormData();
+    formParams.set('text', text);
+    formParams.set('mode', mode);
+    formParams.set('voice', voiceId);
+    formParams.set('instruct', instruct);
+
+    // Parâmetros avançados
+    ['num_step','guidance_scale','speed','language_id','position_temperature','class_temperature'].forEach(k => {
+        const el = panel.querySelector(`.omni-p.${k}`);
+        if (el && el.value.trim() !== '') formParams.set(k, el.value.trim());
+    });
+    const denoise = panel.querySelector('.omni-p-denoise');
+    const pre = panel.querySelector('.omni-p-preprocess');
+    const post = panel.querySelector('.omni-p-postprocess');
+    if (denoise) formParams.set('denoise', denoise.checked ? '1' : '0');
+    if (pre) formParams.set('preprocess_prompt', pre.checked ? '1' : '0');
+    if (post) formParams.set('postprocess_output', post.checked ? '1' : '0');
+
+    // UI: estado gerando
+    const genSection = panel.querySelector('.omni-gen-section');
+    const progressWrap = genSection.querySelector('.omni-progress-wrap');
+    const progressFill = genSection.querySelector('.omni-progress-fill');
+    const progressLabel = genSection.querySelector('.omni-progress-label');
+    const progressPercent = genSection.querySelector('.omni-progress-percent');
+    const statusArea = genSection.querySelector('.omni-status-area');
+
+    btn.disabled = true;
+    btn.classList.add('generating');
+    btn.innerHTML = '⏳ Gerando...';
+    progressWrap.classList.add('visible');
+    progressFill.style.width = '0%';
+    progressLabel.textContent = 'Enviando...';
+    progressPercent.textContent = '0%';
+    statusArea.innerHTML = '<span class="omni-status-badge pending">⏳ Gerando áudio...</span>';
+
+    // Limpar geração anterior
+    audioItem._omniGenerated = null;
+    const playerWrap = panel.querySelector('.audio-player-wrap');
+    if (playerWrap) playerWrap.classList.remove('visible');
+    const trimWrap = panel.querySelector('.audio-trim-wrap');
+    if (trimWrap) trimWrap.classList.remove('visible');
+
+    try {
+        // POST para gerar
+        const response = await fetch('/audio/api/generate', { method: 'POST', body: formParams });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Erro ao gerar áudio');
+
+        const jobId = data.job_id;
+        showToast(`Áudio IA em geração (job ${jobId})...`, 'info');
+
+        // Iniciar SSE para progresso
+        if (audioItem._omniEventSource) audioItem._omniEventSource.close();
+        const es = new EventSource(`/audio/api/progress/${jobId}/stream`);
+        audioItem._omniEventSource = es;
+
+        es.onmessage = async (event) => {
+            try {
+                const d = JSON.parse(event.data);
+                const pct = Math.round(d.progress || 0);
+                progressFill.style.width = `${pct}%`;
+                progressPercent.textContent = `${pct}%`;
+                progressLabel.textContent = d.detail || d.status || 'Processando...';
+
+                if (d.status === 'done') {
+                    es.close();
+                    audioItem._omniEventSource = null;
+
+                    // Pegar URL do áudio gerado
+                    const audioUrl = d.audio_url || `/audio-files/${jobId}.wav`;
+
+                    // Baixar o blob do áudio para enviar junto com o form
+                    let blob = null;
+                    try {
+                        const audioResp = await fetch(audioUrl);
+                        if (audioResp.ok) blob = await audioResp.blob();
+                    } catch (e) {
+                        console.warn('Não foi possível baixar o blob do áudio:', e);
+                    }
+
+                    audioItem._omniGenerated = { job_id: jobId, audio_url: audioUrl, blob };
+
+                    // UI: estado pronto
+                    btn.disabled = false;
+                    btn.classList.remove('generating');
+                    btn.classList.add('done');
+                    btn.innerHTML = '🔄 Refazer Áudio IA';
+                    statusArea.innerHTML = '<span class="omni-status-badge done">✅ Áudio pronto!</span>';
+                    progressLabel.textContent = 'Concluído!';
+
+                    // Mostrar player de preview
+                    if (blob) {
+                        const blobUrl = URL.createObjectURL(blob);
+                        setupAudioPreviewFromUrl(panel, blobUrl);
+                    } else {
+                        setupAudioPreviewFromUrl(panel, audioUrl);
+                    }
+
+                    showToast('Áudio IA gerado com sucesso! Escute o preview.', 'success');
+
+                } else if (d.status === 'error') {
+                    es.close();
+                    audioItem._omniEventSource = null;
+                    btn.disabled = false;
+                    btn.classList.remove('generating');
+                    btn.innerHTML = '🎵 Gerar Áudio IA';
+                    statusArea.innerHTML = `<span class="omni-status-badge error">❌ ${d.detail || 'Erro'}</span>`;
+                    showToast(`Erro ao gerar áudio: ${d.detail}`, 'error');
+                }
+            } catch (e) { /* heartbeat */ }
+        };
+
+        es.onerror = () => {
+            es.close();
+            audioItem._omniEventSource = null;
+            // Tentar reconectar uma vez
+            setTimeout(() => {
+                if (!audioItem._omniGenerated) {
+                    btn.disabled = false;
+                    btn.classList.remove('generating');
+                    btn.innerHTML = '🎵 Gerar Áudio IA';
+                    statusArea.innerHTML = '<span class="omni-status-badge error">❌ Conexão perdida</span>';
+                }
+            }, 3000);
+        };
+
+    } catch (err) {
+        btn.disabled = false;
+        btn.classList.remove('generating');
+        btn.innerHTML = '🎵 Gerar Áudio IA';
+        statusArea.innerHTML = `<span class="omni-status-badge error">❌ ${err.message}</span>`;
+        progressWrap.classList.remove('visible');
+        showToast(err.message, 'error');
+    }
 }
 
 // ══════════════════════════════════════════

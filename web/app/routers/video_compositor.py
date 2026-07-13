@@ -195,8 +195,11 @@ async def render_compositor(request: Request):
             idx = item_meta["index"]
             item_type = item_meta.get("type", "upload")
             volume = item_meta.get("volume", 100)
+            trim_start = item_meta.get("trim_start")
+            trim_end = item_meta.get("trim_end")
 
-            if item_type == "upload":
+            if item_type == "upload" or item_type == "omni_pregenerated":
+                # Tanto upload normal quanto IA pré-gerada enviam arquivo via FormData
                 audio_upload: Optional[UploadFile] = form_data.get(f"audio_file_{idx}")
                 if not audio_upload or not audio_upload.filename:
                     return JSONResponse(
@@ -209,13 +212,18 @@ async def render_compositor(request: Request):
                     None, drive.upload_bytes, audio_content, f"audio_{idx}{audio_ext}",
                     job_folder_id, audio_upload.content_type or "audio/mpeg",
                 )
-                metadata["audio_items"].append({
+                entry = {
                     "index": idx,
-                    "type": "upload",
+                    "type": "upload",  # Normaliza para "upload" pois já tem o arquivo
                     "volume": volume,
                     "file_id": audio_file_id,
                     "file_ext": audio_ext,
-                })
+                }
+                if trim_start is not None:
+                    entry["trim_start"] = float(trim_start)
+                if trim_end is not None:
+                    entry["trim_end"] = float(trim_end)
+                metadata["audio_items"].append(entry)
 
             elif item_type == "omni":
                 text = (item_meta.get("text") or "").strip()
@@ -240,6 +248,10 @@ async def render_compositor(request: Request):
                     "preset_id": preset_id,
                     "gen_params": gen_params,
                 }
+                if trim_start is not None:
+                    omni_entry["trim_start"] = float(trim_start)
+                if trim_end is not None:
+                    omni_entry["trim_end"] = float(trim_end)
 
                 if mode == "clone":
                     if not voice_id:
