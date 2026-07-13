@@ -1,13 +1,14 @@
 """Processador do tipo 'video_compositor' — orquestra download, áudio e renderização.
 
-Fluxo:
+Fluxo (v2 — múltiplos áudios e imagens por segmento de tempo):
 1. Baixa metadata.json do Drive
-2. Baixa imagem de fundo
-3. Baixa overlay e áudio secundário (se existirem)
-4. Se audio_source == 'omni': gera áudio via OmniVoice
-5. Se audio_source == 'upload': baixa o áudio do Drive
-6. Chama o renderer para compor o vídeo final
-7. Faz upload do resultado
+2. Baixa todas as imagens de fundo (bg_segments) e sobrepostas (overlay_segments)
+3. Para cada item de áudio principal (audio_items): baixa (upload) ou gera via
+   OmniVoice (omni) — na ordem em que serão concatenados
+4. Baixa áudio secundário (se existir)
+5. Chama o renderer para compor o vídeo final (corte, volume, concat de áudios,
+   troca de fundo/overlay por tempo, animações e elementos)
+6. Faz upload do resultado
 """
 from __future__ import annotations
 
@@ -16,7 +17,6 @@ import json
 import logging
 import os
 import shutil
-import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -44,7 +44,7 @@ class VideoCompositorProcessor:
         work_dir = None
         try:
             logger.info(f"[{job_id}] ------------------------------------------")
-            logger.info(f"[{job_id}] INICIANDO JOB (video_compositor)")
+            logger.info(f"[{job_id}] INICIANDO JOB (video_compositor v2)")
 
             # ── 1. Localizar pasta no Drive ──
             folder_id = await asyncio.get_event_loop().run_in_executor(
@@ -64,58 +64,35 @@ class VideoCompositorProcessor:
                 None, self.drive.read_json, metadata_file_id
             )
 
+            audio_items = metadata.get("audio_items", [])
+            bg_segments = metadata.get("bg_segments", [])
+            overlay_segments = metadata.get("overlay_segments", [])
+
+            if not audio_items:
+                raise ValueError("Nenhum áudio principal configurado no job.")
+            if not bg_segments:
+                raise ValueError("Nenhuma imagem de fundo configurada no job.")
+
             # ── 3. Criar diretório de trabalho ──
             work_dir = Path(tempfile.mkdtemp(prefix=f"job_{job_id}_compositor_"))
             logger.info(f"[{job_id}] Diretório local: {work_dir}")
 
-            # ── 4. Baixar imagem de fundo ──
-            await self._publish(job_id, "preparing", 2, "Baixando imagem de fundo...")
-            files_info = metadata.get("files", {})
+            # ── 4. Baixar imagens de fundo ──
+            await self._download_bg_segments(job_id, bg_segments, work_dir)
 
-            bg_image_id = files_info.get("bg_image")
-            bg_ext = files_info.get("bg_image_ext", ".png")
-            if bg_image_id:
-                bg_dest = work_dir / f"bg_image{bg_ext}"
-                await asyncio.get_event_loop().run_in_executor(
-                    None, self.drive.download_file, bg_image_id, bg_dest
-                )
+            # ── 5. Baixar imagens sobrepostas ──
+            await self._download_overlay_segments(job_id, overlay_segments, work_dir)
 
-            # ── 5. Baixar overlay (se existir) ──
-            overlay_id = files_info.get("overlay_image")
-            if overlay_id:
-                await self._publish(job_id, "preparing", 3, "Baixando imagem sobreposta...")
-                ov_ext = files_info.get("overlay_image_ext", ".png")
-                ov_dest = work_dir / f"overlay_image{ov_ext}"
-                await asyncio.get_event_loop().run_in_executor(
-                    None, self.drive.download_file, overlay_id, ov_dest
-                )
-
-            # ── 6. Lidar com áudio principal ──
-            audio_source = metadata.get("audio_source", "upload")
-
-            if audio_source == "upload":
-                await self._publish(job_id, "preparing", 5, "Baixando áudio principal...")
-                audio_id = files_info.get("audio")
-                audio_ext = files_info.get("audio_ext", ".mp3")
-                if audio_id:
-                    audio_dest = work_dir / f"audio{audio_ext}"
-                    await asyncio.get_event_loop().run_in_executor(
-                        None, self.drive.download_file, audio_id, audio_dest
-                    )
-                else:
-                    raise ValueError("Arquivo de áudio não encontrado no metadata.")
-
-            elif audio_source == "omni":
-                await self._publish(job_id, "generating_audio", 5, "Gerando áudio via OmniVoice...")
-                await self._generate_omni_audio(metadata, work_dir, folder_id, metadata_file_id)
-
-            else:
-                raise ValueError(f"Fonte de áudio desconhecida: {audio_source}")
+            # ── 6. Baixar/gerar os áudios principais ──
+            await self._prepare_audio_items(
+                job_id, audio_items, work_dir, folder_id, metadata_file_id, metadata
+            )
 
             # ── 7. Baixar áudio secundário (se existir) ──
+            files_info = metadata.get("files", {})
             sec_audio_id = files_info.get("secondary_audio")
             if sec_audio_id:
-                await self._publish(job_id, "preparing", 7, "Baixando áudio secundário...")
+                await self._publish(job_id, "preparing", 42, "Baixando áudio secundário...")
                 sec_ext = files_info.get("secondary_audio_ext", ".mp3")
                 sec_dest = work_dir / f"secondary_audio{sec_ext}"
                 await asyncio.get_event_loop().run_in_executor(
@@ -134,7 +111,7 @@ class VideoCompositorProcessor:
                     _loop,
                 )
 
-            progress_callback(status="preparing", progress=8, detail="Arquivos prontos. Iniciando renderização...")
+            progress_callback(status="preparing", progress=45, detail="Arquivos prontos. Iniciando renderização...")
 
             from renderers.video_compositor.renderer import VideoCompositorRenderer
             renderer = VideoCompositorRenderer()
@@ -168,6 +145,7 @@ class VideoCompositorProcessor:
             # ── 9.5. Upload da thumbnail (se existir) ──
             thumbnail_path = work_dir / "thumbnail.jpg"
             thumbnail_url = None
+            thumbnail_file_id = None
             if thumbnail_path.exists():
                 logger.info(f"[{job_id}] Fazendo upload da thumbnail...")
                 thumbnail_bytes = thumbnail_path.read_bytes()
@@ -217,38 +195,119 @@ class VideoCompositorProcessor:
             if work_dir and work_dir.exists():
                 shutil.rmtree(work_dir, ignore_errors=True)
 
-    async def _generate_omni_audio(
-        self, metadata: dict, work_dir: Path,
-        folder_id: str, metadata_file_id: str,
+    # ══════════════════════════════════════════
+    # Download de imagens por segmento
+    # ══════════════════════════════════════════
+
+    async def _download_bg_segments(self, job_id: str, bg_segments: list, work_dir: Path):
+        """Baixa todas as imagens de fundo, uma por segmento, nomeadas por índice."""
+        await self._publish(job_id, "preparing", 10, "Baixando imagens de fundo...")
+        for seg in bg_segments:
+            idx = seg["index"]
+            file_id = seg.get("file_id")
+            ext = seg.get("file_ext", ".png")
+            if not file_id:
+                continue
+            dest = work_dir / f"bg_image_{idx}{ext}"
+            await asyncio.get_event_loop().run_in_executor(
+                None, self.drive.download_file, file_id, dest
+            )
+
+    async def _download_overlay_segments(self, job_id: str, overlay_segments: list, work_dir: Path):
+        """Baixa todas as imagens sobrepostas, uma por segmento, nomeadas por índice."""
+        if not overlay_segments:
+            return
+        await self._publish(job_id, "preparing", 15, "Baixando imagens sobrepostas...")
+        for seg in overlay_segments:
+            idx = seg["index"]
+            file_id = seg.get("file_id")
+            ext = seg.get("file_ext", ".png")
+            if not file_id:
+                continue
+            dest = work_dir / f"overlay_image_{idx}{ext}"
+            await asyncio.get_event_loop().run_in_executor(
+                None, self.drive.download_file, file_id, dest
+            )
+
+    # ══════════════════════════════════════════
+    # Preparação dos áudios principais (upload + IA)
+    # ══════════════════════════════════════════
+
+    async def _prepare_audio_items(
+        self, job_id: str, audio_items: list, work_dir: Path,
+        folder_id: str, metadata_file_id: str, metadata: dict,
     ):
-        """Gera áudio via OmniVoice (mesmo mecanismo do video_bg)."""
-        omni_config = metadata.get("omni", {})
-        text = omni_config.get("text", "")
-        ref_filename = omni_config.get("ref_filename")
-        ref_text = omni_config.get("ref_text", "")
-        gen_params = omni_config.get("gen_params", {})
+        """Baixa (upload) ou gera (omni) cada item de áudio, na ordem de índice.
+
+        Ao final, cada item terá um arquivo local `audio_{idx}{ext}` em work_dir,
+        e o renderer fará o corte (trim) e a concatenação na ordem correta.
+        """
+        # Processa em ordem de índice para manter a sequência de concatenação
+        items_sorted = sorted(audio_items, key=lambda x: x.get("index", 0))
+        total = len(items_sorted)
+
+        for pos, item in enumerate(items_sorted):
+            idx = item["index"]
+            item_type = item.get("type", "upload")
+            base_progress = 20 + int((pos / max(total, 1)) * 20)  # 20..40%
+
+            if item_type == "upload":
+                file_id = item.get("file_id")
+                ext = item.get("file_ext", ".mp3")
+                if not file_id:
+                    raise ValueError(f"Áudio {idx+1}: arquivo não encontrado no metadata.")
+                await self._publish(job_id, "preparing", base_progress, f"Baixando áudio {idx+1}/{total}...")
+                dest = work_dir / f"audio_{idx}{ext}"
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self.drive.download_file, file_id, dest
+                )
+
+            elif item_type == "omni":
+                await self._publish(
+                    job_id, "generating_audio", base_progress,
+                    f"Gerando áudio {idx+1}/{total} via IA..."
+                )
+                await self._generate_omni_audio_item(
+                    job_id, item, work_dir, folder_id, metadata_file_id, metadata, idx
+                )
+
+            else:
+                raise ValueError(f"Áudio {idx+1}: tipo desconhecido '{item_type}'.")
+
+    async def _generate_omni_audio_item(
+        self, job_id: str, item: dict, work_dir: Path,
+        folder_id: str, metadata_file_id: str, metadata: dict, idx: int,
+    ):
+        """Gera um item de áudio via OmniVoice e salva como audio_{idx}.<ext> em work_dir."""
+        text = item.get("text", "")
+        ref_filename = item.get("ref_filename")
+        ref_text = item.get("ref_text", "")
+        gen_params = item.get("gen_params", {})
+        mode = item.get("mode", "auto")
+        instruct = item.get("instruct", "")
 
         if not text:
-            raise ValueError("Texto para geração de áudio não fornecido.")
+            raise ValueError(f"Áudio {idx+1}: texto para geração de áudio não fornecido.")
 
-        await self._publish(self.job_id, "generating_audio", 10, "Gerando áudio...")
         out = await self._omni_generate_one(
-            text, ref_filename, ref_text, gen_params, folder_id, work_dir, "audio"
+            job_id, text, mode, ref_filename, ref_text, instruct, gen_params,
+            folder_id, work_dir, f"audio_{idx}",
         )
         ext = out.suffix
-        metadata["files"]["audio_ext"] = ext
-        audio_bytes = out.read_bytes()
-        audio_file_id = self.drive.upload_bytes(
-            audio_bytes, f"audio{ext}", folder_id, "audio/wav"
-        )
-        metadata["files"]["audio"] = audio_file_id
+
+        # Atualiza o metadata com a extensão real gerada (para o renderer localizar o arquivo)
+        for entry in metadata.get("audio_items", []):
+            if entry.get("index") == idx:
+                entry["file_ext"] = ext
+                entry["generated"] = True
+                break
         self.drive.update_json(metadata_file_id, metadata)
 
     async def _omni_generate_one(
-        self, text: str, ref_filename, ref_text: str, gen_params: dict,
-        folder_id: str, work_dir: Path, out_name: str,
+        self, job_id: str, text: str, mode: str, ref_filename, ref_text: str,
+        instruct: str, gen_params: dict, folder_id: str, work_dir: Path, out_name: str,
     ) -> Path:
-        """Publica sub-job OmniVoice, aguarda e retorna o path local."""
+        """Publica sub-job OmniVoice, aguarda e retorna o path local do áudio gerado."""
         import aio_pika
         import uuid
 
@@ -260,10 +319,10 @@ class VideoCompositorProcessor:
         payload = json.dumps({
             "job_id": omni_job_id,
             "text": text,
-            "mode": "clone",
+            "mode": mode,
             "ref_filename": ref_filename,
             "ref_text": ref_text,
-            "instruct": "",
+            "instruct": instruct,
             "gen_params": gen_params,
             "drive_folder_id": folder_id,
         })
@@ -310,7 +369,7 @@ class VideoCompositorProcessor:
 
                         await self._publish(
                             self.job_id, "generating_audio",
-                            10 + int(progress * 0.2),
+                            20 + int(progress * 0.2),
                             f"Gerando áudio: {detail}"
                         )
 
@@ -330,24 +389,26 @@ class VideoCompositorProcessor:
             raise RuntimeError("Geração de áudio não concluída.")
 
         omni_outputs_dir = Path(os.getenv("OMNI_OUTPUTS_DIR", "/app/tts3_audio/outputs"))
-        for ext in [".wav", ".mp3", ".ogg"]:
-            candidate = omni_outputs_dir / f"{omni_job_id}{ext}"
-            if candidate.exists():
-                dest = work_dir / f"{out_name}{ext}"
-                shutil.copy2(candidate, dest)
-                logger.info(f"[{self.job_id}] Áudio encontrado localmente: {candidate}")
-                return dest
+        candidate = omni_outputs_dir / f"{omni_job_id}.wav"
+        if candidate.exists():
+            dest = work_dir / f"{out_name}.wav"
+            shutil.copy2(candidate, dest)
+            logger.info(f"[{self.job_id}] Áudio encontrado localmente: {candidate}")
+            return dest
 
-        for ext in [".wav", ".mp3"]:
-            fname = f"audio_{omni_job_id}{ext}"
-            fid = self.drive.find_file_in_folder(folder_id, fname)
-            if fid:
-                dest = work_dir / f"{out_name}{ext}"
-                self.drive.download_file(fid, dest)
-                logger.info(f"[{self.job_id}] Áudio baixado do Drive: {fname}")
-                return dest
+        fname = f"{omni_job_id}.wav"
+        fid = self.drive.find_file_in_folder(folder_id, fname)
+        if fid:
+            dest = work_dir / f"{out_name}.wav"
+            self.drive.download_file(fid, dest)
+            logger.info(f"[{self.job_id}] Áudio baixado do Drive: {fname}")
+            return dest
 
         raise RuntimeError("Não foi possível localizar o áudio gerado pelo OmniVoice.")
+
+    # ══════════════════════════════════════════
+    # Utilitários
+    # ══════════════════════════════════════════
 
     async def _publish(self, job_id: str, status: str, progress: float, detail: str):
         """Publica progresso."""

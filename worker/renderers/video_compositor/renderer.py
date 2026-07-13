@@ -1,11 +1,15 @@
-"""Renderer do tipo 'video_compositor' — composição visual por camadas.
+"""Renderer do tipo 'video_compositor' — composição visual por camadas (v2).
 
-Usa FFmpeg para:
-1. Escalar imagem de fundo para a resolução alvo
-2. Sobrepor imagem overlay na posição configurada
-3. Aplicar efeitos visuais (vinheta, gradientes, molduras)
-4. Gerar animações via filtros FFmpeg (partículas, brilho, etc.)
-5. Mixar áudio principal + secundário com volumes independentes
+Suporta:
+1. Múltiplos áudios principais, concatenados em sequência (com corte/trim e
+   volume individuais) — define a duração total do vídeo.
+2. Múltiplas imagens de fundo, cada uma visível em uma janela de tempo
+   [start_sec, end_sec) — troca de fundo ao longo do vídeo.
+3. Múltiplas imagens sobrepostas, cada uma visível em sua própria janela de
+   tempo, com posição/tamanho por percentual OU controle fino em pixels.
+4. Elementos decorativos e animações via filtros FFmpeg (aplicados sobre
+   todo o vídeo).
+5. Áudio secundário (música de fundo) com volume independente, em loop.
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ logger = logging.getLogger("VideoCompositorRenderer")
 
 
 # Mapeamento de posições para coordenadas overlay do FFmpeg
-# Usamos expressões FFmpeg com W,H (output), w,h (overlay)
+# Usamos expressões FFmpeg com W,H (output), w,h (overlay) — resolvidas em tempo de filtro.
 POSITION_MAP = {
     "centro":            "(W-w)/2:(H-h)/2",
     "superior":          "(W-w)/2:H*0.05",
@@ -36,7 +40,7 @@ POSITION_MAP = {
 
 
 class VideoCompositorRenderer(BaseRenderer):
-    """Renderer para vídeo compositor com camadas."""
+    """Renderer para vídeo compositor com camadas, múltiplos áudios e imagens por tempo."""
 
     @property
     def video_type(self) -> str:
@@ -52,7 +56,7 @@ class VideoCompositorRenderer(BaseRenderer):
             if progress_callback:
                 progress_callback(status=status, progress=pct, detail=detail)
 
-        _progress("rendering", 5, "Preparando composição...")
+        _progress("rendering", 50, "Preparando composição...")
 
         # ── Extrair parâmetros ──
         resolution = job_data.get("resolution", {"width": 1080, "height": 1920})
@@ -60,51 +64,51 @@ class VideoCompositorRenderer(BaseRenderer):
         res_h = resolution.get("height", 1920)
         files_info = job_data.get("files", {})
 
-        bg_ext = files_info.get("bg_image_ext", ".png")
-        bg_path = work_dir / f"bg_image{bg_ext}"
+        audio_items = sorted(job_data.get("audio_items", []), key=lambda x: x.get("index", 0))
+        bg_segments = job_data.get("bg_segments", [])
+        overlay_segments = job_data.get("overlay_segments", [])
 
-        audio_ext = files_info.get("audio_ext", ".mp3")
-        audio_path = work_dir / f"audio{audio_ext}"
-
-        overlay_ext = files_info.get("overlay_image_ext", ".png")
-        overlay_path = work_dir / f"overlay_image{overlay_ext}"
-        has_overlay = overlay_path.exists()
+        if not audio_items:
+            raise ValueError("Nenhum áudio principal configurado.")
+        if not bg_segments:
+            raise ValueError("Nenhuma imagem de fundo configurada.")
 
         sec_audio_ext = files_info.get("secondary_audio_ext", ".mp3")
         sec_audio_path = work_dir / f"secondary_audio{sec_audio_ext}"
         has_sec_audio = sec_audio_path.exists()
 
-        overlay_position = job_data.get("overlay_position", "centro")
-        overlay_scale_pct = float(job_data.get("overlay_scale", 50))
         sec_volume = float(job_data.get("secondary_audio_volume", 20)) / 100.0
-
         animations = job_data.get("animations", [])
         elements = job_data.get("elements", [])
 
-        if not bg_path.exists():
-            raise FileNotFoundError(f"Imagem de fundo não encontrada: {bg_path}")
-        if not audio_path.exists():
-            raise FileNotFoundError(f"Áudio não encontrado: {audio_path}")
+        # ── 1. Resolver caminhos e durações dos áudios (com corte aplicado) ──
+        _progress("rendering", 52, "Analisando áudios...")
+        audio_tracks = self._resolve_audio_tracks(audio_items, work_dir)
+        total_duration = sum(t["duration"] for t in audio_tracks)
+        if total_duration <= 0:
+            raise ValueError("Duração total dos áudios é zero — verifique os arquivos/corte.")
+        logger.info(f"Duração total do vídeo (áudios concatenados): {total_duration:.2f}s")
 
-        # ── 1. Obter duração do áudio ──
-        _progress("rendering", 10, "Analisando duração do áudio...")
-        audio_duration = self._get_duration(audio_path)
-        logger.info(f"Duração do áudio principal: {audio_duration:.2f}s")
+        # ── 2. Resolver janelas de tempo das imagens de fundo (preenche lacunas) ──
+        bg_clips = self._resolve_bg_clips(bg_segments, work_dir, total_duration)
+        if not bg_clips:
+            raise ValueError("Nenhuma imagem de fundo válida encontrada.")
 
-        # ── 2. Compor o vídeo final ──
-        _progress("composing", 20, "Compondo vídeo com camadas...")
+        # ── 3. Resolver janelas de tempo das imagens sobrepostas ──
+        overlay_clips = self._resolve_overlay_clips(overlay_segments, work_dir, total_duration)
+
+        # ── 4. Compor o vídeo final ──
+        _progress("composing", 55, "Compondo vídeo com camadas...")
         output_path = work_dir / "output.mp4"
 
         self._compose_video(
-            bg_path=bg_path,
-            audio_path=audio_path,
             output_path=output_path,
             res_w=res_w,
             res_h=res_h,
-            duration=audio_duration,
-            overlay_path=overlay_path if has_overlay else None,
-            overlay_position=overlay_position,
-            overlay_scale_pct=overlay_scale_pct,
+            duration=total_duration,
+            audio_tracks=audio_tracks,
+            bg_clips=bg_clips,
+            overlay_clips=overlay_clips,
             sec_audio_path=sec_audio_path if has_sec_audio else None,
             sec_volume=sec_volume,
             animations=animations,
@@ -112,13 +116,128 @@ class VideoCompositorRenderer(BaseRenderer):
             progress_fn=_progress,
         )
 
-        # ── 3. Gerar thumbnail ──
+        # ── 5. Gerar thumbnail ──
         _progress("composing", 90, "Gerando thumbnail...")
         thumbnail_path = work_dir / "thumbnail.jpg"
         self._generate_thumbnail(output_path, thumbnail_path)
 
         _progress("composing", 95, "Vídeo renderizado com sucesso!")
         return output_path
+
+    # ══════════════════════════════════════════
+    # Resolução de arquivos e durações
+    # ══════════════════════════════════════════
+
+    def _find_file(self, work_dir: Path, stem: str, hint_ext: Optional[str] = None) -> Optional[Path]:
+        """Encontra um arquivo `stem.<ext>` em work_dir, tentando a extensão sugerida primeiro."""
+        if hint_ext:
+            candidate = work_dir / f"{stem}{hint_ext}"
+            if candidate.exists():
+                return candidate
+        matches = sorted(work_dir.glob(f"{stem}.*"))
+        return matches[0] if matches else None
+
+    def _resolve_audio_tracks(self, audio_items: list, work_dir: Path) -> list[dict]:
+        """Localiza cada arquivo de áudio, aplica corte e calcula a duração efetiva.
+
+        Retorna lista ordenada (mesma ordem de `audio_items`) de:
+        {"path": Path, "volume": float(0..1), "trim_start": float, "trim_end": float|None, "duration": float}
+        """
+        tracks = []
+        for item in audio_items:
+            idx = item.get("index", 0)
+            ext = item.get("file_ext")
+            path = self._find_file(work_dir, f"audio_{idx}", ext)
+            if not path:
+                raise FileNotFoundError(f"Áudio {idx+1}: arquivo não encontrado em {work_dir}")
+
+            raw_duration = self._get_duration(path)
+            trim_start = max(0.0, float(item.get("trim_start") or 0.0))
+            trim_end_raw = item.get("trim_end")
+            trim_end = min(raw_duration, float(trim_end_raw)) if trim_end_raw is not None else raw_duration
+            effective_duration = max(0.0, trim_end - trim_start)
+
+            volume = max(0.0, float(item.get("volume", 100)) / 100.0)
+
+            tracks.append({
+                "path": path,
+                "volume": volume,
+                "trim_start": trim_start,
+                "trim_end": trim_end if trim_end_raw is not None else None,
+                "raw_duration": raw_duration,
+                "duration": effective_duration,
+            })
+        return tracks
+
+    def _resolve_bg_clips(self, bg_segments: list, work_dir: Path, total_duration: float) -> list[dict]:
+        """Calcula a janela [start, end) de cada imagem de fundo, preenchendo lacunas.
+
+        A primeira imagem sempre cobre a partir de t=0. Se `end_sec` não for
+        informado, usa o início da próxima imagem (ordenadas por start_sec) ou
+        o fim do vídeo. Lacunas entre imagens são preenchidas estendendo a
+        imagem anterior.
+        """
+        segs_sorted = sorted(bg_segments, key=lambda s: s.get("start_sec", 0) or 0)
+        clips = []
+        cursor = 0.0
+
+        for i, seg in enumerate(segs_sorted):
+            idx = seg.get("index", 0)
+            ext = seg.get("file_ext")
+            path = self._find_file(work_dir, f"bg_image_{idx}", ext)
+            if not path:
+                logger.warning(f"Imagem de fundo {idx+1}: arquivo não encontrado, ignorando.")
+                continue
+
+            end_sec = seg.get("end_sec")
+            if end_sec is None:
+                end_sec = segs_sorted[i + 1].get("start_sec", total_duration) if i + 1 < len(segs_sorted) else total_duration
+            end_sec = min(float(end_sec), total_duration)
+
+            if end_sec <= cursor:
+                continue  # segmento totalmente fora da timeline útil
+
+            clips.append({"path": path, "start": cursor, "end": end_sec})
+            cursor = end_sec
+
+        # Se restou tempo sem cobertura no final, estende o último clipe
+        if clips and cursor < total_duration:
+            clips[-1]["end"] = total_duration
+        elif not clips:
+            return []
+
+        return clips
+
+    def _resolve_overlay_clips(self, overlay_segments: list, work_dir: Path, total_duration: float) -> list[dict]:
+        """Calcula a janela [start, end) de cada imagem sobreposta (sem preencher lacunas —
+        overlays podem ter períodos sem nenhuma imagem visível)."""
+        clips = []
+        for seg in sorted(overlay_segments, key=lambda s: s.get("start_sec", 0) or 0):
+            idx = seg.get("index", 0)
+            ext = seg.get("file_ext")
+            path = self._find_file(work_dir, f"overlay_image_{idx}", ext)
+            if not path:
+                logger.warning(f"Imagem sobreposta {idx+1}: arquivo não encontrado, ignorando.")
+                continue
+
+            start = max(0.0, float(seg.get("start_sec", 0) or 0))
+            end_raw = seg.get("end_sec")
+            end = min(float(end_raw), total_duration) if end_raw is not None else total_duration
+            if end <= start:
+                continue
+
+            clips.append({
+                "path": path,
+                "start": start,
+                "end": end,
+                "position": seg.get("position", "centro"),
+                "scale": float(seg.get("scale", 50)),
+                "px_width": seg.get("px_width"),
+                "px_height": seg.get("px_height"),
+                "px_x": seg.get("px_x"),
+                "px_y": seg.get("px_y"),
+            })
+        return clips
 
     def _get_duration(self, file_path: Path) -> float:
         """Obtém a duração de um arquivo de mídia via ffprobe."""
@@ -133,358 +252,3 @@ class VideoCompositorRenderer(BaseRenderer):
             raise RuntimeError(f"ffprobe falhou: {result.stderr}")
         data = json.loads(result.stdout)
         return float(data["format"]["duration"])
-
-    def _compose_video(
-        self,
-        bg_path: Path,
-        audio_path: Path,
-        output_path: Path,
-        res_w: int,
-        res_h: int,
-        duration: float,
-        overlay_path: Optional[Path] = None,
-        overlay_position: str = "centro",
-        overlay_scale_pct: float = 50.0,
-        sec_audio_path: Optional[Path] = None,
-        sec_volume: float = 0.2,
-        animations: list = None,
-        elements: list = None,
-        progress_fn: Optional[Callable] = None,
-    ):
-        """Compõe o vídeo final usando FFmpeg em uma única passagem.
-
-        Estratégia:
-        - Converte a imagem de fundo em um "vídeo" estático com a duração do áudio
-        - Sobrepõe overlay se existir, na posição configurada
-        - Aplica filtros visuais para animações/elementos
-        - Mixa áudios com volumes independentes
-        """
-        inputs = ["-y"]
-
-        # Input 0: imagem de fundo como vídeo (loop pela duração do áudio)
-        inputs += [
-            "-loop", "1",
-            "-t", str(duration),
-            "-i", str(bg_path),
-        ]
-
-        # Input 1: áudio principal
-        inputs += ["-i", str(audio_path)]
-
-        # Input 2 (opcional): overlay
-        input_idx = 2
-        overlay_input = None
-        if overlay_path and overlay_path.exists():
-            inputs += ["-i", str(overlay_path)]
-            overlay_input = input_idx
-            input_idx += 1
-
-        # Input N (opcional): áudio secundário
-        sec_audio_input = None
-        if sec_audio_path and sec_audio_path.exists():
-            inputs += ["-stream_loop", "-1", "-i", str(sec_audio_path)]
-            sec_audio_input = input_idx
-            input_idx += 1
-
-        # ── Construir filtro complexo ──
-        fc_parts = []
-
-        # Escalar fundo para resolução alvo
-        fc_parts.append(
-            f"[0:v]scale={res_w}:{res_h}:force_original_aspect_ratio=increase,"
-            f"crop={res_w}:{res_h},setsar=1,format=yuv420p[bg]"
-        )
-        cur_video = "bg"
-
-        # Aplicar elementos visuais (vinheta, gradientes)
-        if elements:
-            cur_video = self._apply_elements(fc_parts, cur_video, elements, res_w, res_h)
-
-        # Overlay da imagem sobreposta
-        if overlay_input is not None:
-            if progress_fn:
-                progress_fn("composing", 40, "Adicionando imagem sobreposta...")
-
-            # Calcular escala do overlay
-            overlay_w = int(res_w * overlay_scale_pct / 100)
-            pos_expr = POSITION_MAP.get(overlay_position, POSITION_MAP["centro"])
-
-            fc_parts.append(
-                f"[{overlay_input}:v]scale={overlay_w}:-1,format=rgba[ov]"
-            )
-            fc_parts.append(
-                f"[{cur_video}][ov]overlay={pos_expr}:format=auto[vov]"
-            )
-            cur_video = "vov"
-
-        # Aplicar animações via filtros FFmpeg
-        if animations:
-            if progress_fn:
-                progress_fn("composing", 55, "Aplicando animações...")
-            cur_video = self._apply_animations(fc_parts, cur_video, animations, res_w, res_h, duration)
-
-        # ── Áudio ──
-        audio_filter = None
-        if sec_audio_input is not None:
-            if progress_fn:
-                progress_fn("composing", 70, "Mixando áudios...")
-            # Mixar áudio principal (volume 1.0) + secundário (volume configurado)
-            fc_parts.append(
-                f"[1:a]volume=1.0[amain]"
-            )
-            fc_parts.append(
-                f"[{sec_audio_input}:a]volume={sec_volume:.2f}[asec]"
-            )
-            fc_parts.append(
-                f"[amain][asec]amix=inputs=2:duration=first:dropout_transition=2[aout]"
-            )
-            audio_filter = "aout"
-
-        filter_complex = ";".join(fc_parts)
-
-        # ── Montar comando ffmpeg ──
-        cmd = [
-            "ffmpeg", *inputs,
-            "-filter_complex", filter_complex,
-            "-map", f"[{cur_video}]",
-        ]
-
-        if audio_filter:
-            cmd += ["-map", f"[{audio_filter}]"]
-        else:
-            cmd += ["-map", "1:a:0"]
-
-        cmd += [
-            "-c:v", "libx264", "-preset", "veryfast",
-            "-c:a", "aac", "-b:a", "192k",
-            "-t", str(duration),
-            "-shortest",
-            "-movflags", "+faststart",
-            str(output_path),
-        ]
-
-        if progress_fn:
-            progress_fn("composing", 75, "Codificando vídeo final...")
-
-        logger.info(f"Compondo vídeo compositor ({res_w}x{res_h}, {duration:.0f}s)...")
-        timeout = max(1800, int(duration * 10))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-
-        if result.returncode != 0:
-            logger.error(f"FFmpeg stderr: {result.stderr[-800:]}")
-            raise RuntimeError(f"ffmpeg falhou ao compor vídeo: {result.stderr[-600:]}")
-
-        logger.info(
-            f"Vídeo compositor gerado: {output_path} "
-            f"({output_path.stat().st_size / 1024 / 1024:.1f} MB)"
-        )
-
-    def _apply_elements(
-        self, fc_parts: list, cur_video: str,
-        elements: list, res_w: int, res_h: int,
-    ) -> str:
-        """Aplica elementos decorativos via filtros FFmpeg."""
-        elem_idx = 0
-
-        for elem in elements:
-            out_label = f"velem{elem_idx}"
-
-            if elem == "sombra_vinheta":
-                # Efeito vinheta — escurece as bordas
-                fc_parts.append(
-                    f"[{cur_video}]vignette=PI/4[{out_label}]"
-                )
-                cur_video = out_label
-                elem_idx += 1
-
-            elif elem == "sombra_radial":
-                # Vinheta mais suave
-                fc_parts.append(
-                    f"[{cur_video}]vignette=PI/3:max_radius={res_w//3}[{out_label}]"
-                )
-                cur_video = out_label
-                elem_idx += 1
-
-            elif elem == "gradiente_top":
-                # Gradiente escuro no topo (drawbox com transparência)
-                fc_parts.append(
-                    f"[{cur_video}]drawbox=x=0:y=0:w={res_w}:h={res_h//4}:"
-                    f"color=black@0.4:t=fill[{out_label}]"
-                )
-                cur_video = out_label
-                elem_idx += 1
-
-            elif elem == "gradiente_bottom":
-                # Gradiente escuro na parte inferior
-                y_start = res_h - res_h // 4
-                fc_parts.append(
-                    f"[{cur_video}]drawbox=x=0:y={y_start}:w={res_w}:h={res_h//4}:"
-                    f"color=black@0.4:t=fill[{out_label}]"
-                )
-                cur_video = out_label
-                elem_idx += 1
-
-            elif elem == "moldura_gold":
-                # Borda dourada fina
-                border = 6
-                fc_parts.append(
-                    f"[{cur_video}]drawbox=x=0:y=0:w={res_w}:h={border}:color=0xFFD700@0.8:t=fill,"
-                    f"drawbox=x=0:y={res_h - border}:w={res_w}:h={border}:color=0xFFD700@0.8:t=fill,"
-                    f"drawbox=x=0:y=0:w={border}:h={res_h}:color=0xFFD700@0.8:t=fill,"
-                    f"drawbox=x={res_w - border}:y=0:w={border}:h={res_h}:color=0xFFD700@0.8:t=fill"
-                    f"[{out_label}]"
-                )
-                cur_video = out_label
-                elem_idx += 1
-
-            elif elem == "moldura_neon":
-                # Borda neon roxa
-                border = 4
-                fc_parts.append(
-                    f"[{cur_video}]drawbox=x=0:y=0:w={res_w}:h={border}:color=0xE040FB@0.9:t=fill,"
-                    f"drawbox=x=0:y={res_h - border}:w={res_w}:h={border}:color=0xE040FB@0.9:t=fill,"
-                    f"drawbox=x=0:y=0:w={border}:h={res_h}:color=0xE040FB@0.9:t=fill,"
-                    f"drawbox=x={res_w - border}:y=0:w={border}:h={res_h}:color=0xE040FB@0.9:t=fill"
-                    f"[{out_label}]"
-                )
-                cur_video = out_label
-                elem_idx += 1
-
-            elif elem == "barra_inferior":
-                # Barra escura na parte inferior para texto
-                bar_h = res_h // 8
-                fc_parts.append(
-                    f"[{cur_video}]drawbox=x=0:y={res_h - bar_h}:w={res_w}:h={bar_h}:"
-                    f"color=black@0.6:t=fill[{out_label}]"
-                )
-                cur_video = out_label
-                elem_idx += 1
-
-            elif elem == "caixa_texto":
-                # Caixa de texto centralizada semi-transparente
-                box_w = int(res_w * 0.8)
-                box_h = res_h // 6
-                box_x = (res_w - box_w) // 2
-                box_y = res_h // 2 - box_h // 2
-                fc_parts.append(
-                    f"[{cur_video}]drawbox=x={box_x}:y={box_y}:w={box_w}:h={box_h}:"
-                    f"color=black@0.5:t=fill[{out_label}]"
-                )
-                cur_video = out_label
-                elem_idx += 1
-
-        return cur_video
-
-    def _apply_animations(
-        self, fc_parts: list, cur_video: str,
-        animations: list, res_w: int, res_h: int, duration: float,
-    ) -> str:
-        """Aplica animações via filtros FFmpeg (simuladas com filtros nativos)."""
-        anim_idx = 0
-
-        for anim in animations:
-            out_label = f"vanim{anim_idx}"
-
-            if anim == "brilho":
-                # Pulso de brilho sutil (eq com oscilação)
-                fc_parts.append(
-                    f"[{cur_video}]eq=brightness=0.03:saturation=1.1[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "particulas":
-                # Simular partículas com noise overlay sutil
-                fc_parts.append(
-                    f"[{cur_video}]noise=alls=8:allf=t+u[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "neve":
-                # Simulação de neve com noise + threshold
-                fc_parts.append(
-                    f"[{cur_video}]noise=alls=15:allf=t[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "fogo":
-                # Simular efeito quente — ajuste de cor
-                fc_parts.append(
-                    f"[{cur_video}]colorbalance=rs=0.15:gs=-0.05:bs=-0.15,"
-                    f"eq=brightness=0.02:saturation=1.3[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "chuva":
-                # Simular chuva com noise + blur direcional leve
-                fc_parts.append(
-                    f"[{cur_video}]noise=alls=12:allf=t,"
-                    f"eq=brightness=-0.03:contrast=1.05[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "fumaca":
-                # Efeito de neblina — blur leve + brilho
-                fc_parts.append(
-                    f"[{cur_video}]gblur=sigma=1.5,"
-                    f"eq=brightness=0.05:contrast=0.95[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "luz":
-                # Efeito de luz — brilho pulsante usando eq
-                fc_parts.append(
-                    f"[{cur_video}]eq=brightness=0.06:gamma=1.1[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "faiscas":
-                # Faíscas — noise colorido mais forte
-                fc_parts.append(
-                    f"[{cur_video}]noise=alls=20:allf=t+u,"
-                    f"eq=saturation=1.2[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "explosao":
-                # Efeito de explosão leve — saturação + brilho
-                fc_parts.append(
-                    f"[{cur_video}]eq=brightness=0.08:saturation=1.4:contrast=1.1[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "loop_bg":
-                # Loop de fundo — não faz nada extra (o fundo já é loop)
-                # Mas vamos adicionar um leve zoom lento (ken burns)
-                fc_parts.append(
-                    f"[{cur_video}]zoompan=z='min(zoom+0.0005,1.15)':"
-                    f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-                    f"d={int(duration*25)}:s={res_w}x{res_h}:fps=25[{out_label}]"
-                )
-                cur_video = out_label
-                anim_idx += 1
-
-        return cur_video
-
-    def _generate_thumbnail(self, video_path: Path, thumbnail_path: Path):
-        """Gera thumbnail do primeiro frame do vídeo."""
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(video_path),
-            "-frames:v", "1",
-            "-q:v", "2",
-            str(thumbnail_path),
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            logger.warning(f"Falha ao gerar thumbnail: {result.stderr[-300:]}")
-        else:
-            logger.info(f"Thumbnail gerada: {thumbnail_path}")

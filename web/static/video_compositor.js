@@ -20,6 +20,9 @@ const state = {
     // OmniVoice shared data
     omniVoices: [],
     omniPresets: [],
+    // Timeline de preview
+    totalDuration: 0,      // duração total calculada a partir dos áudios (considerando corte)
+    _activeOvSeg: null,    // segmento de overlay ativo no instante atual da timeline
 };
 
 let audioItemCounter = 0;
@@ -37,6 +40,9 @@ function selectResolution(btn) {
     const canvas = document.getElementById('previewCanvas');
     const [w, h] = state.resolution.split('x').map(Number);
     canvas.style.aspectRatio = `${w}/${h}`;
+    // Resolução muda os cálculos px do controle fino de overlays
+    document.querySelectorAll('#overlaySegmentsList .img-segment').forEach(_syncFineFromQuick);
+    refreshPreviewNow();
 }
 
 // ══════════════════════════════════════════
@@ -226,6 +232,7 @@ function switchAudioType(btn, type) {
     item.querySelectorAll('.audio-panel').forEach(p => {
         p.classList.toggle('active', p.dataset.panelType === type);
     });
+    refreshTimelineUI();
 }
 
 function removeAudioItem(btn) {
@@ -244,6 +251,7 @@ function removeAudioItem(btn) {
     renumberAudioItems();
     updateAudioPreview();
     updateLayers();
+    refreshTimelineUI();
 }
 
 function renumberAudioItems() {
@@ -275,13 +283,14 @@ function addBgSegment() {
     setupImageSegment(added, 'bg');
     renumberBgSegments();
     updateLayers();
+    refreshTimelineUI();
 }
 
 function removeBgSegment(btn) {
     btn.closest('.img-segment').remove();
     renumberBgSegments();
-    updatePreview();
     updateLayers();
+    refreshTimelineUI();
 }
 
 function renumberBgSegments() {
@@ -307,26 +316,27 @@ function addOverlaySegment() {
 
     // Atualiza preview ao mudar posição ou escala, e sincroniza campos px
     added.querySelectorAll('.overlay-pos-grid button').forEach(btn => {
-        btn.addEventListener('click', () => updatePreview());
+        btn.addEventListener('click', () => refreshPreviewNow());
     });
     const scaleRange = added.querySelector('.overlay-scale-range');
     if (scaleRange) {
         scaleRange.addEventListener('input', () => {
             scaleRange.nextElementSibling.textContent = scaleRange.value + '%';
             _syncFineFromQuick(added);
-            updatePreview();
+            refreshPreviewNow();
         });
     }
 
     renumberOverlaySegments();
     updateLayers();
+    refreshTimelineUI();
 }
 
 function removeOverlaySegment(btn) {
     btn.closest('.img-segment').remove();
     renumberOverlaySegments();
-    updatePreview();
     updateLayers();
+    refreshTimelineUI();
 }
 
 function renumberOverlaySegments() {
@@ -418,7 +428,7 @@ function selectOvPos(btn) {
     btn.classList.add('active');
     const seg = btn.closest('.img-segment');
     if (seg) _syncFineFromQuick(seg);
-    updatePreview();
+    refreshPreviewNow();
 }
 
 // ══════════════════════════════════════════
@@ -505,18 +515,228 @@ function setupImageSegment(seg, type) {
         reader.onload = ev => {
             preview.src = ev.target.result;
             preview.style.display = 'block';
-            if (type === 'bg') updatePreview(ev.target.result);
-            else if (type === 'overlay') {
+            if (type === 'bg') {
+                refreshPreviewNow();
+            } else if (type === 'overlay') {
                 // Espera o elemento carregar para ter naturalWidth/Height
                 preview.onload = () => {
                     _syncFineFromQuick(seg);
+                    refreshPreviewNow();
                 };
-                updatePreview(null, ev.target.result);
             }
         };
         reader.readAsDataURL(file);
         updateLayers();
     });
+
+    // Campos de início/fim: aplica limite (clamp) na duração total e atualiza a timeline
+    const startInput = seg.querySelector('.seg-start');
+    const endInput = seg.querySelector('.seg-end');
+    [startInput, endInput].forEach(el => {
+        if (!el) return;
+        el.addEventListener('input', () => checkSegmentTimeWarning(seg));
+        el.addEventListener('change', () => {
+            clampSegmentTimes(seg);
+            refreshPreviewNow();
+        });
+        el.addEventListener('blur', () => {
+            clampSegmentTimes(seg);
+            refreshPreviewNow();
+        });
+    });
+}
+
+// ══════════════════════════════════════════
+// Duração total dos áudios (considerando corte/trim)
+// ══════════════════════════════════════════
+
+/** Duração efetiva de um item de áudio, aplicando trim_start/trim_end se definidos. */
+function getAudioItemEffectiveDuration(item) {
+    const activePanel = item.querySelector('.audio-panel.active');
+    if (!activePanel) return 0;
+    const audioEl = activePanel.querySelector('.audio-preview-el');
+    const rawDuration = audioEl && isFinite(audioEl.duration) ? audioEl.duration : 0;
+    if (!rawDuration) return 0;
+
+    const trimStartRaw = activePanel.querySelector('.trim-start')?.value.trim();
+    const trimEndRaw = activePanel.querySelector('.trim-end')?.value.trim();
+    const trimStart = trimStartRaw ? Math.max(0, parseFloat(trimStartRaw)) : 0;
+    const trimEnd = trimEndRaw ? Math.min(rawDuration, parseFloat(trimEndRaw)) : rawDuration;
+
+    return Math.max(0, trimEnd - trimStart);
+}
+
+/** Soma a duração efetiva de todos os áudios principais (eles são concatenados). */
+function computeTotalDuration() {
+    let total = 0;
+    document.querySelectorAll('#audioItemsList .audio-item').forEach(item => {
+        total += getAudioItemEffectiveDuration(item);
+    });
+    state.totalDuration = total;
+    return total;
+}
+
+/** Lê start/end (segundos) de todos os segmentos de fundo, na ordem do DOM. */
+function getBgSegmentsData() {
+    return Array.from(document.querySelectorAll('#bgSegmentsList .img-segment')).map(seg => {
+        const startInput = seg.querySelector('.seg-start');
+        const endInput = seg.querySelector('.seg-end');
+        const start = startInput && startInput.value !== '' ? parseFloat(startInput.value) : 0;
+        const endRaw = endInput ? endInput.value.trim() : '';
+        const end = endRaw !== '' ? parseFloat(endRaw) : null;
+        return { seg, start, end };
+    });
+}
+
+/** Lê start/end (segundos) de todos os segmentos sobrepostos, na ordem do DOM. */
+function getOverlaySegmentsData() {
+    return Array.from(document.querySelectorAll('#overlaySegmentsList .img-segment')).map(seg => {
+        const startInput = seg.querySelector('.seg-start');
+        const endInput = seg.querySelector('.seg-end');
+        const start = startInput && startInput.value !== '' ? parseFloat(startInput.value) : 0;
+        const endRaw = endInput ? endInput.value.trim() : '';
+        const end = endRaw !== '' ? parseFloat(endRaw) : null;
+        return { seg, start, end };
+    });
+}
+
+/** Encontra o segmento ativo num instante t (segundos), com fallback para gaps. */
+function findActiveSegmentAtTime(segments, t) {
+    if (!segments.length) return null;
+    const candidates = segments.filter(s => s.start <= t && (s.end === null || t < s.end));
+    if (candidates.length) {
+        return candidates.reduce((a, b) => (b.start >= a.start ? b : a));
+    }
+    // Sem correspondência exata: usa o último que já começou (cobre gaps)
+    const before = segments.filter(s => s.start <= t);
+    if (before.length) {
+        return before.reduce((a, b) => (b.start >= a.start ? b : a));
+    }
+    // t é anterior a todos os segmentos: usa o primeiro
+    return segments.reduce((a, b) => (b.start <= a.start ? b : a));
+}
+
+/** Mostra qual imagem está ativa no instante atual, na área de status da timeline. */
+function updateTimelineStatusLabel(activeBg, activeOv) {
+    const statusEl = document.getElementById('previewTimeStatus');
+    if (!statusEl) return;
+    if (state.totalDuration <= 0) {
+        statusEl.textContent = 'Adicione áudios para calcular a duração';
+        return;
+    }
+    const allBg = Array.from(document.querySelectorAll('#bgSegmentsList .img-segment'));
+    const allOv = Array.from(document.querySelectorAll('#overlaySegmentsList .img-segment'));
+    const bgIdx = activeBg ? allBg.indexOf(activeBg.seg) + 1 : null;
+    const ovIdx = activeOv ? allOv.indexOf(activeOv.seg) + 1 : null;
+    const parts = [];
+    if (bgIdx) parts.push(`Fundo #${bgIdx}${allBg.length > 1 ? `/${allBg.length}` : ''}`);
+    if (ovIdx) parts.push(`Sobreposta #${ovIdx}${allOv.length > 1 ? `/${allOv.length}` : ''}`);
+    statusEl.textContent = parts.length ? parts.join(' · ') : 'Nenhuma imagem configurada para este momento';
+}
+
+/** Mostra aviso ao vivo (sem alterar valor) se início/fim ultrapassar a duração total. */
+function checkSegmentTimeWarning(seg) {
+    const warnMsg = seg.querySelector('.seg-time-warn-msg');
+    const startInput = seg.querySelector('.seg-start');
+    const endInput = seg.querySelector('.seg-end');
+    if (!warnMsg) return;
+
+    const total = state.totalDuration;
+    const start = parseFloat(startInput?.value || '0') || 0;
+    const endRaw = endInput?.value.trim();
+    const end = endRaw ? parseFloat(endRaw) : null;
+
+    let msg = '';
+    if (total > 0 && start > total) {
+        msg = `⚠️ Início maior que a duração total dos áudios (${total.toFixed(1)}s).`;
+    } else if (total > 0 && end !== null && end > total) {
+        msg = `⚠️ Fim maior que a duração total dos áudios (${total.toFixed(1)}s).`;
+    } else if (end !== null && end <= start) {
+        msg = '⚠️ O fim deve ser maior que o início.';
+    }
+
+    startInput?.classList.toggle('seg-time-warn', total > 0 && start > total);
+    endInput?.classList.toggle('seg-time-warn', (total > 0 && end !== null && end > total) || (end !== null && end <= start));
+    warnMsg.textContent = msg;
+    warnMsg.classList.toggle('visible', !!msg);
+}
+
+/** Ajusta (corta) início/fim de um segmento para não passar da duração total. */
+function clampSegmentTimes(seg) {
+    const total = state.totalDuration;
+    const startInput = seg.querySelector('.seg-start');
+    const endInput = seg.querySelector('.seg-end');
+
+    if (startInput) {
+        let v = parseFloat(startInput.value || '0') || 0;
+        if (v < 0) v = 0;
+        if (total > 0 && v > total) v = total;
+        startInput.value = v.toFixed(1);
+    }
+    if (endInput) {
+        const raw = endInput.value.trim();
+        if (raw !== '') {
+            let v = parseFloat(raw);
+            if (total > 0 && v > total) v = total;
+            endInput.value = v.toFixed(1);
+        }
+    }
+    checkSegmentTimeWarning(seg);
+}
+
+/** Recalcula duração total, ajusta limites dos segmentos e atualiza a UI da timeline. */
+function refreshTimelineUI() {
+    const total = computeTotalDuration();
+    const slider = document.getElementById('previewTimeSlider');
+    const totalLabel = document.getElementById('previewTotalDuration');
+    const timeLabel = document.getElementById('previewTimeLabel');
+    if (!slider) return;
+
+    if (total > 0) {
+        slider.disabled = false;
+        slider.max = total.toFixed(1);
+        if (parseFloat(slider.value) > total) slider.value = total.toFixed(1);
+        totalLabel.textContent = `${total.toFixed(1)}s total`;
+    } else {
+        slider.disabled = true;
+        slider.max = 0;
+        slider.value = 0;
+        totalLabel.textContent = '0.0s total';
+    }
+    timeLabel.textContent = `${(parseFloat(slider.value) || 0).toFixed(1)}s`;
+
+    // Reajustar limites de todos os segmentos de fundo e sobrepostos
+    document.querySelectorAll('#bgSegmentsList .img-segment').forEach(clampSegmentTimes);
+    document.querySelectorAll('#overlaySegmentsList .img-segment').forEach(clampSegmentTimes);
+
+    refreshPreviewNow();
+}
+
+/** Atualiza o preview visual com base no instante atual da timeline. */
+function refreshPreviewNow() {
+    const slider = document.getElementById('previewTimeSlider');
+    const t = slider ? (parseFloat(slider.value) || 0) : 0;
+
+    const bgSegs = getBgSegmentsData();
+    const ovSegs = getOverlaySegmentsData();
+    const activeBg = findActiveSegmentAtTime(bgSegs, t);
+    const activeOv = findActiveSegmentAtTime(ovSegs, t);
+
+    state._activeOvSeg = activeOv ? activeOv.seg : null;
+
+    let bgUrl = null;
+    if (activeBg) {
+        const preview = activeBg.seg.querySelector('.preview');
+        if (preview && preview.style.display !== 'none' && preview.src) bgUrl = preview.src;
+    }
+    let overlayUrl = null;
+    if (activeOv) {
+        const preview = activeOv.seg.querySelector('.preview');
+        if (preview && preview.style.display !== 'none' && preview.src) overlayUrl = preview.src;
+    }
+
+    updatePreview(bgUrl, overlayUrl);
+    updateTimelineStatusLabel(activeBg, activeOv);
 }
 
 // ══════════════════════════════════════════
@@ -526,19 +746,6 @@ function updatePreview(bgUrl, overlayUrl) {
     const bgEl = document.getElementById('previewBg');
     const overlayEl = document.getElementById('previewOverlay');
     const placeholder = document.getElementById('previewPlaceholder');
-
-    // Usa a primeira imagem de fundo como preview
-    if (bgUrl === undefined) {
-        const firstBgInput = document.querySelector('#bgSegmentsList .bg-img-input');
-        const firstBgPreview = document.querySelector('#bgSegmentsList .preview');
-        bgUrl = firstBgPreview && firstBgPreview.src && firstBgPreview.style.display !== 'none'
-            ? firstBgPreview.src : null;
-    }
-    if (overlayUrl === undefined) {
-        const firstOvPreview = document.querySelector('#overlaySegmentsList .preview');
-        overlayUrl = firstOvPreview && firstOvPreview.src && firstOvPreview.style.display !== 'none'
-            ? firstOvPreview.src : null;
-    }
 
     if (bgUrl) {
         bgEl.src = bgUrl;
@@ -550,13 +757,13 @@ function updatePreview(bgUrl, overlayUrl) {
     }
 
     if (overlayUrl) {
-        // Pega posição e escala do primeiro segmento sobreposto ativo
-        const firstOvSeg = document.querySelector('#overlaySegmentsList .img-segment');
-        const activePos = firstOvSeg
-            ? firstOvSeg.querySelector('.overlay-pos-grid button.active')
+        // Pega posição e escala do segmento sobreposto ativo no instante da timeline
+        const activeOvSeg = state._activeOvSeg || document.querySelector('#overlaySegmentsList .img-segment');
+        const activePos = activeOvSeg
+            ? activeOvSeg.querySelector('.overlay-pos-grid button.active')
             : null;
-        const scaleRange = firstOvSeg
-            ? firstOvSeg.querySelector('.overlay-scale-range')
+        const scaleRange = activeOvSeg
+            ? activeOvSeg.querySelector('.overlay-scale-range')
             : null;
         const scale = scaleRange ? parseInt(scaleRange.value) : 50;
         const pos = activePos ? activePos.dataset.pos : 'centro';
@@ -625,7 +832,7 @@ function toggleGalleryItem(el, type) {
         if (idx >= 0) state.selectedElements.splice(idx, 1); else state.selectedElements.push(value);
     }
     updateLayers();
-    updatePreview();
+    refreshPreviewNow();
 }
 
 // ══════════════════════════════════════════
@@ -1019,9 +1226,9 @@ function setupAudioPreviewFromFile(panel, file) {
     const objectUrl = URL.createObjectURL(file);
     audioEl.src = objectUrl;
     playerWrap.classList.add('visible');
-    if (trimWrap) trimWrap.classList.add('visible');
+    if (trimWrap) { trimWrap.classList.add('visible'); setupTrimListeners(panel); }
 
-    // Mostrar duração quando carregada
+    // Mostrar duração quando carregada + recalcular timeline geral
     audioEl.addEventListener('loadedmetadata', () => {
         if (durationEl && isFinite(audioEl.duration)) {
             const dur = audioEl.duration;
@@ -1029,6 +1236,7 @@ function setupAudioPreviewFromFile(panel, file) {
             const sec = Math.floor(dur % 60);
             durationEl.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
         }
+        refreshTimelineUI();
     }, { once: true });
 }
 
@@ -1041,7 +1249,7 @@ function setupAudioPreviewFromUrl(panel, url) {
 
     audioEl.src = url;
     playerWrap.classList.add('visible');
-    if (trimWrap) trimWrap.classList.add('visible');
+    if (trimWrap) { trimWrap.classList.add('visible'); setupTrimListeners(panel); }
 
     audioEl.addEventListener('loadedmetadata', () => {
         if (durationEl && isFinite(audioEl.duration)) {
@@ -1050,7 +1258,20 @@ function setupAudioPreviewFromUrl(panel, url) {
             const sec = Math.floor(dur % 60);
             durationEl.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
         }
+        refreshTimelineUI();
     }, { once: true });
+}
+
+/** Liga os campos de recorte (trim) do painel ao recálculo da timeline (evita duplicar listener). */
+function setupTrimListeners(panel) {
+    const trimStart = panel.querySelector('.trim-start');
+    const trimEnd = panel.querySelector('.trim-end');
+    [trimStart, trimEnd].forEach(el => {
+        if (el && !el.dataset.trimBound) {
+            el.dataset.trimBound = '1';
+            el.addEventListener('input', () => refreshTimelineUI());
+        }
+    });
 }
 
 // ══════════════════════════════════════════
@@ -1245,6 +1466,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Timeline: mover o slider atualiza o preview no instante escolhido
+    const timeSlider = document.getElementById('previewTimeSlider');
+    if (timeSlider) {
+        timeSlider.addEventListener('input', () => {
+            document.getElementById('previewTimeLabel').textContent = `${(parseFloat(timeSlider.value) || 0).toFixed(1)}s`;
+            refreshPreviewNow();
+        });
+    }
+
     // Carregar vozes e presets da OmniVoice
     loadOmniVoices();
     loadOmniPresets();
@@ -1254,5 +1484,5 @@ document.addEventListener('DOMContentLoaded', () => {
     addBgSegment();
 
     updateLayers();
-    updatePreview();
+    refreshTimelineUI();
 });
