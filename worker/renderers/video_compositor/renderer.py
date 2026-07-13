@@ -1,4 +1,4 @@
-"""Renderer do tipo 'video_compositor' — composição visual por camadas (v2).
+"""Renderer do tipo 'video_compositor' — composição visual por camadas (v3).
 
 Suporta:
 1. Múltiplos áudios principais, concatenados em sequência (com corte/trim e
@@ -7,9 +7,12 @@ Suporta:
    [start_sec, end_sec) — troca de fundo ao longo do vídeo.
 3. Múltiplas imagens sobrepostas, cada uma visível em sua própria janela de
    tempo, com posição/tamanho por percentual OU controle fino em pixels.
-4. Elementos decorativos e animações via filtros FFmpeg (aplicados sobre
-   todo o vídeo).
-5. Áudio secundário (música de fundo) com volume independente, em loop.
+4. Elementos decorativos com controle de intervalo de tempo (enable=between).
+5. Animações via filtros FFmpeg com controle de intensidade e intervalo de
+   tempo (enable=between).
+6. Animações customizadas (upload de vídeo/GIF) como overlays animados,
+   com posição, escala, tempo e opção de loop.
+7. Áudio secundário (música de fundo) com volume independente, em loop.
 """
 from __future__ import annotations
 
@@ -80,6 +83,7 @@ class VideoCompositorRenderer(BaseRenderer):
         sec_volume = float(job_data.get("secondary_audio_volume", 20)) / 100.0
         animations = job_data.get("animations", [])
         elements = job_data.get("elements", [])
+        custom_anims = job_data.get("custom_anims", [])
 
         # ── 1. Resolver caminhos e durações dos áudios (com corte aplicado) ──
         _progress("rendering", 52, "Analisando áudios...")
@@ -97,6 +101,9 @@ class VideoCompositorRenderer(BaseRenderer):
         # ── 3. Resolver janelas de tempo das imagens sobrepostas ──
         overlay_clips = self._resolve_overlay_clips(overlay_segments, work_dir, total_duration)
 
+        # ── 3.5. Resolver animações customizadas ──
+        custom_anim_clips = self._resolve_custom_anim_clips(custom_anims, work_dir, total_duration)
+
         # ── 4. Compor o vídeo final ──
         _progress("composing", 55, "Compondo vídeo com camadas...")
         output_path = work_dir / "output.mp4"
@@ -109,6 +116,7 @@ class VideoCompositorRenderer(BaseRenderer):
             audio_tracks=audio_tracks,
             bg_clips=bg_clips,
             overlay_clips=overlay_clips,
+            custom_anim_clips=custom_anim_clips,
             sec_audio_path=sec_audio_path if has_sec_audio else None,
             sec_volume=sec_volume,
             animations=animations,
@@ -239,6 +247,33 @@ class VideoCompositorRenderer(BaseRenderer):
             })
         return clips
 
+    def _resolve_custom_anim_clips(self, custom_anims: list, work_dir: Path, total_duration: float) -> list[dict]:
+        """Resolve os clipes de animações customizadas (vídeo/GIF como overlay)."""
+        clips = []
+        for anim in sorted(custom_anims, key=lambda a: a.get("start_sec", 0) or 0):
+            idx = anim.get("index", 0)
+            ext = anim.get("file_ext")
+            path = self._find_file(work_dir, f"custom_anim_{idx}", ext)
+            if not path:
+                logger.warning(f"Animação customizada {idx+1}: arquivo não encontrado, ignorando.")
+                continue
+
+            start = max(0.0, float(anim.get("start_sec", 0) or 0))
+            end_raw = anim.get("end_sec")
+            end = min(float(end_raw), total_duration) if end_raw is not None else total_duration
+            if end <= start:
+                continue
+
+            clips.append({
+                "path": path,
+                "start": start,
+                "end": end,
+                "position": anim.get("position", "centro"),
+                "scale": float(anim.get("scale", 30)),
+                "loop": anim.get("loop", True),
+            })
+        return clips
+
     def _get_duration(self, file_path: Path) -> float:
         """Obtém a duração de um arquivo de mídia via ffprobe."""
         cmd = [
@@ -266,6 +301,7 @@ class VideoCompositorRenderer(BaseRenderer):
         audio_tracks: list,
         bg_clips: list,
         overlay_clips: list,
+        custom_anim_clips: list = None,
         sec_audio_path: Optional[Path] = None,
         sec_volume: float = 0.2,
         animations: list = None,
@@ -335,15 +371,13 @@ class VideoCompositorRenderer(BaseRenderer):
 
         # ── Elementos decorativos sobre o fundo concatenado ──
         if elements:
-            cur_video = self._apply_elements(fc_parts, cur_video, elements, res_w, res_h)
+            cur_video = self._apply_elements(fc_parts, cur_video, elements, res_w, res_h, duration)
 
         # ── Imagens sobrepostas, cada uma na sua janela de tempo ──
         if overlay_clips:
             if progress_fn:
                 progress_fn("composing", 65, "Adicionando imagens sobrepostas...")
             for i, clip in enumerate(overlay_clips):
-                # -loop 1 faz a imagem estática virar um "vídeo" contínuo,
-                # necessário pois o enable=between(...) cobre vários segundos.
                 inputs += ["-loop", "1", "-framerate", str(fps), "-i", str(clip["path"])]
                 ov_in_idx = input_idx
                 input_idx += 1
@@ -373,10 +407,36 @@ class VideoCompositorRenderer(BaseRenderer):
                 )
                 cur_video = out_label
 
+        # ── Animações customizadas (vídeo/GIF como overlay) ──
+        if custom_anim_clips:
+            if progress_fn:
+                progress_fn("composing", 70, "Adicionando animações customizadas...")
+            for i, clip in enumerate(custom_anim_clips):
+                clip_duration = clip["end"] - clip["start"]
+                loop_flag = ["-stream_loop", "-1"] if clip.get("loop", True) else []
+                inputs += [*loop_flag, "-i", str(clip["path"])]
+                ca_in_idx = input_idx
+                input_idx += 1
+
+                ca_label = f"ca{i}"
+                ca_w = max(1, int(res_w * clip["scale"] / 100))
+                fc_parts.append(
+                    f"[{ca_in_idx}:v]scale={ca_w}:-1,format=rgba[{ca_label}]"
+                )
+
+                pos_expr = POSITION_MAP.get(clip["position"], POSITION_MAP["centro"])
+                out_label = f"vca{i}"
+                enable_expr = f"between(t,{clip['start']:.3f},{clip['end']:.3f})"
+                fc_parts.append(
+                    f"[{cur_video}][{ca_label}]overlay={pos_expr}:"
+                    f"enable='{enable_expr}':format=auto:shortest=1[{out_label}]"
+                )
+                cur_video = out_label
+
         # ── Animações sobre o vídeo final ──
         if animations:
             if progress_fn:
-                progress_fn("composing", 72, "Aplicando animações...")
+                progress_fn("composing", 75, "Aplicando animações...")
             cur_video = self._apply_animations(fc_parts, cur_video, animations, res_w, res_h, duration)
 
         # ── Áudio secundário (música de fundo em loop) ──
@@ -412,6 +472,7 @@ class VideoCompositorRenderer(BaseRenderer):
         logger.info(
             f"Compondo vídeo compositor ({res_w}x{res_h}, {duration:.1f}s, "
             f"{len(bg_clips)} fundo(s), {len(overlay_clips)} overlay(s), "
+            f"{len(custom_anim_clips or [])} anim custom, "
             f"{len(audio_tracks)} áudio(s))..."
         )
         timeout = max(1800, int(duration * 10))
@@ -427,89 +488,106 @@ class VideoCompositorRenderer(BaseRenderer):
         )
 
     # ══════════════════════════════════════════
-    # Elementos decorativos
+    # Elementos decorativos (com controle de tempo)
     # ══════════════════════════════════════════
 
     def _apply_elements(
         self, fc_parts: list, cur_video: str,
-        elements: list, res_w: int, res_h: int,
+        elements: list, res_w: int, res_h: int, duration: float,
     ) -> str:
-        """Aplica elementos decorativos via filtros FFmpeg."""
+        """Aplica elementos decorativos via filtros FFmpeg, com enable=between() quando necessário."""
         elem_idx = 0
 
         for elem in elements:
-            out_label = f"velem{elem_idx}"
+            # Formato expandido: {name: str, full_video: bool, start_sec, end_sec}
+            # Formato legado (str simples): compatibilidade
+            if isinstance(elem, str):
+                elem_name = elem
+                enable = None
+            else:
+                elem_name = elem.get("name", "")
+                full_video = elem.get("full_video", True)
+                start_sec = elem.get("start_sec")
+                end_sec = elem.get("end_sec")
+                if not full_video and start_sec is not None:
+                    end_val = end_sec if end_sec is not None else duration
+                    enable = f"between(t,{float(start_sec):.3f},{float(end_val):.3f})"
+                else:
+                    enable = None
 
-            if elem == "sombra_vinheta":
-                fc_parts.append(f"[{cur_video}]vignette=PI/4[{out_label}]")
+            out_label = f"velem{elem_idx}"
+            enable_suffix = f":enable='{enable}'" if enable else ""
+
+            if elem_name == "sombra_vinheta":
+                fc_parts.append(f"[{cur_video}]vignette=PI/4{enable_suffix}[{out_label}]")
                 cur_video = out_label
                 elem_idx += 1
 
-            elif elem == "sombra_radial":
+            elif elem_name == "sombra_radial":
                 fc_parts.append(
-                    f"[{cur_video}]vignette=PI/3:max_radius={res_w//3}[{out_label}]"
+                    f"[{cur_video}]vignette=PI/3:max_radius={res_w//3}{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 elem_idx += 1
 
-            elif elem == "gradiente_top":
+            elif elem_name == "gradiente_top":
                 fc_parts.append(
                     f"[{cur_video}]drawbox=x=0:y=0:w={res_w}:h={res_h//4}:"
-                    f"color=black@0.4:t=fill[{out_label}]"
+                    f"color=black@0.4:t=fill{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 elem_idx += 1
 
-            elif elem == "gradiente_bottom":
+            elif elem_name == "gradiente_bottom":
                 y_start = res_h - res_h // 4
                 fc_parts.append(
                     f"[{cur_video}]drawbox=x=0:y={y_start}:w={res_w}:h={res_h//4}:"
-                    f"color=black@0.4:t=fill[{out_label}]"
+                    f"color=black@0.4:t=fill{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 elem_idx += 1
 
-            elif elem == "moldura_gold":
+            elif elem_name == "moldura_gold":
                 border = 6
                 fc_parts.append(
-                    f"[{cur_video}]drawbox=x=0:y=0:w={res_w}:h={border}:color=0xFFD700@0.8:t=fill,"
-                    f"drawbox=x=0:y={res_h - border}:w={res_w}:h={border}:color=0xFFD700@0.8:t=fill,"
-                    f"drawbox=x=0:y=0:w={border}:h={res_h}:color=0xFFD700@0.8:t=fill,"
-                    f"drawbox=x={res_w - border}:y=0:w={border}:h={res_h}:color=0xFFD700@0.8:t=fill"
+                    f"[{cur_video}]drawbox=x=0:y=0:w={res_w}:h={border}:color=0xFFD700@0.8:t=fill{enable_suffix},"
+                    f"drawbox=x=0:y={res_h - border}:w={res_w}:h={border}:color=0xFFD700@0.8:t=fill{enable_suffix},"
+                    f"drawbox=x=0:y=0:w={border}:h={res_h}:color=0xFFD700@0.8:t=fill{enable_suffix},"
+                    f"drawbox=x={res_w - border}:y=0:w={border}:h={res_h}:color=0xFFD700@0.8:t=fill{enable_suffix}"
                     f"[{out_label}]"
                 )
                 cur_video = out_label
                 elem_idx += 1
 
-            elif elem == "moldura_neon":
+            elif elem_name == "moldura_neon":
                 border = 4
                 fc_parts.append(
-                    f"[{cur_video}]drawbox=x=0:y=0:w={res_w}:h={border}:color=0xE040FB@0.9:t=fill,"
-                    f"drawbox=x=0:y={res_h - border}:w={res_w}:h={border}:color=0xE040FB@0.9:t=fill,"
-                    f"drawbox=x=0:y=0:w={border}:h={res_h}:color=0xE040FB@0.9:t=fill,"
-                    f"drawbox=x={res_w - border}:y=0:w={border}:h={res_h}:color=0xE040FB@0.9:t=fill"
+                    f"[{cur_video}]drawbox=x=0:y=0:w={res_w}:h={border}:color=0xE040FB@0.9:t=fill{enable_suffix},"
+                    f"drawbox=x=0:y={res_h - border}:w={res_w}:h={border}:color=0xE040FB@0.9:t=fill{enable_suffix},"
+                    f"drawbox=x=0:y=0:w={border}:h={res_h}:color=0xE040FB@0.9:t=fill{enable_suffix},"
+                    f"drawbox=x={res_w - border}:y=0:w={border}:h={res_h}:color=0xE040FB@0.9:t=fill{enable_suffix}"
                     f"[{out_label}]"
                 )
                 cur_video = out_label
                 elem_idx += 1
 
-            elif elem == "barra_inferior":
+            elif elem_name == "barra_inferior":
                 bar_h = res_h // 8
                 fc_parts.append(
                     f"[{cur_video}]drawbox=x=0:y={res_h - bar_h}:w={res_w}:h={bar_h}:"
-                    f"color=black@0.6:t=fill[{out_label}]"
+                    f"color=black@0.6:t=fill{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 elem_idx += 1
 
-            elif elem == "caixa_texto":
+            elif elem_name == "caixa_texto":
                 box_w = int(res_w * 0.8)
                 box_h = res_h // 6
                 box_x = (res_w - box_w) // 2
                 box_y = res_h // 2 - box_h // 2
                 fc_parts.append(
                     f"[{cur_video}]drawbox=x={box_x}:y={box_y}:w={box_w}:h={box_h}:"
-                    f"color=black@0.5:t=fill[{out_label}]"
+                    f"color=black@0.5:t=fill{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 elem_idx += 1
@@ -517,87 +595,144 @@ class VideoCompositorRenderer(BaseRenderer):
         return cur_video
 
     # ══════════════════════════════════════════
-    # Animações
+    # Animações (com controle de tempo e intensidade)
     # ══════════════════════════════════════════
 
     def _apply_animations(
         self, fc_parts: list, cur_video: str,
         animations: list, res_w: int, res_h: int, duration: float,
     ) -> str:
-        """Aplica animações via filtros FFmpeg (simuladas com filtros nativos)."""
+        """Aplica animações via filtros FFmpeg com intensidade configurável e enable=between()."""
         anim_idx = 0
 
         for anim in animations:
+            # Formato expandido: {name, full_video, start_sec, end_sec, intensity}
+            # Formato legado (str simples): compatibilidade
+            if isinstance(anim, str):
+                anim_name = anim
+                intensity = 50
+                enable = None
+            else:
+                anim_name = anim.get("name", "")
+                intensity = int(anim.get("intensity", 50))
+                full_video = anim.get("full_video", True)
+                start_sec = anim.get("start_sec")
+                end_sec = anim.get("end_sec")
+                if not full_video and start_sec is not None:
+                    end_val = end_sec if end_sec is not None else duration
+                    enable = f"between(t,{float(start_sec):.3f},{float(end_val):.3f})"
+                else:
+                    enable = None
+
+            # Fator de intensidade: 0.2 (10%) a 2.0 (100%)
+            factor = max(0.2, intensity / 50.0)
             out_label = f"vanim{anim_idx}"
+            enable_suffix = f":enable='{enable}'" if enable else ""
 
-            if anim == "brilho":
+            if anim_name == "brilho":
+                brightness = 0.06 * factor
+                saturation = 1.0 + 0.2 * factor
                 fc_parts.append(
-                    f"[{cur_video}]eq=brightness=0.03:saturation=1.1[{out_label}]"
+                    f"[{cur_video}]eq=brightness={brightness:.3f}:saturation={saturation:.2f}"
+                    f"{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 anim_idx += 1
 
-            elif anim == "particulas":
+            elif anim_name == "particulas":
+                noise_val = int(15 * factor)
                 fc_parts.append(
-                    f"[{cur_video}]noise=alls=8:allf=t+u[{out_label}]"
+                    f"[{cur_video}]noise=alls={noise_val}:allf=t+u"
+                    f"{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 anim_idx += 1
 
-            elif anim == "neve":
-                fc_parts.append(f"[{cur_video}]noise=alls=15:allf=t[{out_label}]")
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "fogo":
+            elif anim_name == "neve":
+                noise_val = int(25 * factor)
                 fc_parts.append(
-                    f"[{cur_video}]colorbalance=rs=0.15:gs=-0.05:bs=-0.15,"
-                    f"eq=brightness=0.02:saturation=1.3[{out_label}]"
+                    f"[{cur_video}]noise=alls={noise_val}:allf=t"
+                    f"{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 anim_idx += 1
 
-            elif anim == "chuva":
+            elif anim_name == "fogo":
+                rs = 0.25 * factor
+                bs = -0.25 * factor
+                brightness = 0.04 * factor
+                saturation = 1.0 + 0.5 * factor
                 fc_parts.append(
-                    f"[{cur_video}]noise=alls=12:allf=t,"
-                    f"eq=brightness=-0.03:contrast=1.05[{out_label}]"
+                    f"[{cur_video}]colorbalance=rs={rs:.3f}:gs=-0.05:bs={-bs:.3f},"
+                    f"eq=brightness={brightness:.3f}:saturation={saturation:.2f}"
+                    f"{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 anim_idx += 1
 
-            elif anim == "fumaca":
+            elif anim_name == "chuva":
+                noise_val = int(20 * factor)
+                brightness = -0.05 * factor
                 fc_parts.append(
-                    f"[{cur_video}]gblur=sigma=1.5,"
-                    f"eq=brightness=0.05:contrast=0.95[{out_label}]"
+                    f"[{cur_video}]noise=alls={noise_val}:allf=t,"
+                    f"eq=brightness={brightness:.3f}:contrast=1.08"
+                    f"{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 anim_idx += 1
 
-            elif anim == "luz":
-                fc_parts.append(f"[{cur_video}]eq=brightness=0.06:gamma=1.1[{out_label}]")
-                cur_video = out_label
-                anim_idx += 1
-
-            elif anim == "faiscas":
+            elif anim_name == "fumaca":
+                sigma = 2.5 * factor
+                brightness = 0.08 * factor
                 fc_parts.append(
-                    f"[{cur_video}]noise=alls=20:allf=t+u,"
-                    f"eq=saturation=1.2[{out_label}]"
+                    f"[{cur_video}]gblur=sigma={sigma:.2f},"
+                    f"eq=brightness={brightness:.3f}:contrast=0.92"
+                    f"{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 anim_idx += 1
 
-            elif anim == "explosao":
+            elif anim_name == "luz":
+                brightness = 0.1 * factor
+                gamma = 1.0 + 0.2 * factor
                 fc_parts.append(
-                    f"[{cur_video}]eq=brightness=0.08:saturation=1.4:contrast=1.1[{out_label}]"
+                    f"[{cur_video}]eq=brightness={brightness:.3f}:gamma={gamma:.2f}"
+                    f"{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 anim_idx += 1
 
-            elif anim == "loop_bg":
+            elif anim_name == "faiscas":
+                noise_val = int(30 * factor)
+                saturation = 1.0 + 0.4 * factor
                 fc_parts.append(
-                    f"[{cur_video}]zoompan=z='min(zoom+0.0005,1.15)':"
+                    f"[{cur_video}]noise=alls={noise_val}:allf=t+u,"
+                    f"eq=saturation={saturation:.2f}"
+                    f"{enable_suffix}[{out_label}]"
+                )
+                cur_video = out_label
+                anim_idx += 1
+
+            elif anim_name == "explosao":
+                brightness = 0.12 * factor
+                saturation = 1.0 + 0.6 * factor
+                contrast = 1.0 + 0.15 * factor
+                fc_parts.append(
+                    f"[{cur_video}]eq=brightness={brightness:.3f}:"
+                    f"saturation={saturation:.2f}:contrast={contrast:.2f}"
+                    f"{enable_suffix}[{out_label}]"
+                )
+                cur_video = out_label
+                anim_idx += 1
+
+            elif anim_name == "loop_bg":
+                zoom_speed = 0.0005 + 0.0005 * factor
+                max_zoom = 1.1 + 0.1 * factor
+                fc_parts.append(
+                    f"[{cur_video}]zoompan=z='min(zoom+{zoom_speed:.5f},{max_zoom:.3f})':"
                     f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-                    f"d={int(duration*25)}:s={res_w}x{res_h}:fps=25[{out_label}]"
+                    f"d={int(duration*25)}:s={res_w}x{res_h}:fps=25"
+                    f"{enable_suffix}[{out_label}]"
                 )
                 cur_video = out_label
                 anim_idx += 1

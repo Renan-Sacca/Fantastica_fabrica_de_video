@@ -83,6 +83,11 @@ class VideoCompositorProcessor:
             # ── 5. Baixar imagens sobrepostas ──
             await self._download_overlay_segments(job_id, overlay_segments, work_dir)
 
+            # ── 5.5. Baixar animações customizadas ──
+            custom_anims = metadata.get("custom_anims", [])
+            if custom_anims:
+                await self._download_custom_anims(job_id, custom_anims, work_dir)
+
             # ── 6. Baixar/gerar os áudios principais ──
             await self._prepare_audio_items(
                 job_id, audio_items, work_dir, folder_id, metadata_file_id, metadata
@@ -225,6 +230,20 @@ class VideoCompositorProcessor:
             if not file_id:
                 continue
             dest = work_dir / f"overlay_image_{idx}{ext}"
+            await asyncio.get_event_loop().run_in_executor(
+                None, self.drive.download_file, file_id, dest
+            )
+
+    async def _download_custom_anims(self, job_id: str, custom_anims: list, work_dir: Path):
+        """Baixa todos os arquivos de animação customizada (vídeo/GIF)."""
+        await self._publish(job_id, "preparing", 18, "Baixando animações customizadas...")
+        for anim in custom_anims:
+            idx = anim["index"]
+            file_id = anim.get("file_id")
+            ext = anim.get("file_ext", ".mp4")
+            if not file_id:
+                continue
+            dest = work_dir / f"custom_anim_{idx}{ext}"
             await asyncio.get_event_loop().run_in_executor(
                 None, self.drive.download_file, file_id, dest
             )

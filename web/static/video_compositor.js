@@ -1,32 +1,35 @@
 /**
- * Vídeo Compositor — Lógica do editor visual v2
+ * Vídeo Compositor — Lógica do editor visual v3
  * Suporta: múltiplos áudios, OmniVoice com seleção de voz/preset/configuração,
- *          imagens de fundo por segmento de tempo, imagens sobrepostas por segmento.
+ *          imagens de fundo por segmento de tempo (cascata automática),
+ *          imagens sobrepostas por segmento,
+ *          animações/elementos com controles de tempo e intensidade,
+ *          animações customizadas (upload de vídeo/GIF).
  */
 
 // ══════════════════════════════════════════
 // Estado global
 // ══════════════════════════════════════════
 const state = {
-    selectedAnimations: [],
-    selectedElements: [],
+    selectedAnimations: [],   // [{name:'particulas', start:null, end:null, fullVideo:true, intensity:50}, ...]
+    selectedElements: [],     // [{name:'moldura_gold', start:null, end:null, fullVideo:true}, ...]
     layers: [],
     resolution: '1080x1920',
-    audioItems: [],       // [{type:'upload'|'omni', file:File|null, omni:{...}, volume:100}]
-    bgSegments: [],       // [{file:File, previewUrl:str, startSec:num, endSec:num|null}]
-    overlaySegments: [],  // [{file:File, previewUrl:str, startSec:num, endSec:num|null, position:str, scale:num}]
+    audioItems: [],
+    bgSegments: [],
+    overlaySegments: [],
+    customAnims: [],          // [{file:File, start, end, position, scale, loop}, ...]
     jobId: null,
     eventSource: null,
-    // OmniVoice shared data
     omniVoices: [],
     omniPresets: [],
-    // Timeline de preview
-    totalDuration: 0,      // duração total calculada a partir dos áudios (considerando corte)
+    totalDuration: 0,
 };
 
 let audioItemCounter = 0;
 let bgSegmentCounter = 0;
 let overlaySegmentCounter = 0;
+let customAnimCounter = 0;
 
 // ══════════════════════════════════════════
 // Resolução
@@ -39,7 +42,6 @@ function selectResolution(btn) {
     const canvas = document.getElementById('previewCanvas');
     const [w, h] = state.resolution.split('x').map(Number);
     canvas.style.aspectRatio = `${w}/${h}`;
-    // Resolução muda os cálculos px do controle fino de overlays
     document.querySelectorAll('#overlaySegmentsList .img-segment').forEach(_syncFineFromQuick);
     refreshPreviewNow();
 }
@@ -152,8 +154,7 @@ function addAudioItem() {
     const wrapper = document.createElement('div');
     wrapper.className = 'audio-item';
     wrapper.dataset.idx = idx;
-    // Estado do áudio IA pré-gerado
-    wrapper._omniGenerated = null; // {job_id, audio_url, blob}
+    wrapper._omniGenerated = null;
     wrapper._omniEventSource = null;
 
     wrapper.innerHTML = `
@@ -173,11 +174,9 @@ function addAudioItem() {
 
     const panelsWrap = wrapper.querySelector('.audio-panels-wrap');
 
-    // Upload panel
     const uploadTpl = document.getElementById('tplAudioUpload').content.cloneNode(true);
     panelsWrap.appendChild(uploadTpl);
 
-    // Omni panel
     const omniTpl = document.getElementById('tplAudioOmni').content.cloneNode(true);
     const omniPanel = omniTpl.querySelector('.audio-panel');
     omniPanel.classList.remove('active');
@@ -185,7 +184,6 @@ function addAudioItem() {
 
     container.appendChild(wrapper);
 
-    // Setup file input for upload panel — com player de preview
     const fileInput = wrapper.querySelector('.audio-file-input');
     const fileName = wrapper.querySelector('.audio-panel[data-panel-type=upload] .file-name');
     const uploadPanel = wrapper.querySelector('.audio-panel[data-panel-type=upload]');
@@ -193,20 +191,17 @@ function addAudioItem() {
         if (fileInput.files[0]) {
             fileName.textContent = '✅ ' + fileInput.files[0].name;
             fileName.style.display = 'block';
-            // Criar preview de áudio
             setupAudioPreviewFromFile(uploadPanel, fileInput.files[0]);
         }
         updateAudioPreview();
     });
 
-    // Volume display for all range inputs in this item
     wrapper.querySelectorAll('.audio-vol-range').forEach(range => {
         range.addEventListener('input', () => {
             range.nextElementSibling.textContent = range.value + '%';
         });
     });
 
-    // Populate voice/preset selects
     const voiceSel = wrapper.querySelector('.omni-voice-select');
     if (state.omniVoices.length) {
         voiceSel.innerHTML = state.omniVoices.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
@@ -236,12 +231,10 @@ function switchAudioType(btn, type) {
 
 function removeAudioItem(btn) {
     const item = btn.closest('.audio-item');
-    // Fechar EventSource se existir
     if (item._omniEventSource) {
         item._omniEventSource.close();
         item._omniEventSource = null;
     }
-    // Revogar ObjectURL se existir
     const audioEl = item.querySelector('.audio-preview-el');
     if (audioEl && audioEl.src && audioEl.src.startsWith('blob:')) {
         URL.revokeObjectURL(audioEl.src);
@@ -267,7 +260,7 @@ function updateAudioPreview() {
 }
 
 // ══════════════════════════════════════════
-// Imagens de Fundo: Adicionar/Remover
+// Imagens de Fundo: Adicionar/Remover — Cascata automática
 // ══════════════════════════════════════════
 function addBgSegment() {
     bgSegmentCounter++;
@@ -280,14 +273,106 @@ function addBgSegment() {
 
     const added = container.querySelector(`[data-bg-idx="${bgSegmentCounter}"]`);
     setupImageSegment(added, 'bg');
+
+    // Configurar cascata automática: start do novo = end do anterior
+    const allSegs = container.querySelectorAll('.img-segment');
+    const segIndex = Array.from(allSegs).indexOf(added);
+
+    if (segIndex > 0) {
+        // Calcular start baseado no end do anterior
+        const prevSeg = allSegs[segIndex - 1];
+        const prevEnd = prevSeg.querySelector('.seg-end');
+        const prevEndVal = prevEnd && prevEnd.value.trim() ? parseFloat(prevEnd.value) : null;
+        const startInput = added.querySelector('.seg-start');
+
+        if (prevEndVal !== null) {
+            startInput.value = prevEndVal.toFixed(1);
+        } else if (state.totalDuration > 0) {
+            // Dividir tempo restante igualmente
+            const prevStart = parseFloat(prevSeg.querySelector('.seg-start').value || '0');
+            const remaining = state.totalDuration - prevStart;
+            const half = prevStart + remaining / 2;
+            // Setar o end do anterior se estiver vazio
+            prevEnd.value = half.toFixed(1);
+            startInput.value = half.toFixed(1);
+        }
+
+        // Campo start readonly a partir do 2º segmento
+        startInput.readOnly = true;
+        startInput.classList.add('seg-start-auto');
+        // Adicionar hint
+        const hintDiv = document.createElement('div');
+        hintDiv.className = 'seg-start-auto-hint';
+        hintDiv.innerHTML = '🔗 Calculado automaticamente';
+        startInput.parentNode.appendChild(hintDiv);
+    }
+
+    // Listener no campo end para propagar cascata
+    const endInput = added.querySelector('.seg-end');
+    if (endInput) {
+        endInput.addEventListener('change', () => recalcBgCascadeTimes());
+        endInput.addEventListener('blur', () => recalcBgCascadeTimes());
+    }
+
     renumberBgSegments();
     updateLayers();
     refreshTimelineUI();
 }
 
+/**
+ * Recalcula os tempos de início de todas as imagens de fundo em cascata.
+ * O start da imagem N+1 = end da imagem N.
+ * O start da primeira imagem é sempre 0.
+ */
+function recalcBgCascadeTimes() {
+    const container = document.getElementById('bgSegmentsList');
+    const allSegs = container.querySelectorAll('.img-segment');
+
+    allSegs.forEach((seg, i) => {
+        const startInput = seg.querySelector('.seg-start');
+        const endInput = seg.querySelector('.seg-end');
+
+        if (i === 0) {
+            // A primeira sempre começa em 0
+            startInput.value = '0.0';
+            startInput.readOnly = false;
+            startInput.classList.remove('seg-start-auto');
+            // Remover hint se existir
+            const hint = startInput.parentNode.querySelector('.seg-start-auto-hint');
+            if (hint) hint.remove();
+        } else {
+            // Start = end do anterior
+            const prevSeg = allSegs[i - 1];
+            const prevEnd = prevSeg.querySelector('.seg-end');
+            const prevEndVal = prevEnd && prevEnd.value.trim() ? parseFloat(prevEnd.value) : null;
+
+            if (prevEndVal !== null) {
+                startInput.value = prevEndVal.toFixed(1);
+            }
+
+            // Garantir readonly
+            startInput.readOnly = true;
+            if (!startInput.classList.contains('seg-start-auto')) {
+                startInput.classList.add('seg-start-auto');
+                if (!startInput.parentNode.querySelector('.seg-start-auto-hint')) {
+                    const hintDiv = document.createElement('div');
+                    hintDiv.className = 'seg-start-auto-hint';
+                    hintDiv.innerHTML = '🔗 Calculado automaticamente';
+                    startInput.parentNode.appendChild(hintDiv);
+                }
+            }
+        }
+
+        checkSegmentTimeWarning(seg);
+    });
+
+    refreshPreviewNow();
+}
+
 function removeBgSegment(btn) {
     btn.closest('.img-segment').remove();
     renumberBgSegments();
+    recalcBgCascadeTimes();
     updateLayers();
     refreshTimelineUI();
 }
@@ -313,7 +398,6 @@ function addOverlaySegment() {
     const added = container.querySelector(`[data-ov-idx="${overlaySegmentCounter}"]`);
     setupImageSegment(added, 'overlay');
 
-    // Atualiza preview ao mudar posição ou escala, e sincroniza campos px
     added.querySelectorAll('.overlay-pos-grid button').forEach(btn => {
         btn.addEventListener('click', () => refreshPreviewNow());
     });
@@ -348,10 +432,6 @@ function renumberOverlaySegments() {
 // Posição da imagem sobreposta dentro de um segmento
 // ══════════════════════════════════════════
 
-/**
- * Converte escala % → largura/altura em pixels de saída,
- * respeitando a proporção da imagem se já estiver carregada.
- */
 function _scaleToPx(seg, scalePercent) {
     const [outW, outH] = state.resolution.split('x').map(Number);
     const imgEl = seg.querySelector('.preview');
@@ -360,30 +440,24 @@ function _scaleToPx(seg, scalePercent) {
     let w, h;
     if (hasImg) {
         const ratio = imgEl.naturalWidth / imgEl.naturalHeight;
-        // Usa a largura de saída como 100%
         w = Math.round(outW * scalePercent / 100);
         h = Math.round(w / ratio);
-        // Se ultrapassar a altura, limita pela altura
         if (h > outH) {
             h = Math.round(outH * scalePercent / 100);
             w = Math.round(h * ratio);
         }
     } else {
-        // Sem imagem: escala baseada apenas na largura de saída
         w = Math.round(outW * scalePercent / 100);
-        h = null; // não preenche altura sem saber o ratio
+        h = null;
     }
     return { w, h };
 }
 
-/**
- * Converte posição semântica + dimensões → X, Y em pixels (canto superior-esquerdo da imagem).
- */
 function _posToPx(posKey, imgW, imgH) {
     const [outW, outH] = state.resolution.split('x').map(Number);
     const w = imgW || 0;
     const h = imgH || 0;
-    const pad = Math.round(outW * 0.05); // 5% de padding lateral
+    const pad = Math.round(outW * 0.05);
 
     const map = {
         'centro':            { x: Math.round((outW - w) / 2),          y: Math.round((outH - h) / 2) },
@@ -399,7 +473,6 @@ function _posToPx(posKey, imgW, imgH) {
     return map[posKey] || map['centro'];
 }
 
-/** Preenche os campos px do controle fino a partir dos controles rápidos. */
 function _syncFineFromQuick(seg) {
     const scaleRange = seg.querySelector('.overlay-scale-range');
     const activePos  = seg.querySelector('.overlay-pos-grid button.active');
@@ -432,10 +505,7 @@ function selectOvPos(btn) {
 
 // ══════════════════════════════════════════
 // Controle fino: aplica tamanho/posição px ao preview
-/**
- * Aplica tamanho/posição em pixels (resolução de saída) a um elemento de
- * overlay já criado no preview, convertendo para a escala do canvas atual.
- */
+// ══════════════════════════════════════════
 function applyFinePositionToEl(overlayEl, pxW, pxH, pxX, pxY) {
     const canvas = document.getElementById('previewCanvas');
     const canvasRect = canvas.getBoundingClientRect();
@@ -443,7 +513,6 @@ function applyFinePositionToEl(overlayEl, pxW, pxH, pxX, pxY) {
     const scaleX = canvasRect.width / outW;
     const scaleY = canvasRect.height / outH;
 
-    // Reseta todos os posicionamentos
     overlayEl.style.top = 'auto';
     overlayEl.style.left = 'auto';
     overlayEl.style.right = 'auto';
@@ -476,7 +545,6 @@ function applyFinePositionToEl(overlayEl, pxW, pxH, pxX, pxY) {
     }
 }
 
-/** Botão "Aplicar ao preview" do controle fino — apenas força um redraw do preview. */
 function applyFinePosition(btn) {
     const seg = btn.closest('.img-segment');
     if (!seg) return;
@@ -511,7 +579,6 @@ function setupImageSegment(seg, type) {
             if (type === 'bg') {
                 refreshPreviewNow();
             } else if (type === 'overlay') {
-                // Espera o elemento carregar para ter naturalWidth/Height
                 preview.onload = () => {
                     _syncFineFromQuick(seg);
                     refreshPreviewNow();
@@ -522,7 +589,6 @@ function setupImageSegment(seg, type) {
         updateLayers();
     });
 
-    // Campos de início/fim: aplica limite (clamp) na duração total e atualiza a timeline
     const startInput = seg.querySelector('.seg-start');
     const endInput = seg.querySelector('.seg-end');
     [startInput, endInput].forEach(el => {
@@ -530,10 +596,12 @@ function setupImageSegment(seg, type) {
         el.addEventListener('input', () => checkSegmentTimeWarning(seg));
         el.addEventListener('change', () => {
             clampSegmentTimes(seg);
+            if (type === 'bg') recalcBgCascadeTimes();
             refreshPreviewNow();
         });
         el.addEventListener('blur', () => {
             clampSegmentTimes(seg);
+            if (type === 'bg') recalcBgCascadeTimes();
             refreshPreviewNow();
         });
     });
@@ -543,7 +611,6 @@ function setupImageSegment(seg, type) {
 // Duração total dos áudios (considerando corte/trim)
 // ══════════════════════════════════════════
 
-/** Duração efetiva de um item de áudio, aplicando trim_start/trim_end se definidos. */
 function getAudioItemEffectiveDuration(item) {
     const activePanel = item.querySelector('.audio-panel.active');
     if (!activePanel) return 0;
@@ -559,7 +626,6 @@ function getAudioItemEffectiveDuration(item) {
     return Math.max(0, trimEnd - trimStart);
 }
 
-/** Soma a duração efetiva de todos os áudios principais (eles são concatenados). */
 function computeTotalDuration() {
     let total = 0;
     document.querySelectorAll('#audioItemsList .audio-item').forEach(item => {
@@ -569,7 +635,6 @@ function computeTotalDuration() {
     return total;
 }
 
-/** Lê start/end (segundos) de todos os segmentos de fundo, na ordem do DOM. */
 function getBgSegmentsData() {
     return Array.from(document.querySelectorAll('#bgSegmentsList .img-segment')).map(seg => {
         const startInput = seg.querySelector('.seg-start');
@@ -581,7 +646,6 @@ function getBgSegmentsData() {
     });
 }
 
-/** Lê start/end (segundos) de todos os segmentos sobrepostos, na ordem do DOM. */
 function getOverlaySegmentsData() {
     return Array.from(document.querySelectorAll('#overlaySegmentsList .img-segment')).map(seg => {
         const startInput = seg.querySelector('.seg-start');
@@ -593,34 +657,21 @@ function getOverlaySegmentsData() {
     });
 }
 
-/**
- * Encontra o segmento ativo num instante t (segundos).
- *
- * @param {boolean} allowGapFill - Se true (fundo), preenche lacunas usando o
- *   último segmento que já começou, mesmo passado seu próprio fim (o fundo
- *   deve sempre mostrar algo). Se false (sobreposta), a busca é estrita: fora
- *   da própria janela [start, end) o segmento não é considerado — retorna
- *   null quando nada cobre o instante t.
- */
 function findActiveSegmentAtTime(segments, t, allowGapFill = true) {
     if (!segments.length) return null;
     const candidates = segments.filter(s => s.start <= t && (s.end === null || t < s.end));
     if (candidates.length) {
-        // Em caso de sobreposição, prioriza o que começou mais recentemente
         return candidates.reduce((a, b) => (b.start >= a.start ? b : a));
     }
     if (!allowGapFill) return null;
 
-    // Sem correspondência exata: usa o último que já começou (cobre gaps) — só para o fundo
     const before = segments.filter(s => s.start <= t);
     if (before.length) {
         return before.reduce((a, b) => (b.start >= a.start ? b : a));
     }
-    // t é anterior a todos os segmentos: usa o primeiro
     return segments.reduce((a, b) => (b.start <= a.start ? b : a));
 }
 
-/** Mostra qual(is) imagem(ns) está(ão) ativa(s) no instante atual, na área de status da timeline. */
 function updateTimelineStatusLabel(activeBg, activeOvList) {
     const statusEl = document.getElementById('previewTimeStatus');
     if (!statusEl) return;
@@ -645,7 +696,6 @@ function updateTimelineStatusLabel(activeBg, activeOvList) {
     statusEl.textContent = parts.length ? parts.join(' · ') : 'Nenhuma imagem configurada para este momento';
 }
 
-/** Mostra aviso ao vivo (sem alterar valor) se início/fim ultrapassar a duração total. */
 function checkSegmentTimeWarning(seg) {
     const warnMsg = seg.querySelector('.seg-time-warn-msg');
     const startInput = seg.querySelector('.seg-start');
@@ -672,13 +722,12 @@ function checkSegmentTimeWarning(seg) {
     warnMsg.classList.toggle('visible', !!msg);
 }
 
-/** Ajusta (corta) início/fim de um segmento para não passar da duração total. */
 function clampSegmentTimes(seg) {
     const total = state.totalDuration;
     const startInput = seg.querySelector('.seg-start');
     const endInput = seg.querySelector('.seg-end');
 
-    if (startInput) {
+    if (startInput && !startInput.readOnly) {
         let v = parseFloat(startInput.value || '0') || 0;
         if (v < 0) v = 0;
         if (total > 0 && v > total) v = total;
@@ -695,7 +744,6 @@ function clampSegmentTimes(seg) {
     checkSegmentTimeWarning(seg);
 }
 
-/** Recalcula duração total, ajusta limites dos segmentos e atualiza a UI da timeline. */
 function refreshTimelineUI() {
     const total = computeTotalDuration();
     const slider = document.getElementById('previewTimeSlider');
@@ -716,23 +764,19 @@ function refreshTimelineUI() {
     }
     timeLabel.textContent = `${(parseFloat(slider.value) || 0).toFixed(1)}s`;
 
-    // Reajustar limites de todos os segmentos de fundo e sobrepostos
     document.querySelectorAll('#bgSegmentsList .img-segment').forEach(clampSegmentTimes);
     document.querySelectorAll('#overlaySegmentsList .img-segment').forEach(clampSegmentTimes);
+
+    // Recalcular cascata quando a duração total muda
+    recalcBgCascadeTimes();
 
     refreshPreviewNow();
 }
 
-/**
- * Encontra TODOS os segmentos ativos num instante t (busca estrita, sem
- * preenchimento de lacunas). Usado para overlays, que podem ter várias
- * imagens visíveis ao mesmo tempo (ex: uma de cada lado da tela).
- */
 function findAllActiveSegmentsAtTime(segments, t) {
     return segments.filter(s => s.start <= t && (s.end === null || t < s.end));
 }
 
-/** Atualiza o preview visual com base no instante atual da timeline. */
 function refreshPreviewNow() {
     const slider = document.getElementById('previewTimeSlider');
     const t = slider ? (parseFloat(slider.value) || 0) : 0;
@@ -748,7 +792,6 @@ function refreshPreviewNow() {
         if (preview && preview.style.display !== 'none' && preview.src) bgUrl = preview.src;
     }
 
-    // Monta lista de {url, seg} para cada overlay ativo no instante t
     const activeOverlays = activeOvList
         .map(ov => {
             const preview = ov.seg.querySelector('.preview');
@@ -764,7 +807,6 @@ function refreshPreviewNow() {
 // ══════════════════════════════════════════
 // Preview
 // ══════════════════════════════════════════
-// Mapa de posição semântica → estilo CSS (usado no preview de overlays)
 const OVERLAY_POS_MAP = {
     'centro':            { top:'50%',    left:'50%',   right:'auto', bottom:'auto', transform:'translate(-50%,-50%)' },
     'superior':          { top:'5%',     left:'50%',   right:'auto', bottom:'auto', transform:'translateX(-50%)' },
@@ -777,12 +819,6 @@ const OVERLAY_POS_MAP = {
     'inferior direita':  { top:'auto',   left:'auto',  right:'5%',   bottom:'5%',   transform:'none' },
 };
 
-/**
- * Atualiza o preview visual.
- * @param {string|null} bgUrl - URL da imagem de fundo ativa (ou null).
- * @param {Array<{url:string, seg:HTMLElement}>} activeOverlays - lista de
- *   overlays ativos no instante atual (pode ter 0, 1 ou mais itens).
- */
 function updatePreview(bgUrl, activeOverlays) {
     const bgEl = document.getElementById('previewBg');
     const overlaysContainer = document.getElementById('previewOverlaysContainer');
@@ -818,7 +854,6 @@ function updatePreview(bgUrl, activeOverlays) {
         img.style.bottom = p.bottom;
         img.style.transform = p.transform;
 
-        // Controle fino (px) tem prioridade sobre posição/escala rápida
         const pxW = seg.querySelector('.overlay-px-w')?.value.trim();
         const pxH = seg.querySelector('.overlay-px-h')?.value.trim();
         const pxX = seg.querySelector('.overlay-px-x')?.value.trim();
@@ -831,8 +866,10 @@ function updatePreview(bgUrl, activeOverlays) {
     });
 
     // Animações badges
-    document.getElementById('previewAnimBadges').innerHTML = state.selectedAnimations
-        .map(a => `<span>${getAnimName(a)}</span>`).join('');
+    const animBadges = state.selectedAnimations.map(a => `<span>${getAnimName(a.name || a)}</span>`).join('');
+    const customAnimBadges = document.querySelectorAll('#customAnimsList .custom-anim-item').length;
+    const customBadge = customAnimBadges > 0 ? `<span>🎞️ ${customAnimBadges} custom</span>` : '';
+    document.getElementById('previewAnimBadges').innerHTML = animBadges + customBadge;
 }
 
 function getAnimName(key) {
@@ -844,6 +881,14 @@ function getAnimName(key) {
     return map[key] || key;
 }
 
+function getAnimIcon(key) {
+    const map = {
+        particulas:'✨', fumaca:'🌫️', brilho:'💎', fogo:'🔥', chuva:'🌧️',
+        neve:'❄️', faiscas:'⚡', explosao:'💥', luz:'💡', loop_bg:'🔄'
+    };
+    return map[key] || '🎬';
+}
+
 function getElemName(key) {
     const map = {
         moldura_gold:'🖼️ Moldura', moldura_neon:'💜 Neon', barra_inferior:'▬ Barra',
@@ -853,21 +898,212 @@ function getElemName(key) {
     return map[key] || key;
 }
 
+function getElemIcon(key) {
+    const map = {
+        moldura_gold:'🖼️', moldura_neon:'💜', barra_inferior:'▬', caixa_texto:'💬',
+        gradiente_top:'🌅', gradiente_bottom:'🌆', sombra_vinheta:'🔲', sombra_radial:'⭕'
+    };
+    return map[key] || '✨';
+}
+
 // ══════════════════════════════════════════
-// Gallery toggle
+// Gallery toggle — com controles de tempo/intensidade
 // ══════════════════════════════════════════
 function toggleGalleryItem(el, type) {
     el.classList.toggle('selected');
-    const value = el.getAttribute(type === 'animation' ? 'data-animation' : 'data-element');
+    const isSelected = el.classList.contains('selected');
+
     if (type === 'animation') {
-        const idx = state.selectedAnimations.indexOf(value);
-        if (idx >= 0) state.selectedAnimations.splice(idx, 1); else state.selectedAnimations.push(value);
+        const value = el.dataset.animation;
+        if (isSelected) {
+            state.selectedAnimations.push({
+                name: value, start: null, end: null, fullVideo: true, intensity: 50
+            });
+            addEffectCtrlPanel('animation', value);
+        } else {
+            state.selectedAnimations = state.selectedAnimations.filter(a => a.name !== value);
+            removeEffectCtrlPanel('animation', value);
+        }
     } else {
-        const idx = state.selectedElements.indexOf(value);
-        if (idx >= 0) state.selectedElements.splice(idx, 1); else state.selectedElements.push(value);
+        const value = el.dataset.element;
+        if (isSelected) {
+            state.selectedElements.push({
+                name: value, start: null, end: null, fullVideo: true
+            });
+            addEffectCtrlPanel('element', value);
+        } else {
+            state.selectedElements = state.selectedElements.filter(e => e.name !== value);
+            removeEffectCtrlPanel('element', value);
+        }
     }
     updateLayers();
     refreshPreviewNow();
+}
+
+/**
+ * Adiciona painel de controle para animação/elemento selecionado.
+ */
+function addEffectCtrlPanel(type, name) {
+    const container = type === 'animation'
+        ? document.getElementById('animationsCtrlList')
+        : document.getElementById('elementsCtrlList');
+
+    const icon = type === 'animation' ? getAnimIcon(name) : getElemIcon(name);
+    const displayName = type === 'animation' ? getAnimName(name) : getElemName(name);
+    const isAnim = type === 'animation';
+
+    const panel = document.createElement('div');
+    panel.className = 'effect-ctrl-item';
+    panel.dataset.effectType = type;
+    panel.dataset.effectName = name;
+
+    panel.innerHTML = `
+        <div class="effect-ctrl-header">
+            <span class="effect-ctrl-icon">${icon}</span>
+            <span class="effect-ctrl-name">${displayName}</span>
+            <button type="button" class="effect-ctrl-remove" onclick="toggleEffectFromPanel(this, '${type}', '${name}')" title="Remover">✕</button>
+        </div>
+        <div class="effect-ctrl-full">
+            <input type="checkbox" class="effect-full-video" checked onchange="toggleEffectTimeInputs(this)">
+            <label>Vídeo inteiro</label>
+        </div>
+        <div class="effect-ctrl-row effect-time-inputs" style="display:none;">
+            <div>
+                <label>Início (s)</label>
+                <input type="number" class="effect-start" min="0" step="0.1" placeholder="0" value="0">
+            </div>
+            <div>
+                <label>Fim (s)</label>
+                <input type="number" class="effect-end" min="0" step="0.1" placeholder="(fim)">
+            </div>
+        </div>
+        ${isAnim ? `
+        <div class="intensity-control">
+            <label>🎚️ Intensidade</label>
+            <input type="range" min="10" max="100" value="50" class="effect-intensity" oninput="updateEffectIntensity(this)">
+            <span class="intensity-value">50%</span>
+        </div>
+        ` : ''}
+    `;
+
+    container.appendChild(panel);
+}
+
+function removeEffectCtrlPanel(type, name) {
+    const container = type === 'animation'
+        ? document.getElementById('animationsCtrlList')
+        : document.getElementById('elementsCtrlList');
+
+    const panel = container.querySelector(`.effect-ctrl-item[data-effect-name="${name}"]`);
+    if (panel) panel.remove();
+}
+
+function toggleEffectFromPanel(btn, type, name) {
+    // Desselecionar na galeria
+    const galleryId = type === 'animation' ? 'animationsGallery' : 'elementsGallery';
+    const attr = type === 'animation' ? 'data-animation' : 'data-element';
+    const galleryItem = document.querySelector(`#${galleryId} .gallery-item[${attr}="${name}"]`);
+    if (galleryItem) {
+        galleryItem.classList.remove('selected');
+    }
+
+    // Remover do state
+    if (type === 'animation') {
+        state.selectedAnimations = state.selectedAnimations.filter(a => a.name !== name);
+    } else {
+        state.selectedElements = state.selectedElements.filter(e => e.name !== name);
+    }
+
+    // Remover painel
+    btn.closest('.effect-ctrl-item').remove();
+    updateLayers();
+    refreshPreviewNow();
+}
+
+function toggleEffectTimeInputs(checkbox) {
+    const panel = checkbox.closest('.effect-ctrl-item');
+    const timeInputs = panel.querySelector('.effect-time-inputs');
+    timeInputs.style.display = checkbox.checked ? 'none' : 'grid';
+
+    // Atualizar no state
+    const type = panel.dataset.effectType;
+    const name = panel.dataset.effectName;
+    const list = type === 'animation' ? state.selectedAnimations : state.selectedElements;
+    const item = list.find(i => i.name === name);
+    if (item) item.fullVideo = checkbox.checked;
+}
+
+function updateEffectIntensity(input) {
+    const value = input.value;
+    input.nextElementSibling.textContent = `${value}%`;
+
+    const panel = input.closest('.effect-ctrl-item');
+    const name = panel.dataset.effectName;
+    const item = state.selectedAnimations.find(a => a.name === name);
+    if (item) item.intensity = parseInt(value);
+}
+
+// ══════════════════════════════════════════
+// Animações Customizadas (upload de vídeo/GIF)
+// ══════════════════════════════════════════
+function addCustomAnim() {
+    customAnimCounter++;
+    const container = document.getElementById('customAnimsList');
+    const tpl = document.getElementById('tplCustomAnim').content.cloneNode(true);
+    const item = tpl.querySelector('.custom-anim-item');
+    item.dataset.customIdx = customAnimCounter;
+
+    container.appendChild(tpl);
+
+    const added = container.querySelector(`[data-custom-idx="${customAnimCounter}"]`);
+
+    // File input
+    const fileInput = added.querySelector('.custom-anim-input');
+    const fileName = added.querySelector('.file-name');
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files[0]) {
+            fileName.textContent = '✅ ' + fileInput.files[0].name;
+            fileName.style.display = 'block';
+        }
+        updateLayers();
+    });
+
+    // Scale display
+    const scaleRange = added.querySelector('.custom-anim-scale');
+    if (scaleRange) {
+        scaleRange.addEventListener('input', () => {
+            scaleRange.nextElementSibling.textContent = scaleRange.value + '%';
+        });
+    }
+
+    // Position grid
+    added.querySelectorAll('.custom-anim-pos-grid button').forEach(btn => {
+        btn.addEventListener('click', () => refreshPreviewNow());
+    });
+
+    renumberCustomAnims();
+    updateLayers();
+}
+
+function removeCustomAnim(btn) {
+    btn.closest('.custom-anim-item').remove();
+    renumberCustomAnims();
+    updateLayers();
+    refreshPreviewNow();
+}
+
+function selectCustomAnimPos(btn) {
+    const grid = btn.closest('.custom-anim-pos-grid');
+    grid.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    refreshPreviewNow();
+}
+
+function renumberCustomAnims() {
+    document.querySelectorAll('#customAnimsList .custom-anim-item').forEach((item, i) => {
+        item.querySelector('.custom-anim-num').textContent = i + 1;
+        item.querySelector('.custom-anim-title').textContent = `Animação Própria ${i + 1}`;
+    });
 }
 
 // ══════════════════════════════════════════
@@ -877,10 +1113,12 @@ function updateLayers() {
     const list = [];
     const bgCount = document.querySelectorAll('#bgSegmentsList .img-segment').length;
     if (bgCount > 0) list.push({ id:'bg', icon:'🖼️', name:`Fundo (${bgCount} imagem${bgCount>1?'s':''})`, type:'background' });
-    state.selectedElements.forEach(e => list.push({ id:`elem_${e}`, icon:'✨', name:getElemName(e), type:'element' }));
-    state.selectedAnimations.forEach(a => list.push({ id:`anim_${a}`, icon:'🎬', name:getAnimName(a), type:'animation' }));
+    state.selectedElements.forEach(e => list.push({ id:`elem_${e.name}`, icon:'✨', name:getElemName(e.name), type:'element' }));
+    state.selectedAnimations.forEach(a => list.push({ id:`anim_${a.name}`, icon:'🎬', name:getAnimName(a.name), type:'animation' }));
     const ovCount = document.querySelectorAll('#overlaySegmentsList .img-segment').length;
     if (ovCount > 0) list.push({ id:'overlay', icon:'📸', name:`Sobrepostas (${ovCount})`, type:'overlay' });
+    const customCount = document.querySelectorAll('#customAnimsList .custom-anim-item').length;
+    if (customCount > 0) list.push({ id:'custom_anims', icon:'🎞️', name:`Animações Próprias (${customCount})`, type:'custom_anim' });
     state.layers = list;
     renderLayers();
 }
@@ -920,7 +1158,6 @@ function dragEnd(e) { e.currentTarget.classList.remove('dragging'); dragIdx = nu
 // Coleta de dados para submissão
 // ══════════════════════════════════════════
 
-/** Coleta metadados de cada item de áudio (sem o File, que vai via FormData separadamente) */
 function collectAudioMeta() {
     const items = [];
     document.querySelectorAll('#audioItemsList .audio-item').forEach((item, i) => {
@@ -929,7 +1166,6 @@ function collectAudioMeta() {
         const volRange = activePanel ? activePanel.querySelector('.audio-vol-range') : null;
         const volume = volRange ? parseInt(volRange.value) : 100;
 
-        // Trim values (comuns a upload e omni)
         const trimStart = activePanel.querySelector('.trim-start')?.value.trim();
         const trimEnd = activePanel.querySelector('.trim-end')?.value.trim();
 
@@ -945,11 +1181,9 @@ function collectAudioMeta() {
             if (trimEnd) entry.trim_end = parseFloat(trimEnd);
             items.push(entry);
         } else {
-            // OmniVoice — checar se já foi pré-gerado
             const omniGenData = item._omniGenerated;
 
             if (omniGenData && omniGenData.audio_url) {
-                // Áudio IA já gerado — enviar como pré-gerado
                 const entry = {
                     index: i,
                     type: 'omni_pregenerated',
@@ -961,14 +1195,12 @@ function collectAudioMeta() {
                 if (trimEnd) entry.trim_end = parseFloat(trimEnd);
                 items.push(entry);
             } else {
-                // Não gerado ainda — enviar dados crus para gerar no worker
                 const text = (activePanel.querySelector('.omni-text-input')?.value || '').trim();
                 const activeModeTabs = activePanel.querySelectorAll('.omni-mode-tab.active');
                 const mode = activeModeTabs.length ? activeModeTabs[0].dataset.mode : 'clone';
                 const voiceId = activePanel.querySelector('.omni-voice-select')?.value || '';
                 const presetId = activePanel.querySelector('.omni-preset-select')?.value || '';
 
-                // Voice Design instruct
                 let instruct = '';
                 if (mode === 'design') {
                     const free = activePanel.querySelector('.omni-d-free')?.value.trim() || '';
@@ -985,7 +1217,6 @@ function collectAudioMeta() {
                     }
                 }
 
-                // Gen params
                 const genParams = {};
                 ['num_step','guidance_scale','speed','language_id','position_temperature','class_temperature'].forEach(k => {
                     const el = activePanel.querySelector(`.omni-p.${k}`);
@@ -1020,7 +1251,6 @@ function collectAudioMeta() {
     return items;
 }
 
-/** Coleta metadados de cada segmento de imagem de fundo */
 function collectBgMeta() {
     const segs = [];
     document.querySelectorAll('#bgSegmentsList .img-segment').forEach((seg, i) => {
@@ -1037,7 +1267,6 @@ function collectBgMeta() {
     return segs;
 }
 
-/** Coleta metadados de cada segmento de imagem sobreposta */
 function collectOverlayMeta() {
     const segs = [];
     document.querySelectorAll('#overlaySegmentsList .img-segment').forEach((seg, i) => {
@@ -1046,7 +1275,6 @@ function collectOverlayMeta() {
         const fileInput = seg.querySelector('.overlay-img-input');
         const activePos = seg.querySelector('.overlay-pos-grid button.active');
         const scaleRange = seg.querySelector('.overlay-scale-range');
-        // Campos px (controle fino)
         const pxW = seg.querySelector('.overlay-px-w')?.value.trim();
         const pxH = seg.querySelector('.overlay-px-h')?.value.trim();
         const pxX = seg.querySelector('.overlay-px-x')?.value.trim();
@@ -1060,7 +1288,6 @@ function collectOverlayMeta() {
             scale: scaleRange ? parseInt(scaleRange.value) : 50,
             has_file: !!(fileInput && fileInput.files[0]),
         };
-        // Só envia campos px se preenchidos
         if (pxW) entry.px_width  = parseInt(pxW);
         if (pxH) entry.px_height = parseInt(pxH);
         if (pxX !== '') entry.px_x = parseInt(pxX);
@@ -1069,6 +1296,77 @@ function collectOverlayMeta() {
         segs.push(entry);
     });
     return segs;
+}
+
+/**
+ * Coleta dados expandidos de animações selecionadas (com tempo e intensidade).
+ */
+function collectAnimationMeta() {
+    const result = [];
+    document.querySelectorAll('#animationsCtrlList .effect-ctrl-item').forEach(panel => {
+        const name = panel.dataset.effectName;
+        const fullVideo = panel.querySelector('.effect-full-video')?.checked ?? true;
+        const startVal = panel.querySelector('.effect-start')?.value.trim();
+        const endVal = panel.querySelector('.effect-end')?.value.trim();
+        const intensityEl = panel.querySelector('.effect-intensity');
+        const intensity = intensityEl ? parseInt(intensityEl.value) : 50;
+
+        result.push({
+            name,
+            full_video: fullVideo,
+            start_sec: !fullVideo && startVal ? parseFloat(startVal) : null,
+            end_sec: !fullVideo && endVal ? parseFloat(endVal) : null,
+            intensity,
+        });
+    });
+    return result;
+}
+
+/**
+ * Coleta dados expandidos de elementos selecionados (com tempo).
+ */
+function collectElementMeta() {
+    const result = [];
+    document.querySelectorAll('#elementsCtrlList .effect-ctrl-item').forEach(panel => {
+        const name = panel.dataset.effectName;
+        const fullVideo = panel.querySelector('.effect-full-video')?.checked ?? true;
+        const startVal = panel.querySelector('.effect-start')?.value.trim();
+        const endVal = panel.querySelector('.effect-end')?.value.trim();
+
+        result.push({
+            name,
+            full_video: fullVideo,
+            start_sec: !fullVideo && startVal ? parseFloat(startVal) : null,
+            end_sec: !fullVideo && endVal ? parseFloat(endVal) : null,
+        });
+    });
+    return result;
+}
+
+/**
+ * Coleta dados de animações customizadas (upload).
+ */
+function collectCustomAnimMeta() {
+    const result = [];
+    document.querySelectorAll('#customAnimsList .custom-anim-item').forEach((item, i) => {
+        const fileInput = item.querySelector('.custom-anim-input');
+        const startInput = item.querySelector('.seg-start');
+        const endInput = item.querySelector('.seg-end');
+        const activePos = item.querySelector('.custom-anim-pos-grid button.active');
+        const scaleRange = item.querySelector('.custom-anim-scale');
+        const loopCheck = item.querySelector('.custom-anim-loop');
+
+        result.push({
+            index: i,
+            has_file: !!(fileInput && fileInput.files[0]),
+            start_sec: startInput && startInput.value !== '' ? parseFloat(startInput.value) : 0,
+            end_sec: endInput && endInput.value !== '' ? parseFloat(endInput.value) : null,
+            position: activePos ? activePos.dataset.pos : 'centro',
+            scale: scaleRange ? parseInt(scaleRange.value) : 30,
+            loop: loopCheck ? loopCheck.checked : true,
+        });
+    });
+    return result;
 }
 
 // ══════════════════════════════════════════
@@ -1082,7 +1380,6 @@ async function submitCompositor() {
     const title = document.getElementById('title').value.trim();
     if (!title) { showToast('Informe o título do vídeo.', 'error'); return; }
 
-    // Validar áudios
     const audioItems = document.querySelectorAll('#audioItemsList .audio-item');
     if (audioItems.length === 0) { showToast('Adicione ao menos um áudio principal.', 'error'); return; }
 
@@ -1095,11 +1392,9 @@ async function submitCompositor() {
             const fileInput = activePanel.querySelector('.audio-file-input');
             if (!fileInput?.files[0]) { showToast(`Áudio ${i+1}: envie um arquivo de áudio.`, 'error'); hasAudioError = true; }
         } else if (type === 'omni') {
-            // Se o áudio IA já foi gerado, está ok
             if (item._omniGenerated && item._omniGenerated.audio_url) {
-                // OK — áudio já pronto
+                // OK
             } else {
-                // Não foi gerado — bloquear e pedir para gerar primeiro
                 showToast(`Áudio ${i+1}: gere o áudio IA antes de criar o vídeo. Clique em "🎵 Gerar Áudio IA".`, 'error');
                 hasAudioError = true;
             }
@@ -1107,7 +1402,6 @@ async function submitCompositor() {
     });
     if (hasAudioError) return;
 
-    // Validar imagens de fundo
     const bgSegs = document.querySelectorAll('#bgSegmentsList .img-segment');
     if (bgSegs.length === 0) { showToast('Adicione ao menos uma imagem de fundo.', 'error'); return; }
 
@@ -1122,9 +1416,10 @@ async function submitCompositor() {
     btn.disabled = true;
     btn.textContent = '⏳ Enviando...';
     progressSection.classList.remove('hidden');
+    progressSection.classList.remove('error'); // Limpa erro anterior
     resultSection.classList.add('hidden');
+    state.jobFinished = false; // Reseta flag de fim
 
-    // Montar FormData
     const formData = new FormData();
     formData.set('title', title);
     formData.set('resolution', state.resolution);
@@ -1133,21 +1428,25 @@ async function submitCompositor() {
     const audioMeta = collectAudioMeta();
     const bgMeta = collectBgMeta();
     const overlayMeta = collectOverlayMeta();
+    const animationMeta = collectAnimationMeta();
+    const elementMeta = collectElementMeta();
+    const customAnimMeta = collectCustomAnimMeta();
+
     formData.set('audio_items_json', JSON.stringify(audioMeta));
     formData.set('bg_segments_json', JSON.stringify(bgMeta));
     formData.set('overlay_segments_json', JSON.stringify(overlayMeta));
-    formData.set('animations_json', JSON.stringify(state.selectedAnimations));
-    formData.set('elements_json', JSON.stringify(state.selectedElements));
+    formData.set('animations_json', JSON.stringify(animationMeta));
+    formData.set('elements_json', JSON.stringify(elementMeta));
+    formData.set('custom_anims_json', JSON.stringify(customAnimMeta));
     formData.set('layers_json', JSON.stringify(state.layers));
 
-    // Arquivos de áudio (upload + IA pré-gerada como blob)
+    // Arquivos de áudio
     document.querySelectorAll('#audioItemsList .audio-item').forEach((item, i) => {
         const activePanel = item.querySelector('.audio-panel.active');
         if (activePanel?.dataset.panelType === 'upload') {
             const fileInput = activePanel.querySelector('.audio-file-input');
             if (fileInput?.files[0]) formData.append(`audio_file_${i}`, fileInput.files[0]);
         } else if (activePanel?.dataset.panelType === 'omni') {
-            // Se tem blob do áudio IA pré-gerado, envia como arquivo
             if (item._omniGenerated && item._omniGenerated.blob) {
                 formData.append(`audio_file_${i}`, item._omniGenerated.blob, `omni_audio_${i}.wav`);
             }
@@ -1164,6 +1463,12 @@ async function submitCompositor() {
     document.querySelectorAll('#overlaySegmentsList .img-segment').forEach((seg, i) => {
         const fileInput = seg.querySelector('.overlay-img-input');
         if (fileInput?.files[0]) formData.append(`overlay_image_${i}`, fileInput.files[0]);
+    });
+
+    // Arquivos de animação customizada
+    document.querySelectorAll('#customAnimsList .custom-anim-item').forEach((item, i) => {
+        const fileInput = item.querySelector('.custom-anim-input');
+        if (fileInput?.files[0]) formData.append(`custom_anim_${i}`, fileInput.files[0]);
     });
 
     // Áudio secundário
@@ -1195,8 +1500,13 @@ function startProgressStream(jobId) {
         try {
             const data = JSON.parse(event.data);
             updateProgress(data.status, data.progress, data.detail);
-            if (data.status === 'done') { es.close(); showResult(data); }
+            if (data.status === 'done') { 
+                state.jobFinished = true;
+                es.close(); 
+                showResult(data); 
+            }
             else if (data.status === 'error') {
+                state.jobFinished = true;
                 es.close();
                 showToast(`Erro: ${data.detail}`, 'error');
                 document.getElementById('btnGenerate').disabled = false;
@@ -1206,7 +1516,9 @@ function startProgressStream(jobId) {
     };
     es.onerror = () => {
         es.close();
-        setTimeout(() => { if (state.jobId) startProgressStream(state.jobId); }, 5000);
+        if (!state.jobFinished) {
+            setTimeout(() => { if (state.jobId && !state.jobFinished) startProgressStream(state.jobId); }, 5000);
+        }
     };
 }
 
@@ -1215,6 +1527,14 @@ function updateProgress(status, progress, detail) {
         pending:'⏳ Na fila', preparing:'📦 Preparando', generating_audio:'🎵 Gerando áudio',
         rendering:'🎬 Renderizando', composing:'🎨 Compondo', done:'✅ Concluído', error:'❌ Erro',
     };
+    
+    const progressSection = document.getElementById('progressSection');
+    if (status === 'error') {
+        progressSection.classList.add('error');
+    } else {
+        progressSection.classList.remove('error');
+    }
+
     document.getElementById('progressFill').style.width = `${progress}%`;
     document.getElementById('progressLabel').textContent = statusMap[status] || status;
     document.getElementById('progressPercent').textContent = `${Math.round(progress)}%`;
@@ -1253,7 +1573,6 @@ function setupAudioPreviewFromFile(panel, file) {
     const trimWrap = panel.querySelector('.audio-trim-wrap');
     if (!playerWrap || !audioEl) return;
 
-    // Revogar URL anterior se existir
     if (audioEl.src && audioEl.src.startsWith('blob:')) {
         URL.revokeObjectURL(audioEl.src);
     }
@@ -1263,7 +1582,6 @@ function setupAudioPreviewFromFile(panel, file) {
     playerWrap.classList.add('visible');
     if (trimWrap) { trimWrap.classList.add('visible'); setupTrimListeners(panel); }
 
-    // Mostrar duração quando carregada + recalcular timeline geral
     audioEl.addEventListener('loadedmetadata', () => {
         if (durationEl && isFinite(audioEl.duration)) {
             const dur = audioEl.duration;
@@ -1297,7 +1615,6 @@ function setupAudioPreviewFromUrl(panel, url) {
     }, { once: true });
 }
 
-/** Liga os campos de recorte (trim) do painel ao recálculo da timeline (evita duplicar listener). */
 function setupTrimListeners(panel) {
     const trimStart = panel.querySelector('.trim-start');
     const trimEnd = panel.querySelector('.trim-end');
@@ -1317,7 +1634,6 @@ async function generateOmniAudio(btn) {
     const panel = btn.closest('.audio-panel');
     if (!audioItem || !panel) return;
 
-    // Coletar dados do formulário omni
     const text = (panel.querySelector('.omni-text-input')?.value || '').trim();
     if (!text) { showToast('Informe o texto para a IA gerar o áudio.', 'error'); return; }
 
@@ -1330,7 +1646,6 @@ async function generateOmniAudio(btn) {
         return;
     }
 
-    // Voice Design instruct
     let instruct = '';
     if (mode === 'design') {
         const free = panel.querySelector('.omni-d-free')?.value.trim() || '';
@@ -1351,14 +1666,12 @@ async function generateOmniAudio(btn) {
         }
     }
 
-    // Gen params
     const formParams = new FormData();
     formParams.set('text', text);
     formParams.set('mode', mode);
     formParams.set('voice', voiceId);
     formParams.set('instruct', instruct);
 
-    // Parâmetros avançados
     ['num_step','guidance_scale','speed','language_id','position_temperature','class_temperature'].forEach(k => {
         const el = panel.querySelector(`.omni-p.${k}`);
         if (el && el.value.trim() !== '') formParams.set(k, el.value.trim());
@@ -1370,7 +1683,6 @@ async function generateOmniAudio(btn) {
     if (pre) formParams.set('preprocess_prompt', pre.checked ? '1' : '0');
     if (post) formParams.set('postprocess_output', post.checked ? '1' : '0');
 
-    // UI: estado gerando
     const genSection = panel.querySelector('.omni-gen-section');
     const progressWrap = genSection.querySelector('.omni-progress-wrap');
     const progressFill = genSection.querySelector('.omni-progress-fill');
@@ -1387,7 +1699,6 @@ async function generateOmniAudio(btn) {
     progressPercent.textContent = '0%';
     statusArea.innerHTML = '<span class="omni-status-badge pending">⏳ Gerando áudio...</span>';
 
-    // Limpar geração anterior
     audioItem._omniGenerated = null;
     const playerWrap = panel.querySelector('.audio-player-wrap');
     if (playerWrap) playerWrap.classList.remove('visible');
@@ -1395,7 +1706,6 @@ async function generateOmniAudio(btn) {
     if (trimWrap) trimWrap.classList.remove('visible');
 
     try {
-        // POST para gerar
         const response = await fetch('/audio/api/generate', { method: 'POST', body: formParams });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Erro ao gerar áudio');
@@ -1403,7 +1713,6 @@ async function generateOmniAudio(btn) {
         const jobId = data.job_id;
         showToast(`Áudio IA em geração (job ${jobId})...`, 'info');
 
-        // Iniciar SSE para progresso
         if (audioItem._omniEventSource) audioItem._omniEventSource.close();
         const es = new EventSource(`/audio/api/progress/${jobId}/stream`);
         audioItem._omniEventSource = es;
@@ -1420,10 +1729,8 @@ async function generateOmniAudio(btn) {
                     es.close();
                     audioItem._omniEventSource = null;
 
-                    // Pegar URL do áudio gerado
                     const audioUrl = d.audio_url || `/audio-files/${jobId}.wav`;
 
-                    // Baixar o blob do áudio para enviar junto com o form
                     let blob = null;
                     try {
                         const audioResp = await fetch(audioUrl);
@@ -1434,7 +1741,6 @@ async function generateOmniAudio(btn) {
 
                     audioItem._omniGenerated = { job_id: jobId, audio_url: audioUrl, blob };
 
-                    // UI: estado pronto
                     btn.disabled = false;
                     btn.classList.remove('generating');
                     btn.classList.add('done');
@@ -1442,7 +1748,6 @@ async function generateOmniAudio(btn) {
                     statusArea.innerHTML = '<span class="omni-status-badge done">✅ Áudio pronto!</span>';
                     progressLabel.textContent = 'Concluído!';
 
-                    // Mostrar player de preview
                     if (blob) {
                         const blobUrl = URL.createObjectURL(blob);
                         setupAudioPreviewFromUrl(panel, blobUrl);
@@ -1467,7 +1772,6 @@ async function generateOmniAudio(btn) {
         es.onerror = () => {
             es.close();
             audioItem._omniEventSource = null;
-            // Tentar reconectar uma vez
             setTimeout(() => {
                 if (!audioItem._omniGenerated) {
                     btn.disabled = false;
@@ -1492,7 +1796,6 @@ async function generateOmniAudio(btn) {
 // Init
 // ══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
-    // Secondary audio file name display
     const secInput = document.getElementById('secondary_audio_file');
     if (secInput) {
         secInput.addEventListener('change', () => {
@@ -1501,7 +1804,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Timeline: mover o slider atualiza o preview no instante escolhido
     const timeSlider = document.getElementById('previewTimeSlider');
     if (timeSlider) {
         timeSlider.addEventListener('input', () => {
@@ -1510,11 +1812,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Carregar vozes e presets da OmniVoice
     loadOmniVoices();
     loadOmniPresets();
 
-    // Adicionar um áudio e um fundo por padrão
     addAudioItem();
     addBgSegment();
 

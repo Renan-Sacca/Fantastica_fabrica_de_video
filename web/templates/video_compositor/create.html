@@ -131,6 +131,9 @@
     .vc-progress { margin-top: 16px; }
     .vc-progress .bar { height: 8px; background: rgba(255,255,255,.1); border-radius: 999px; overflow: hidden; }
     .vc-progress .fill { height: 100%; width: 0; background: linear-gradient(90deg, #e040fb, #7c4dff); transition: width .3s; border-radius: 999px; }
+    .vc-progress.error .fill { background: linear-gradient(90deg, #f44336, #e91e63) !important; }
+    .vc-progress.error #progressPercent { color: #f44336 !important; }
+    .vc-progress.error #progressLabel { color: #f44336 !important; }
 
     /* OmniVoice inside compositor */
     .omni-params-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
@@ -154,6 +157,51 @@
     /* Botão aplicar controle fino */
     .overlay-apply-btn { padding: 7px 14px; border: none; border-radius: 8px; background: linear-gradient(135deg,#e040fb,#7c4dff); color:#fff; font-weight:600; font-size:.85rem; cursor:pointer; transition: all .2s; margin-top:2px; }
     .overlay-apply-btn:hover { transform:translateY(-1px); box-shadow:0 3px 12px rgba(224,64,251,.4); }
+
+    /* Campo start auto-calculado (readonly) */
+    .seg-start-auto {
+        background: rgba(124,77,255,.08) !important;
+        border-color: rgba(124,77,255,.3) !important;
+        cursor: not-allowed;
+        opacity: .8;
+    }
+    .seg-start-auto-hint {
+        font-size: .68rem; color: #a78bfa; margin-top: 2px;
+        display: flex; align-items: center; gap: 4px;
+    }
+
+    /* Painel de controle de animação/elemento selecionado */
+    .effect-ctrl-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+    .effect-ctrl-item {
+        border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 12px 14px;
+        background: rgba(255,255,255,.02); position: relative;
+    }
+    .effect-ctrl-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .effect-ctrl-icon { font-size: 1.2rem; }
+    .effect-ctrl-name { flex: 1; font-size: .88rem; font-weight: 600; }
+    .effect-ctrl-remove { background:none; border:none; color:rgba(239,68,68,.7); cursor:pointer; font-size:1rem; padding:2px 6px; border-radius:4px; }
+    .effect-ctrl-remove:hover { color:#ef4444; background:rgba(239,68,68,.1); }
+    .effect-ctrl-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .effect-ctrl-full {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+    }
+    .effect-ctrl-full input[type=checkbox] { width: auto; accent-color: #e040fb; }
+    .effect-ctrl-full label { margin: 0; font-size: .82rem; }
+    .intensity-control { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+    .intensity-control label { margin: 0; min-width: 70px; font-size: .82rem; }
+    .intensity-control input[type=range] { flex: 1; margin: 0; accent-color: #e040fb; }
+    .intensity-control .intensity-value { min-width: 40px; text-align: center; font-weight: 600; font-size: .85rem; color: #e040fb; }
+
+    /* Animações customizadas */
+    .custom-anim-item {
+        border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 14px;
+        margin-bottom: 10px; background: rgba(255,255,255,.02); position: relative;
+    }
+    .custom-anim-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .custom-anim-num { background: linear-gradient(135deg,#00c853,#00bfa5); color:#fff; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:.75rem; font-weight:700; flex-shrink:0; }
+    .custom-anim-title { flex:1; font-size:.9rem; font-weight:600; }
+    .custom-anim-remove { background:none; border:none; color:rgba(239,68,68,.7); cursor:pointer; font-size:1rem; padding:2px 6px; border-radius:4px; }
+    .custom-anim-remove:hover { color:#ef4444; background:rgba(239,68,68,.1); }
 
     /* ── Audio Player embutido ── */
     .audio-player-wrap {
@@ -365,6 +413,7 @@
                         <h2>✨ Elementos Decorativos <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
                     </div>
                     <div class="section-body">
+                        <p class="muted" style="margin-bottom:10px;">Selecione elementos visuais. Configure o intervalo de tempo de cada um.</p>
                         <div class="gallery" id="elementsGallery">
                             <div class="gallery-item" data-element="moldura_gold" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">🖼️</span><span class="gi-name">Moldura Dourada</span></div>
                             <div class="gallery-item" data-element="moldura_neon" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">💜</span><span class="gi-name">Moldura Neon</span></div>
@@ -375,6 +424,7 @@
                             <div class="gallery-item" data-element="sombra_vinheta" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">🔲</span><span class="gi-name">Vinheta</span></div>
                             <div class="gallery-item" data-element="sombra_radial" onclick="toggleGalleryItem(this,'element')"><span class="gi-icon">⭕</span><span class="gi-name">Sombra Radial</span></div>
                         </div>
+                        <div class="effect-ctrl-list" id="elementsCtrlList"></div>
                     </div>
                 </div>
 
@@ -385,6 +435,7 @@
                         <h2>🎬 Animações <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
                     </div>
                     <div class="section-body">
+                        <p class="muted" style="margin-bottom:10px;">Selecione efeitos visuais. Configure o tempo e a intensidade de cada um.</p>
                         <div class="gallery" id="animationsGallery">
                             <div class="gallery-item" data-animation="particulas" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">✨</span><span class="gi-name">Partículas</span></div>
                             <div class="gallery-item" data-animation="fumaca" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">🌫️</span><span class="gi-name">Fumaça</span></div>
@@ -397,6 +448,22 @@
                             <div class="gallery-item" data-animation="luz" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">💡</span><span class="gi-name">Efeito de Luz</span></div>
                             <div class="gallery-item" data-animation="loop_bg" onclick="toggleGalleryItem(this,'animation')"><span class="gi-icon">🔄</span><span class="gi-name">Loop Fundo</span></div>
                         </div>
+                        <div class="effect-ctrl-list" id="animationsCtrlList"></div>
+                    </div>
+                </div>
+
+                <!-- 🎞️ Animações Customizadas -->
+                <div class="vc-card">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="chevron">▼</span>
+                        <h2>🎞️ Animações Próprias <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
+                    </div>
+                    <div class="section-body">
+                        <p class="muted" style="margin-bottom:10px;">
+                            Suba vídeos ou GIFs animados para usar como overlay animado no vídeo. Configure posição, tempo e escala.
+                        </p>
+                        <div id="customAnimsList"></div>
+                        <button type="button" class="add-btn" onclick="addCustomAnim()">➕ Adicionar animação própria</button>
                     </div>
                 </div>
 
@@ -760,5 +827,67 @@
 </div>
 </template>
 
-<script src="/static/video_compositor.js?v=8"></script>
+<!-- Template: animação customizada (upload de vídeo/GIF) -->
+<template id="tplCustomAnim">
+<div class="custom-anim-item">
+    <div class="custom-anim-header">
+        <div class="custom-anim-num"></div>
+        <span class="custom-anim-title">Animação Própria</span>
+        <button type="button" class="custom-anim-remove" onclick="removeCustomAnim(this)" title="Remover">✕</button>
+    </div>
+    <div class="vc-file-drop">
+        <input type="file" accept="video/*,image/gif,image/webp,image/apng" class="custom-anim-input">
+        <div class="icon">🎞️</div>
+        <div class="text">Vídeo ou GIF animado</div>
+        <div class="hint">MP4, WEBM, GIF, WEBP — Será reproduzido como overlay</div>
+        <div class="file-name"></div>
+    </div>
+    <div class="seg-time-row" style="margin-top:10px;">
+        <div>
+            <label>Início (segundos)</label>
+            <input type="number" class="seg-start" min="0" step="0.1" placeholder="0" value="0">
+        </div>
+        <div>
+            <label>Fim (segundos)</label>
+            <input type="number" class="seg-end" min="0" step="0.1" placeholder="(fim do vídeo)">
+        </div>
+    </div>
+
+    <!-- Posição 3×3 -->
+    <div style="margin-top:12px;">
+        <label>Posição</label>
+        <div class="position-grid custom-anim-pos-grid">
+            <button type="button" data-pos="superior esquerda" onclick="selectCustomAnimPos(this)">↖ Sup.Esq.</button>
+            <button type="button" data-pos="superior" onclick="selectCustomAnimPos(this)">↑ Superior</button>
+            <button type="button" data-pos="superior direita" onclick="selectCustomAnimPos(this)">↗ Sup.Dir.</button>
+            <button type="button" data-pos="esquerda" onclick="selectCustomAnimPos(this)">← Esq.</button>
+            <button type="button" data-pos="centro" class="active" onclick="selectCustomAnimPos(this)">● Centro</button>
+            <button type="button" data-pos="direita" onclick="selectCustomAnimPos(this)">Dir. →</button>
+            <button type="button" data-pos="inferior esquerda" onclick="selectCustomAnimPos(this)">↙ Inf.Esq.</button>
+            <button type="button" data-pos="inferior" onclick="selectCustomAnimPos(this)">↓ Inferior</button>
+            <button type="button" data-pos="inferior direita" onclick="selectCustomAnimPos(this)">↘ Inf.Dir.</button>
+        </div>
+    </div>
+
+    <!-- Escala -->
+    <div style="margin-top:10px;">
+        <label>Tamanho (%)</label>
+        <div class="volume-control" style="margin-top:0;">
+            <label>📐</label>
+            <input type="range" min="5" max="100" value="30" class="custom-anim-scale">
+            <span class="vol-value custom-anim-scale-val">30%</span>
+        </div>
+    </div>
+
+    <!-- Loop -->
+    <div style="margin-top:8px;">
+        <label style="display:flex; align-items:center; gap:8px; margin:0;">
+            <input type="checkbox" class="custom-anim-loop" checked style="width:auto; accent-color:#e040fb;">
+            <span style="font-size:.82rem;">🔄 Repetir em loop</span>
+        </label>
+    </div>
+</div>
+</template>
+
+<script src="/static/video_compositor.js?v=9"></script>
 {% endblock %}

@@ -136,9 +136,12 @@ async def render_compositor(request: Request):
 
         resolution = form_data.get("resolution", "1080x1920")
         secondary_audio_volume = float(form_data.get("secondary_audio_volume", 20.0))
-        animations_json = form_data.get("animations_json", "[]")
-        elements_json = form_data.get("elements_json", "[]")
         layers_json = form_data.get("layers_json", "[]")
+
+        # Animações e elementos agora são objetos expandidos com tempo/intensidade
+        animations_meta: list = _json.loads(form_data.get("animations_json", "[]"))
+        elements_meta: list = _json.loads(form_data.get("elements_json", "[]"))
+        custom_anims_meta: list = _json.loads(form_data.get("custom_anims_json", "[]"))
 
         audio_items_meta: list = _json.loads(form_data.get("audio_items_json", "[]"))
         bg_segments_meta: list = _json.loads(form_data.get("bg_segments_json", "[]"))
@@ -173,8 +176,9 @@ async def render_compositor(request: Request):
             "user_id": user_id,
             "resolution": {"width": res_w, "height": res_h},
             "secondary_audio_volume": secondary_audio_volume,
-            "animations": _json.loads(animations_json),
-            "elements": _json.loads(elements_json),
+            "animations": animations_meta,
+            "elements": elements_meta,
+            "custom_anims": [],
             "layers": _json.loads(layers_json),
             "audio_items": [],
             "bg_segments": [],
@@ -334,6 +338,29 @@ async def render_compositor(request: Request):
                 "px_height": seg_meta.get("px_height"),
                 "px_x":      seg_meta.get("px_x"),
                 "px_y":      seg_meta.get("px_y"),
+            })
+
+        # ── Upload das animações customizadas ──
+        for anim_meta in custom_anims_meta:
+            idx = anim_meta["index"]
+            anim_upload: Optional[UploadFile] = form_data.get(f"custom_anim_{idx}")
+            if not anim_upload or not anim_upload.filename:
+                continue
+            anim_content = await anim_upload.read()
+            anim_ext = Path(anim_upload.filename).suffix or ".mp4"
+            anim_file_id = await asyncio.get_event_loop().run_in_executor(
+                None, drive.upload_bytes, anim_content, f"custom_anim_{idx}{anim_ext}",
+                job_folder_id, anim_upload.content_type or "video/mp4",
+            )
+            metadata["custom_anims"].append({
+                "index": idx,
+                "file_id": anim_file_id,
+                "file_ext": anim_ext,
+                "start_sec": anim_meta.get("start_sec", 0),
+                "end_sec": anim_meta.get("end_sec"),
+                "position": anim_meta.get("position", "centro"),
+                "scale": anim_meta.get("scale", 30),
+                "loop": anim_meta.get("loop", True),
             })
 
         # ── Áudio secundário ──
