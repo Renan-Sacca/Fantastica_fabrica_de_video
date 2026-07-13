@@ -3,6 +3,7 @@ from .job import Job
 from .whatsapp import WhatsAppJob
 from .whatsapp_extract import WhatsAppExtractJob
 from .video_bg import VideoBgJob
+from .video_compositor import VideoCompositorJob
 from .text_correction import TextCorrectionJob
 from .audio_job import AudioJob
 from .user import User
@@ -16,6 +17,7 @@ __all__ = [
     "WhatsAppJob",
     "WhatsAppExtractJob",
     "VideoBgJob",
+    "VideoCompositorJob",
     "TextCorrectionJob",
     "AudioJob",
     "User",

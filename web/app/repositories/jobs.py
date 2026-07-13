@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import with_polymorphic
 
 from app.database import SessionLocal
-from app.models import Job, WhatsAppExtractJob, WhatsAppJob
+from app.models import Job, VideoCompositorJob, WhatsAppExtractJob, WhatsAppJob
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,8 @@ def _model_for(video_type: str):
         return WhatsAppJob
     if video_type == "whatsapp_extract":
         return WhatsAppExtractJob
+    if video_type == "video_compositor":
+        return VideoCompositorJob
     return Job
 
 

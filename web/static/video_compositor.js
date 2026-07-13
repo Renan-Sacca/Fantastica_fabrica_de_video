@@ -22,7 +22,6 @@ const state = {
     omniPresets: [],
     // Timeline de preview
     totalDuration: 0,      // duração total calculada a partir dos áudios (considerando corte)
-    _activeOvSeg: null,    // segmento de overlay ativo no instante atual da timeline
 };
 
 let audioItemCounter = 0;
@@ -433,52 +432,34 @@ function selectOvPos(btn) {
 
 // ══════════════════════════════════════════
 // Controle fino: aplica tamanho/posição px ao preview
-// ══════════════════════════════════════════
-function applyFinePosition(btn) {
-    const seg = btn.closest('.img-segment');
-    if (!seg) return;
-
-    const pxW = seg.querySelector('.overlay-px-w')?.value.trim();
-    const pxH = seg.querySelector('.overlay-px-h')?.value.trim();
-    const pxX = seg.querySelector('.overlay-px-x')?.value.trim();
-    const pxY = seg.querySelector('.overlay-px-y')?.value.trim();
-
-    const overlayEl = document.getElementById('previewOverlay');
-    if (!overlayEl || overlayEl.style.display === 'none') {
-        showToast('Adicione uma imagem sobreposta primeiro.', 'error');
-        return;
-    }
-
+/**
+ * Aplica tamanho/posição em pixels (resolução de saída) a um elemento de
+ * overlay já criado no preview, convertendo para a escala do canvas atual.
+ */
+function applyFinePositionToEl(overlayEl, pxW, pxH, pxX, pxY) {
     const canvas = document.getElementById('previewCanvas');
     const canvasRect = canvas.getBoundingClientRect();
-
-    // Resolução de saída (ex: 1080x1920)
     const [outW, outH] = state.resolution.split('x').map(Number);
-
-    // Escala: pixels de saída → pixels do canvas de preview
-    const scaleX = canvasRect.width  / outW;
+    const scaleX = canvasRect.width / outW;
     const scaleY = canvasRect.height / outH;
 
     // Reseta todos os posicionamentos
-    overlayEl.style.top    = 'auto';
-    overlayEl.style.left   = 'auto';
-    overlayEl.style.right  = 'auto';
+    overlayEl.style.top = 'auto';
+    overlayEl.style.left = 'auto';
+    overlayEl.style.right = 'auto';
     overlayEl.style.bottom = 'auto';
     overlayEl.style.transform = 'none';
-    overlayEl.style.maxWidth  = 'none';
+    overlayEl.style.maxWidth = 'none';
     overlayEl.style.maxHeight = 'none';
-    overlayEl.style.width  = 'auto';
+    overlayEl.style.width = 'auto';
     overlayEl.style.height = 'auto';
 
-    // Tamanho
-    if (pxW) overlayEl.style.width  = `${parseFloat(pxW) * scaleX}px`;
+    if (pxW) overlayEl.style.width = `${parseFloat(pxW) * scaleX}px`;
     if (pxH) overlayEl.style.height = `${parseFloat(pxH) * scaleY}px`;
 
-    // Posição
     if (pxX !== '' && pxX !== undefined) {
         overlayEl.style.left = `${parseFloat(pxX) * scaleX}px`;
     } else {
-        // sem X definido: centraliza horizontalmente
         overlayEl.style.left = '50%';
         overlayEl.style.transform = overlayEl.style.transform === 'none'
             ? 'translateX(-50%)' : overlayEl.style.transform;
@@ -487,14 +468,26 @@ function applyFinePosition(btn) {
         overlayEl.style.top = `${parseFloat(pxY) * scaleY}px`;
     } else {
         overlayEl.style.top = '50%';
-        // complementa transform
         if (overlayEl.style.left === '50%') {
             overlayEl.style.transform = 'translate(-50%,-50%)';
         } else {
             overlayEl.style.transform = 'translateY(-50%)';
         }
     }
+}
 
+/** Botão "Aplicar ao preview" do controle fino — apenas força um redraw do preview. */
+function applyFinePosition(btn) {
+    const seg = btn.closest('.img-segment');
+    if (!seg) return;
+
+    const fileInput = seg.querySelector('.overlay-img-input');
+    if (!fileInput?.files[0]) {
+        showToast('Adicione uma imagem sobreposta primeiro.', 'error');
+        return;
+    }
+
+    refreshPreviewNow();
     showToast('Preview atualizado!', 'success');
 }
 
@@ -600,14 +593,25 @@ function getOverlaySegmentsData() {
     });
 }
 
-/** Encontra o segmento ativo num instante t (segundos), com fallback para gaps. */
-function findActiveSegmentAtTime(segments, t) {
+/**
+ * Encontra o segmento ativo num instante t (segundos).
+ *
+ * @param {boolean} allowGapFill - Se true (fundo), preenche lacunas usando o
+ *   último segmento que já começou, mesmo passado seu próprio fim (o fundo
+ *   deve sempre mostrar algo). Se false (sobreposta), a busca é estrita: fora
+ *   da própria janela [start, end) o segmento não é considerado — retorna
+ *   null quando nada cobre o instante t.
+ */
+function findActiveSegmentAtTime(segments, t, allowGapFill = true) {
     if (!segments.length) return null;
     const candidates = segments.filter(s => s.start <= t && (s.end === null || t < s.end));
     if (candidates.length) {
+        // Em caso de sobreposição, prioriza o que começou mais recentemente
         return candidates.reduce((a, b) => (b.start >= a.start ? b : a));
     }
-    // Sem correspondência exata: usa o último que já começou (cobre gaps)
+    if (!allowGapFill) return null;
+
+    // Sem correspondência exata: usa o último que já começou (cobre gaps) — só para o fundo
     const before = segments.filter(s => s.start <= t);
     if (before.length) {
         return before.reduce((a, b) => (b.start >= a.start ? b : a));
@@ -616,8 +620,8 @@ function findActiveSegmentAtTime(segments, t) {
     return segments.reduce((a, b) => (b.start <= a.start ? b : a));
 }
 
-/** Mostra qual imagem está ativa no instante atual, na área de status da timeline. */
-function updateTimelineStatusLabel(activeBg, activeOv) {
+/** Mostra qual(is) imagem(ns) está(ão) ativa(s) no instante atual, na área de status da timeline. */
+function updateTimelineStatusLabel(activeBg, activeOvList) {
     const statusEl = document.getElementById('previewTimeStatus');
     if (!statusEl) return;
     if (state.totalDuration <= 0) {
@@ -627,10 +631,17 @@ function updateTimelineStatusLabel(activeBg, activeOv) {
     const allBg = Array.from(document.querySelectorAll('#bgSegmentsList .img-segment'));
     const allOv = Array.from(document.querySelectorAll('#overlaySegmentsList .img-segment'));
     const bgIdx = activeBg ? allBg.indexOf(activeBg.seg) + 1 : null;
-    const ovIdx = activeOv ? allOv.indexOf(activeOv.seg) + 1 : null;
     const parts = [];
     if (bgIdx) parts.push(`Fundo #${bgIdx}${allBg.length > 1 ? `/${allBg.length}` : ''}`);
-    if (ovIdx) parts.push(`Sobreposta #${ovIdx}${allOv.length > 1 ? `/${allOv.length}` : ''}`);
+    if (activeOvList && activeOvList.length) {
+        const ovIdxs = activeOvList
+            .map(ov => allOv.indexOf(ov.seg) + 1)
+            .filter(i => i > 0)
+            .sort((a, b) => a - b);
+        if (ovIdxs.length) {
+            parts.push(`Sobreposta${ovIdxs.length > 1 ? 's' : ''} #${ovIdxs.join(', #')}${allOv.length > 1 ? `/${allOv.length}` : ''}`);
+        }
+    }
     statusEl.textContent = parts.length ? parts.join(' · ') : 'Nenhuma imagem configurada para este momento';
 }
 
@@ -712,6 +723,15 @@ function refreshTimelineUI() {
     refreshPreviewNow();
 }
 
+/**
+ * Encontra TODOS os segmentos ativos num instante t (busca estrita, sem
+ * preenchimento de lacunas). Usado para overlays, que podem ter várias
+ * imagens visíveis ao mesmo tempo (ex: uma de cada lado da tela).
+ */
+function findAllActiveSegmentsAtTime(segments, t) {
+    return segments.filter(s => s.start <= t && (s.end === null || t < s.end));
+}
+
 /** Atualiza o preview visual com base no instante atual da timeline. */
 function refreshPreviewNow() {
     const slider = document.getElementById('previewTimeSlider');
@@ -719,32 +739,53 @@ function refreshPreviewNow() {
 
     const bgSegs = getBgSegmentsData();
     const ovSegs = getOverlaySegmentsData();
-    const activeBg = findActiveSegmentAtTime(bgSegs, t);
-    const activeOv = findActiveSegmentAtTime(ovSegs, t);
-
-    state._activeOvSeg = activeOv ? activeOv.seg : null;
+    const activeBg = findActiveSegmentAtTime(bgSegs, t, true);
+    const activeOvList = findAllActiveSegmentsAtTime(ovSegs, t);
 
     let bgUrl = null;
     if (activeBg) {
         const preview = activeBg.seg.querySelector('.preview');
         if (preview && preview.style.display !== 'none' && preview.src) bgUrl = preview.src;
     }
-    let overlayUrl = null;
-    if (activeOv) {
-        const preview = activeOv.seg.querySelector('.preview');
-        if (preview && preview.style.display !== 'none' && preview.src) overlayUrl = preview.src;
-    }
 
-    updatePreview(bgUrl, overlayUrl);
-    updateTimelineStatusLabel(activeBg, activeOv);
+    // Monta lista de {url, seg} para cada overlay ativo no instante t
+    const activeOverlays = activeOvList
+        .map(ov => {
+            const preview = ov.seg.querySelector('.preview');
+            const url = preview && preview.style.display !== 'none' && preview.src ? preview.src : null;
+            return url ? { url, seg: ov.seg } : null;
+        })
+        .filter(Boolean);
+
+    updatePreview(bgUrl, activeOverlays);
+    updateTimelineStatusLabel(activeBg, activeOvList);
 }
 
 // ══════════════════════════════════════════
 // Preview
 // ══════════════════════════════════════════
-function updatePreview(bgUrl, overlayUrl) {
+// Mapa de posição semântica → estilo CSS (usado no preview de overlays)
+const OVERLAY_POS_MAP = {
+    'centro':            { top:'50%',    left:'50%',   right:'auto', bottom:'auto', transform:'translate(-50%,-50%)' },
+    'superior':          { top:'5%',     left:'50%',   right:'auto', bottom:'auto', transform:'translateX(-50%)' },
+    'inferior':          { top:'auto',   left:'50%',   right:'auto', bottom:'5%',   transform:'translateX(-50%)' },
+    'esquerda':          { top:'50%',    left:'5%',    right:'auto', bottom:'auto', transform:'translateY(-50%)' },
+    'direita':           { top:'50%',    left:'auto',  right:'5%',   bottom:'auto', transform:'translateY(-50%)' },
+    'superior esquerda': { top:'5%',     left:'5%',    right:'auto', bottom:'auto', transform:'none' },
+    'superior direita':  { top:'5%',     left:'auto',  right:'5%',   bottom:'auto', transform:'none' },
+    'inferior esquerda': { top:'auto',   left:'5%',    right:'auto', bottom:'5%',   transform:'none' },
+    'inferior direita':  { top:'auto',   left:'auto',  right:'5%',   bottom:'5%',   transform:'none' },
+};
+
+/**
+ * Atualiza o preview visual.
+ * @param {string|null} bgUrl - URL da imagem de fundo ativa (ou null).
+ * @param {Array<{url:string, seg:HTMLElement}>} activeOverlays - lista de
+ *   overlays ativos no instante atual (pode ter 0, 1 ou mais itens).
+ */
+function updatePreview(bgUrl, activeOverlays) {
     const bgEl = document.getElementById('previewBg');
-    const overlayEl = document.getElementById('previewOverlay');
+    const overlaysContainer = document.getElementById('previewOverlaysContainer');
     const placeholder = document.getElementById('previewPlaceholder');
 
     if (bgUrl) {
@@ -756,44 +797,38 @@ function updatePreview(bgUrl, overlayUrl) {
         placeholder.style.display = 'flex';
     }
 
-    if (overlayUrl) {
-        // Pega posição e escala do segmento sobreposto ativo no instante da timeline
-        const activeOvSeg = state._activeOvSeg || document.querySelector('#overlaySegmentsList .img-segment');
-        const activePos = activeOvSeg
-            ? activeOvSeg.querySelector('.overlay-pos-grid button.active')
-            : null;
-        const scaleRange = activeOvSeg
-            ? activeOvSeg.querySelector('.overlay-scale-range')
-            : null;
+    overlaysContainer.innerHTML = '';
+    (activeOverlays || []).forEach(({ url, seg }) => {
+        const activePos = seg.querySelector('.overlay-pos-grid button.active');
+        const scaleRange = seg.querySelector('.overlay-scale-range');
         const scale = scaleRange ? parseInt(scaleRange.value) : 50;
         const pos = activePos ? activePos.dataset.pos : 'centro';
+        const p = OVERLAY_POS_MAP[pos] || OVERLAY_POS_MAP['centro'];
 
-        // Mapa de posição → estilo
-        const posMap = {
-            'centro':            { top:'50%',    left:'50%',   right:'auto', bottom:'auto', transform:'translate(-50%,-50%)' },
-            'superior':          { top:'5%',     left:'50%',   right:'auto', bottom:'auto', transform:'translateX(-50%)' },
-            'inferior':          { top:'auto',   left:'50%',   right:'auto', bottom:'5%',   transform:'translateX(-50%)' },
-            'esquerda':          { top:'50%',    left:'5%',    right:'auto', bottom:'auto', transform:'translateY(-50%)' },
-            'direita':           { top:'50%',    left:'auto',  right:'5%',   bottom:'auto', transform:'translateY(-50%)' },
-            'superior esquerda': { top:'5%',     left:'5%',    right:'auto', bottom:'auto', transform:'none' },
-            'superior direita':  { top:'5%',     left:'auto',  right:'5%',   bottom:'auto', transform:'none' },
-            'inferior esquerda': { top:'auto',   left:'5%',    right:'auto', bottom:'5%',   transform:'none' },
-            'inferior direita':  { top:'auto',   left:'auto',  right:'5%',   bottom:'5%',   transform:'none' },
-        };
-        const p = posMap[pos] || posMap['centro'];
+        const img = document.createElement('img');
+        img.className = 'preview-overlay';
+        img.src = url;
+        img.alt = '';
+        img.style.display = 'block';
+        img.style.maxWidth = `${scale}%`;
+        img.style.maxHeight = `${scale}%`;
+        img.style.top = p.top;
+        img.style.left = p.left;
+        img.style.right = p.right;
+        img.style.bottom = p.bottom;
+        img.style.transform = p.transform;
 
-        overlayEl.src = overlayUrl;
-        overlayEl.style.display = 'block';
-        overlayEl.style.maxWidth  = `${scale}%`;
-        overlayEl.style.maxHeight = `${scale}%`;
-        overlayEl.style.top       = p.top;
-        overlayEl.style.left      = p.left;
-        overlayEl.style.right     = p.right;
-        overlayEl.style.bottom    = p.bottom;
-        overlayEl.style.transform = p.transform;
-    } else {
-        overlayEl.style.display = 'none';
-    }
+        // Controle fino (px) tem prioridade sobre posição/escala rápida
+        const pxW = seg.querySelector('.overlay-px-w')?.value.trim();
+        const pxH = seg.querySelector('.overlay-px-h')?.value.trim();
+        const pxX = seg.querySelector('.overlay-px-x')?.value.trim();
+        const pxY = seg.querySelector('.overlay-px-y')?.value.trim();
+        if (pxW || pxH || pxX !== '' || pxY !== '') {
+            applyFinePositionToEl(img, pxW, pxH, pxX, pxY);
+        }
+
+        overlaysContainer.appendChild(img);
+    });
 
     // Animações badges
     document.getElementById('previewAnimBadges').innerHTML = state.selectedAnimations
@@ -1154,7 +1189,7 @@ async function submitCompositor() {
 
 function startProgressStream(jobId) {
     if (state.eventSource) state.eventSource.close();
-    const es = new EventSource(`/api/progress/${jobId}/stream`);
+    const es = new EventSource(`/api/jobs/${jobId}/stream`);
     state.eventSource = es;
     es.onmessage = (event) => {
         try {
