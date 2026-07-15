@@ -460,6 +460,8 @@ class VideoCompositorRenderer(BaseRenderer):
             "-map", f"[{cur_video}]",
             "-map", f"[{audio_label}]",
             "-c:v", "libx264", "-preset", "veryfast",
+            "-pix_fmt", "yuv420p",
+            "-crf", "23",
             "-c:a", "aac", "-b:a", "192k",
             "-t", f"{duration:.3f}",
             "-movflags", "+faststart",
