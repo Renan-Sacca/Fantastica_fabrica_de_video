@@ -30,6 +30,8 @@ let audioItemCounter = 0;
 let bgSegmentCounter = 0;
 let overlaySegmentCounter = 0;
 let customAnimCounter = 0;
+let textOverlayCounter = 0;
+let secAudioCounter = 0;
 
 // ══════════════════════════════════════════
 // Resolução
@@ -785,6 +787,7 @@ function refreshPreviewNow() {
     const ovSegs = getOverlaySegmentsData();
     const activeBg = findActiveSegmentAtTime(bgSegs, t, true);
     const activeOvList = findAllActiveSegmentsAtTime(ovSegs, t);
+    const activeTextList = findAllActiveSegmentsAtTime(getTextOverlaysData(), t);
 
     let bgUrl = null;
     if (activeBg) {
@@ -800,13 +803,10 @@ function refreshPreviewNow() {
         })
         .filter(Boolean);
 
-    updatePreview(bgUrl, activeOverlays);
+    updatePreview(bgUrl, activeOverlays, activeTextList);
     updateTimelineStatusLabel(activeBg, activeOvList);
 }
 
-// ══════════════════════════════════════════
-// Preview
-// ══════════════════════════════════════════
 const OVERLAY_POS_MAP = {
     'centro':            { top:'50%',    left:'50%',   right:'auto', bottom:'auto', transform:'translate(-50%,-50%)' },
     'superior':          { top:'5%',     left:'50%',   right:'auto', bottom:'auto', transform:'translateX(-50%)' },
@@ -819,10 +819,106 @@ const OVERLAY_POS_MAP = {
     'inferior direita':  { top:'auto',   left:'auto',  right:'5%',   bottom:'5%',   transform:'none' },
 };
 
-function updatePreview(bgUrl, activeOverlays) {
+const FONT_FAMILY_MAP = {
+    'sans': {
+        regular: '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+        bold: '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+        italic: '/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf',
+        bold_italic: '/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf',
+        name: 'Arial, "Liberation Sans", sans-serif'
+    },
+    'serif': {
+        regular: '/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf',
+        bold: '/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf',
+        italic: '/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf',
+        bold_italic: '/usr/share/fonts/truetype/liberation/LiberationSerif-BoldItalic.ttf',
+        name: '"Times New Roman", "Liberation Serif", serif'
+    },
+    'mono': {
+        regular: '/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf',
+        bold: '/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf',
+        italic: '/usr/share/fonts/truetype/liberation/LiberationMono-Italic.ttf',
+        bold_italic: '/usr/share/fonts/truetype/liberation/LiberationMono-BoldItalic.ttf',
+        name: '"Courier New", "Liberation Mono", monospace'
+    },
+    'free_sans': {
+        regular: '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+        bold: '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf',
+        italic: '/usr/share/fonts/truetype/freefont/FreeSansOblique.ttf',
+        bold_italic: '/usr/share/fonts/truetype/freefont/FreeSansBoldOblique.ttf',
+        name: 'Arial, FreeSans, sans-serif'
+    },
+    'free_serif': {
+        regular: '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
+        bold: '/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf',
+        italic: '/usr/share/fonts/truetype/freefont/FreeSerifItalic.ttf',
+        bold_italic: '/usr/share/fonts/truetype/freefont/FreeSerifBoldItalic.ttf',
+        name: '"Times New Roman", FreeSerif, serif'
+    },
+    'free_mono': {
+        regular: '/usr/share/fonts/truetype/freefont/FreeMono.ttf',
+        bold: '/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf',
+        italic: '/usr/share/fonts/truetype/freefont/FreeMonoOblique.ttf',
+        bold_italic: '/usr/share/fonts/truetype/freefont/FreeMonoBoldOblique.ttf',
+        name: '"Courier New", FreeMono, monospace'
+    }
+};
+
+function getResolvedFont(familyKey, isBold, isItalic) {
+    const family = FONT_FAMILY_MAP[familyKey] || FONT_FAMILY_MAP['sans'];
+    if (isBold && isItalic) return { file: family.bold_italic, style: 'italic', weight: 'bold', family: family.name };
+    if (isBold) return { file: family.bold, style: 'normal', weight: 'bold', family: family.name };
+    if (isItalic) return { file: family.italic, style: 'italic', weight: 'normal', family: family.name };
+    return { file: family.regular, style: 'normal', weight: 'normal', family: family.name };
+}
+
+function getTextOverlaysData() {
+    const list = [];
+    document.querySelectorAll('#textOverlaysList .text-overlay-item').forEach(item => {
+        const text = item.querySelector('.text-content')?.value || '';
+        const fontKey = item.querySelector('.text-font')?.value || 'sans';
+        const isBold = item.querySelector('.text-bold')?.checked || false;
+        const isItalic = item.querySelector('.text-italic')?.checked || false;
+        const size = parseInt(item.querySelector('.text-size')?.value || '48');
+        const color = item.querySelector('.text-color')?.value || '#ffffff';
+        const startInput = item.querySelector('.seg-start');
+        const endInput = item.querySelector('.seg-end');
+        const activePos = item.querySelector('.text-pos-grid button.active');
+
+        const pxX = item.querySelector('.text-px-x')?.value.trim();
+        const pxY = item.querySelector('.text-px-y')?.value.trim();
+
+        const start = startInput && startInput.value !== '' ? parseFloat(startInput.value) : 0;
+        const end = endInput && endInput.value !== '' ? parseFloat(endInput.value) : null;
+        const position = activePos ? activePos.dataset.pos : 'centro';
+
+        const fontResolved = getResolvedFont(fontKey, isBold, isItalic);
+
+        list.push({
+            text,
+            font: fontResolved.file,
+            fontFamily: fontResolved.family,
+            fontStyle: fontResolved.style,
+            fontWeight: fontResolved.weight,
+            size,
+            color,
+            start,
+            end,
+            position,
+            px_x: pxX !== '' && pxX !== undefined ? parseFloat(pxX) : null,
+            px_y: pxY !== '' && pxY !== undefined ? parseFloat(pxY) : null,
+            seg: item
+        });
+    });
+    return list;
+}
+
+function updatePreview(bgUrl, activeOverlays, activeTexts) {
     const bgEl = document.getElementById('previewBg');
     const overlaysContainer = document.getElementById('previewOverlaysContainer');
+    const textsContainer = document.getElementById('previewTextsContainer');
     const placeholder = document.getElementById('previewPlaceholder');
+    const previewCanvas = document.getElementById('previewCanvas');
 
     if (bgUrl) {
         bgEl.src = bgUrl;
@@ -865,12 +961,48 @@ function updatePreview(bgUrl, activeOverlays) {
         overlaysContainer.appendChild(img);
     });
 
+    if (textsContainer && previewCanvas) {
+        textsContainer.innerHTML = '';
+        const canvasW = previewCanvas.clientWidth || 360;
+        const [w, h] = state.resolution.split('x').map(Number);
+        const scaleFactor = canvasW / w;
+
+        (activeTexts || []).forEach(txt => {
+            const div = document.createElement('div');
+            div.className = 'preview-text';
+            div.textContent = txt.text;
+
+            const scaledSize = Math.max(8, txt.size * scaleFactor);
+            div.style.fontSize = `${scaledSize}px`;
+            div.style.color = txt.color;
+
+            div.style.fontFamily = txt.fontFamily;
+            div.style.fontStyle = txt.fontStyle;
+            div.style.fontWeight = txt.fontWeight;
+
+            if (txt.px_x !== null || txt.px_y !== null) {
+                applyFinePositionToEl(div, null, null, txt.px_x, txt.px_y);
+            } else {
+                const p = OVERLAY_POS_MAP[txt.position] || OVERLAY_POS_MAP['centro'];
+                div.style.top = p.top;
+                div.style.left = p.left;
+                div.style.right = p.right;
+                div.style.bottom = p.bottom;
+                div.style.transform = p.transform;
+            }
+
+            textsContainer.appendChild(div);
+        });
+    }
+
     // Animações badges
     const animBadges = state.selectedAnimations.map(a => `<span>${getAnimName(a.name || a)}</span>`).join('');
     const customAnimBadges = document.querySelectorAll('#customAnimsList .custom-anim-item').length;
     const customBadge = customAnimBadges > 0 ? `<span>🎞️ ${customAnimBadges} custom</span>` : '';
     document.getElementById('previewAnimBadges').innerHTML = animBadges + customBadge;
 }
+
+window.addEventListener('resize', () => refreshPreviewNow());
 
 function getAnimName(key) {
     const map = {
@@ -973,6 +1105,138 @@ function renumberCustomAnims() {
 }
 
 // ══════════════════════════════════════════
+// Textos sobrepostos
+// ══════════════════════════════════════════
+function addTextOverlay() {
+    textOverlayCounter++;
+    const container = document.getElementById('textOverlaysList');
+    const tpl = document.getElementById('tplTextOverlay').content.cloneNode(true);
+    const item = tpl.querySelector('.text-overlay-item');
+    item.dataset.textIdx = textOverlayCounter;
+    container.appendChild(tpl);
+
+    const added = container.querySelector(`[data-text-idx="${textOverlayCounter}"]`);
+
+    // Color picker label update
+    const colorInput = added.querySelector('.text-color');
+    const colorLabel = added.querySelector('.text-color-label');
+    if (colorInput && colorLabel) {
+        colorInput.addEventListener('input', () => {
+            colorLabel.textContent = colorInput.value.toUpperCase();
+            colorLabel.style.color = colorInput.value;
+            refreshPreviewNow();
+        });
+    }
+
+    // Live preview update event listeners
+    added.querySelector('.text-content')?.addEventListener('input', () => refreshPreviewNow());
+    added.querySelector('.text-font')?.addEventListener('change', () => refreshPreviewNow());
+    added.querySelector('.text-bold')?.addEventListener('change', () => refreshPreviewNow());
+    added.querySelector('.text-italic')?.addEventListener('change', () => refreshPreviewNow());
+    added.querySelector('.text-size')?.addEventListener('input', () => refreshPreviewNow());
+    added.querySelector('.seg-start')?.addEventListener('input', () => refreshPreviewNow());
+    added.querySelector('.seg-end')?.addEventListener('input', () => refreshPreviewNow());
+    added.querySelector('.text-px-x')?.addEventListener('input', () => refreshPreviewNow());
+    added.querySelector('.text-px-y')?.addEventListener('input', () => refreshPreviewNow());
+
+    renumberTextOverlays();
+    updateLayers();
+    refreshPreviewNow();
+}
+
+function removeTextOverlay(btn) {
+    btn.closest('.text-overlay-item').remove();
+    renumberTextOverlays();
+    updateLayers();
+    refreshPreviewNow();
+}
+
+function _syncTextFineFromQuick(item) {
+    const text = item.querySelector('.text-content')?.value || '';
+    const size = parseInt(item.querySelector('.text-size')?.value || '48');
+    const activePos = item.querySelector('.text-pos-grid button.active');
+    if (!activePos) return;
+
+    const posKey = activePos.dataset.pos || 'centro';
+    
+    // Aproximação da caixa de texto para o cálculo de posicionamento fino
+    const charCount = text.length || 10;
+    const w = Math.round(charCount * size * 0.55);
+    const h = Math.round(size * 1.25);
+
+    const { x, y } = _posToPx(posKey, w, h);
+
+    const pxX = item.querySelector('.text-px-x');
+    const pxY = item.querySelector('.text-px-y');
+
+    if (pxX) pxX.value = x;
+    if (pxY) pxY.value = y;
+}
+
+function selectTextPos(btn) {
+    const grid = btn.closest('.text-pos-grid');
+    grid.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const item = btn.closest('.text-overlay-item');
+    if (item) _syncTextFineFromQuick(item);
+    refreshPreviewNow();
+}
+
+function renumberTextOverlays() {
+    document.querySelectorAll('#textOverlaysList .text-overlay-item').forEach((item, i) => {
+        item.querySelector('.text-overlay-num').textContent = i + 1;
+        item.querySelector('.text-overlay-title').textContent = `Texto ${i + 1}`;
+    });
+}
+
+// ══════════════════════════════════════════
+// Áudios secundários (múltiplos)
+// ══════════════════════════════════════════
+function addSecAudio() {
+    secAudioCounter++;
+    const container = document.getElementById('secAudioList');
+    const tpl = document.getElementById('tplSecAudio').content.cloneNode(true);
+    const item = tpl.querySelector('.sec-audio-item');
+    item.dataset.secIdx = secAudioCounter;
+    container.appendChild(tpl);
+
+    const added = container.querySelector(`[data-sec-idx="${secAudioCounter}"]`);
+
+    // File input
+    const fileInput = added.querySelector('.sec-audio-input');
+    const fileName = added.querySelector('.file-name');
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files[0]) {
+            fileName.textContent = '✅ ' + fileInput.files[0].name;
+            fileName.style.display = 'block';
+        }
+    });
+
+    // Volume display
+    const volRange = added.querySelector('.sec-audio-vol');
+    const volDisplay = added.querySelector('.sec-audio-vol-display');
+    if (volRange && volDisplay) {
+        volRange.addEventListener('input', () => {
+            volDisplay.textContent = volRange.value + '%';
+        });
+    }
+
+    renumberSecAudios();
+}
+
+function removeSecAudio(btn) {
+    btn.closest('.sec-audio-item').remove();
+    renumberSecAudios();
+}
+
+function renumberSecAudios() {
+    document.querySelectorAll('#secAudioList .sec-audio-item').forEach((item, i) => {
+        item.querySelector('.sec-audio-num').textContent = i + 1;
+        item.querySelector('.sec-audio-title').textContent = `Áudio Secundário ${i + 1}`;
+    });
+}
+
+// ══════════════════════════════════════════
 // Camadas (drag & drop)
 // ══════════════════════════════════════════
 function updateLayers() {
@@ -981,6 +1245,8 @@ function updateLayers() {
     if (bgCount > 0) list.push({ id:'bg', icon:'🖼️', name:`Fundo (${bgCount} imagem${bgCount>1?'s':''})`, type:'background' });
     const ovCount = document.querySelectorAll('#overlaySegmentsList .img-segment').length;
     if (ovCount > 0) list.push({ id:'overlay', icon:'📸', name:`Sobrepostas (${ovCount})`, type:'overlay' });
+    const txtCount = document.querySelectorAll('#textOverlaysList .text-overlay-item').length;
+    if (txtCount > 0) list.push({ id:'text_overlays', icon:'📝', name:`Textos (${txtCount})`, type:'text_overlay' });
     const customCount = document.querySelectorAll('#customAnimsList .custom-anim-item').length;
     if (customCount > 0) list.push({ id:'custom_anims', icon:'🎞️', name:`Animações Próprias (${customCount})`, type:'custom_anim' });
     state.layers = list;
@@ -1233,6 +1499,52 @@ function collectCustomAnimMeta() {
     return result;
 }
 
+/**
+ * Coleta dados de textos sobrepostos.
+ */
+function collectTextOverlayMeta() {
+    const result = [];
+    getTextOverlaysData().forEach((txt, i) => {
+        result.push({
+            index: i,
+            text: txt.text,
+            font: txt.font,
+            size: txt.size,
+            color: txt.color,
+            start_sec: txt.start,
+            end_sec: txt.end,
+            position: txt.position,
+            px_x: txt.px_x,
+            px_y: txt.px_y
+        });
+    });
+    return result;
+}
+
+/**
+ * Coleta dados dos áudios secundários.
+ */
+function collectSecAudioMeta() {
+    const result = [];
+    document.querySelectorAll('#secAudioList .sec-audio-item').forEach((item, i) => {
+        const fileInput = item.querySelector('.sec-audio-input');
+        const volRange = item.querySelector('.sec-audio-vol');
+        const startInput = item.querySelector('.seg-start');
+        const endInput = item.querySelector('.seg-end');
+        const loopCheck = item.querySelector('.sec-audio-loop');
+
+        result.push({
+            index: i,
+            has_file: !!(fileInput && fileInput.files[0]),
+            volume: volRange ? parseInt(volRange.value) : 20,
+            start_sec: startInput && startInput.value !== '' ? parseFloat(startInput.value) : 0,
+            end_sec: endInput && endInput.value !== '' ? parseFloat(endInput.value) : null,
+            loop: loopCheck ? loopCheck.checked : true,
+        });
+    });
+    return result;
+}
+
 // ══════════════════════════════════════════
 // Submit
 // ══════════════════════════════════════════
@@ -1295,6 +1607,8 @@ async function submitCompositor() {
     const animationMeta = collectAnimationMeta();
     const elementMeta = collectElementMeta();
     const customAnimMeta = collectCustomAnimMeta();
+    const textOverlayMeta = collectTextOverlayMeta();
+    const secAudioMeta = collectSecAudioMeta();
 
     formData.set('audio_items_json', JSON.stringify(audioMeta));
     formData.set('bg_segments_json', JSON.stringify(bgMeta));
@@ -1302,6 +1616,8 @@ async function submitCompositor() {
     formData.set('animations_json', JSON.stringify(animationMeta));
     formData.set('elements_json', JSON.stringify(elementMeta));
     formData.set('custom_anims_json', JSON.stringify(customAnimMeta));
+    formData.set('text_overlays_json', JSON.stringify(textOverlayMeta));
+    formData.set('sec_audios_json', JSON.stringify(secAudioMeta));
     formData.set('layers_json', JSON.stringify(state.layers));
 
     // Arquivos de áudio
@@ -1335,10 +1651,11 @@ async function submitCompositor() {
         if (fileInput?.files[0]) formData.append(`custom_anim_${i}`, fileInput.files[0]);
     });
 
-    // Áudio secundário
-    const secFile = document.getElementById('secondary_audio_file')?.files[0];
-    if (secFile) formData.append('secondary_audio_file', secFile);
-    formData.set('secondary_audio_volume', document.getElementById('secVolume')?.value || '20');
+    // Arquivos de áudio secundário
+    document.querySelectorAll('#secAudioList .sec-audio-item').forEach((item, i) => {
+        const fileInput = item.querySelector('.sec-audio-input');
+        if (fileInput?.files[0]) formData.append(`sec_audio_file_${i}`, fileInput.files[0]);
+    });
 
     try {
         const response = await fetch('/video-compositor/render', { method: 'POST', body: formData });

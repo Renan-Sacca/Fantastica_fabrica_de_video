@@ -93,16 +93,10 @@ class VideoCompositorProcessor:
                 job_id, audio_items, work_dir, folder_id, metadata_file_id, metadata
             )
 
-            # ── 7. Baixar áudio secundário (se existir) ──
-            files_info = metadata.get("files", {})
-            sec_audio_id = files_info.get("secondary_audio")
-            if sec_audio_id:
-                await self._publish(job_id, "preparing", 42, "Baixando áudio secundário...")
-                sec_ext = files_info.get("secondary_audio_ext", ".mp3")
-                sec_dest = work_dir / f"secondary_audio{sec_ext}"
-                await asyncio.get_event_loop().run_in_executor(
-                    None, self.drive.download_file, sec_audio_id, sec_dest
-                )
+            # ── 7. Baixar áudios secundários (se existirem) ──
+            secondary_audios = metadata.get("secondary_audios", [])
+            if secondary_audios:
+                await self._download_secondary_audios(job_id, secondary_audios, work_dir)
 
             # ── 8. Renderizar ──
             _loop = asyncio.get_event_loop()
@@ -244,6 +238,20 @@ class VideoCompositorProcessor:
             if not file_id:
                 continue
             dest = work_dir / f"custom_anim_{idx}{ext}"
+            await asyncio.get_event_loop().run_in_executor(
+                None, self.drive.download_file, file_id, dest
+            )
+
+    async def _download_secondary_audios(self, job_id: str, secondary_audios: list, work_dir: Path):
+        """Baixa todos os arquivos de áudio secundário."""
+        await self._publish(job_id, "preparing", 42, "Baixando áudios secundários...")
+        for sa in secondary_audios:
+            idx = sa["index"]
+            file_id = sa.get("file_id")
+            ext = sa.get("file_ext", ".mp3")
+            if not file_id:
+                continue
+            dest = work_dir / f"sec_audio_{idx}{ext}"
             await asyncio.get_event_loop().run_in_executor(
                 None, self.drive.download_file, file_id, dest
             )

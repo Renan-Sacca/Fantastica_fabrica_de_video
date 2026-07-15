@@ -135,7 +135,6 @@ async def render_compositor(request: Request):
             return JSONResponse({"error": "Informe o título do vídeo."}, status_code=400)
 
         resolution = form_data.get("resolution", "1080x1920")
-        secondary_audio_volume = float(form_data.get("secondary_audio_volume", 20.0))
         layers_json = form_data.get("layers_json", "[]")
 
         # Animações e elementos agora são objetos expandidos com tempo/intensidade
@@ -146,6 +145,8 @@ async def render_compositor(request: Request):
         audio_items_meta: list = _json.loads(form_data.get("audio_items_json", "[]"))
         bg_segments_meta: list = _json.loads(form_data.get("bg_segments_json", "[]"))
         overlay_segments_meta: list = _json.loads(form_data.get("overlay_segments_json", "[]"))
+        text_overlays_meta: list = _json.loads(form_data.get("text_overlays_json", "[]"))
+        sec_audios_meta: list = _json.loads(form_data.get("sec_audios_json", "[]"))
 
         # Validações básicas
         if not audio_items_meta:
@@ -175,10 +176,11 @@ async def render_compositor(request: Request):
             "video_type": video_type,
             "user_id": user_id,
             "resolution": {"width": res_w, "height": res_h},
-            "secondary_audio_volume": secondary_audio_volume,
             "animations": animations_meta,
             "elements": elements_meta,
             "custom_anims": [],
+            "text_overlays": text_overlays_meta,
+            "secondary_audios": [],
             "layers": _json.loads(layers_json),
             "audio_items": [],
             "bg_segments": [],
@@ -363,17 +365,27 @@ async def render_compositor(request: Request):
                 "loop": anim_meta.get("loop", True),
             })
 
-        # ── Áudio secundário ──
-        secondary_audio_file: Optional[UploadFile] = form_data.get("secondary_audio_file")
-        if secondary_audio_file and getattr(secondary_audio_file, "filename", None):
-            sec_content = await secondary_audio_file.read()
-            sec_ext = Path(secondary_audio_file.filename).suffix or ".mp3"
-            sec_file_id = await asyncio.get_event_loop().run_in_executor(
-                None, drive.upload_bytes, sec_content, f"secondary_audio{sec_ext}",
-                job_folder_id, secondary_audio_file.content_type or "audio/mpeg",
+        # ── Áudios secundários (múltiplos) ──
+        for sa_meta in sec_audios_meta:
+            idx = sa_meta["index"]
+            sa_upload: Optional[UploadFile] = form_data.get(f"sec_audio_file_{idx}")
+            if not sa_upload or not getattr(sa_upload, "filename", None):
+                continue
+            sa_content = await sa_upload.read()
+            sa_ext = Path(sa_upload.filename).suffix or ".mp3"
+            sa_file_id = await asyncio.get_event_loop().run_in_executor(
+                None, drive.upload_bytes, sa_content, f"sec_audio_{idx}{sa_ext}",
+                job_folder_id, sa_upload.content_type or "audio/mpeg",
             )
-            metadata["files"]["secondary_audio"] = sec_file_id
-            metadata["files"]["secondary_audio_ext"] = sec_ext
+            metadata["secondary_audios"].append({
+                "index": idx,
+                "file_id": sa_file_id,
+                "file_ext": sa_ext,
+                "volume": sa_meta.get("volume", 20),
+                "start_sec": sa_meta.get("start_sec", 0),
+                "end_sec": sa_meta.get("end_sec"),
+                "loop": sa_meta.get("loop", True),
+            })
 
         # Salvar metadata
         metadata_file_id = await asyncio.get_event_loop().run_in_executor(

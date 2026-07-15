@@ -76,11 +76,8 @@ class VideoCompositorRenderer(BaseRenderer):
         if not bg_segments:
             raise ValueError("Nenhuma imagem de fundo configurada.")
 
-        sec_audio_ext = files_info.get("secondary_audio_ext", ".mp3")
-        sec_audio_path = work_dir / f"secondary_audio{sec_audio_ext}"
-        has_sec_audio = sec_audio_path.exists()
-
-        sec_volume = float(job_data.get("secondary_audio_volume", 20)) / 100.0
+        secondary_audios = job_data.get("secondary_audios", [])
+        text_overlays = job_data.get("text_overlays", [])
         animations = job_data.get("animations", [])
         elements = job_data.get("elements", [])
         custom_anims = job_data.get("custom_anims", [])
@@ -104,6 +101,9 @@ class VideoCompositorRenderer(BaseRenderer):
         # ── 3.5. Resolver animações customizadas ──
         custom_anim_clips = self._resolve_custom_anim_clips(custom_anims, work_dir, total_duration)
 
+        # ── 3.6. Resolver áudios secundários ──
+        sec_audio_tracks = self._resolve_secondary_audios(secondary_audios, work_dir, total_duration)
+
         # ── 4. Compor o vídeo final ──
         _progress("composing", 55, "Compondo vídeo com camadas...")
         output_path = work_dir / "output.mp4"
@@ -117,8 +117,8 @@ class VideoCompositorRenderer(BaseRenderer):
             bg_clips=bg_clips,
             overlay_clips=overlay_clips,
             custom_anim_clips=custom_anim_clips,
-            sec_audio_path=sec_audio_path if has_sec_audio else None,
-            sec_volume=sec_volume,
+            sec_audio_tracks=sec_audio_tracks,
+            text_overlays=text_overlays,
             animations=animations,
             elements=elements,
             progress_fn=_progress,
@@ -274,6 +274,32 @@ class VideoCompositorRenderer(BaseRenderer):
             })
         return clips
 
+    def _resolve_secondary_audios(self, secondary_audios: list, work_dir: Path, total_duration: float) -> list[dict]:
+        """Resolve os caminhos e durações dos áudios secundários."""
+        tracks = []
+        for sa in sorted(secondary_audios, key=lambda s: s.get("index", 0)):
+            idx = sa.get("index", 0)
+            ext = sa.get("file_ext", ".mp3")
+            path = self._find_file(work_dir, f"sec_audio_{idx}", ext)
+            if not path:
+                logger.warning(f"Áudio secundário {idx+1}: arquivo não encontrado em {work_dir}, ignorando.")
+                continue
+
+            start = max(0.0, float(sa.get("start_sec", 0) or 0))
+            end_raw = sa.get("end_sec")
+            end = min(float(end_raw), total_duration) if end_raw is not None else total_duration
+            if end <= start:
+                continue
+
+            tracks.append({
+                "path": path,
+                "volume": float(sa.get("volume", 20)),
+                "start_sec": start,
+                "end_sec": end,
+                "loop": sa.get("loop", True),
+            })
+        return tracks
+
     def _get_duration(self, file_path: Path) -> float:
         """Obtém a duração de um arquivo de mídia via ffprobe."""
         cmd = [
@@ -302,8 +328,8 @@ class VideoCompositorRenderer(BaseRenderer):
         bg_clips: list,
         overlay_clips: list,
         custom_anim_clips: list = None,
-        sec_audio_path: Optional[Path] = None,
-        sec_volume: float = 0.2,
+        sec_audio_tracks: list = None,
+        text_overlays: list = None,
         animations: list = None,
         elements: list = None,
         progress_fn: Optional[Callable] = None,
@@ -439,18 +465,43 @@ class VideoCompositorRenderer(BaseRenderer):
                 progress_fn("composing", 75, "Aplicando animações...")
             cur_video = self._apply_animations(fc_parts, cur_video, animations, res_w, res_h, duration)
 
-        # ── Áudio secundário (música de fundo em loop) ──
-        if sec_audio_path is not None:
+        # ── Textos sobrepostos (drawtext) ──
+        if text_overlays:
             if progress_fn:
-                progress_fn("composing", 78, "Mixando áudios...")
-            inputs += ["-stream_loop", "-1", "-i", str(sec_audio_path)]
-            sec_idx = input_idx
-            input_idx += 1
-            fc_parts.append(f"[{sec_idx}:a]volume={sec_volume:.2f}[asec]")
-            fc_parts.append(
-                f"[{audio_label}][asec]amix=inputs=2:duration=first:dropout_transition=2[aout]"
-            )
-            audio_label = "aout"
+                progress_fn("composing", 76, "Adicionando textos...")
+            cur_video = self._apply_text_overlays(fc_parts, cur_video, text_overlays, res_w, res_h, duration)
+
+        # ── Áudios secundários (múltiplos, com tempo/loop/volume) ──
+        if sec_audio_tracks:
+            if progress_fn:
+                progress_fn("composing", 78, "Mixando áudios secundários...")
+            for j, sa in enumerate(sec_audio_tracks):
+                sa_vol = max(0.0, float(sa.get("volume", 20)) / 100.0)
+                sa_start = float(sa.get("start_sec", 0))
+                sa_end = float(sa.get("end_sec") or duration)
+                sa_loop = sa.get("loop", True)
+
+                loop_flag = ["-stream_loop", "-1"] if sa_loop else []
+                inputs += [*loop_flag, "-i", str(sa["path"])]
+                sa_idx = input_idx
+                input_idx += 1
+
+                # Trim + volume + delay
+                sa_label = f"asec{j}"
+                sa_duration = sa_end - sa_start
+                trim_expr = f"atrim=duration={sa_duration:.3f}," if sa_loop else ""
+                delay_ms = int(sa_start * 1000)
+                delay_expr = f"adelay={delay_ms}|{delay_ms}," if delay_ms > 0 else ""
+                fc_parts.append(
+                    f"[{sa_idx}:a]{trim_expr}{delay_expr}volume={sa_vol:.2f}[{sa_label}]"
+                )
+
+                # Mix into main audio
+                out_label = f"amix{j}"
+                fc_parts.append(
+                    f"[{audio_label}][{sa_label}]amix=inputs=2:duration=first:dropout_transition=2[{out_label}]"
+                )
+                audio_label = out_label
 
         filter_complex = ";".join(fc_parts)
 
@@ -488,6 +539,69 @@ class VideoCompositorRenderer(BaseRenderer):
             f"Vídeo compositor gerado: {output_path} "
             f"({output_path.stat().st_size / 1024 / 1024:.1f} MB)"
         )
+
+    # ══════════════════════════════════════════
+    # Textos sobrepostos (com controle de tempo/posição)
+    # ══════════════════════════════════════════
+
+    def _apply_text_overlays(
+        self, fc_parts: list, cur_video: str,
+        text_overlays: list, res_w: int, res_h: int, duration: float,
+    ) -> str:
+        """Aplica textos sobrepostos ao vídeo usando o filtro drawtext do FFmpeg."""
+        TEXT_POSITION_MAP = {
+            "centro":            {"x": "(w-tw)/2", "y": "(h-th)/2"},
+            "superior":          {"x": "(w-tw)/2", "y": "h*0.05"},
+            "inferior":          {"x": "(w-tw)/2", "y": "h*0.95-th"},
+            "esquerda":          {"x": "w*0.05", "y": "(h-th)/2"},
+            "direita":           {"x": "w*0.95-tw", "y": "(h-th)/2"},
+            "superior esquerda": {"x": "w*0.05", "y": "h*0.05"},
+            "superior direita":  {"x": "w*0.95-tw", "y": "h*0.05"},
+            "inferior esquerda": {"x": "w*0.05", "y": "h*0.95-th"},
+            "inferior direita":  {"x": "w*0.95-tw", "y": "h*0.95-th"},
+        }
+
+        for i, text_obj in enumerate(text_overlays):
+            text_str = text_obj.get("text", "").strip()
+            if not text_str:
+                continue
+
+            fontfile = text_obj.get("font", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf")
+            fontsize = int(text_obj.get("size", 48))
+            fontcolor = text_obj.get("color", "#ffffff").replace("#", "0x")
+            start = max(0.0, float(text_obj.get("start_sec", 0) or 0))
+            end_raw = text_obj.get("end_sec")
+            end = min(float(end_raw), duration) if end_raw is not None else duration
+
+            if end <= start:
+                continue
+
+            pos_name = text_obj.get("position", "centro")
+            pos = TEXT_POSITION_MAP.get(pos_name, TEXT_POSITION_MAP["centro"])
+
+            px_x = text_obj.get("px_x")
+            px_y = text_obj.get("px_y")
+            x_expr = str(int(px_x)) if px_x is not None else pos["x"]
+            y_expr = str(int(px_y)) if px_y is not None else pos["y"]
+
+            # Escapar texto para o FFmpeg drawtext
+            escaped_text = text_str.replace('\\', '\\\\').replace("'", "'\\''").replace(':', '\\:').replace('%', '\\%')
+
+            enable_expr = f"between(t,{start:.3f},{end:.3f})"
+            out_label = f"vtxt{i}"
+
+            # Filtro drawtext
+            drawtext_filter = (
+                f"drawtext=fontfile={fontfile}:text='{escaped_text}':"
+                f"fontsize={fontsize}:fontcolor={fontcolor}:"
+                f"x='{x_expr}':y='{y_expr}':"
+                f"enable='{enable_expr}'"
+            )
+
+            fc_parts.append(f"[{cur_video}]{drawtext_filter}[{out_label}]")
+            cur_video = out_label
+
+        return cur_video
 
     # ══════════════════════════════════════════
     # Elementos decorativos (com controle de tempo)

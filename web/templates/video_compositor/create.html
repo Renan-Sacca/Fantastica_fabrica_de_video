@@ -110,6 +110,7 @@
     .preview-canvas { width: 100%; aspect-ratio: 9/16; background: #0a0a14; border-radius: 14px; border: 1px solid rgba(255,255,255,.08); overflow: hidden; position: relative; display: flex; align-items: center; justify-content: center; }
     .preview-canvas .preview-bg { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
     .preview-canvas .preview-overlay { position: absolute; object-fit: contain; z-index: 2; max-width: 50%; max-height: 40%; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+    .preview-canvas .preview-text { position: absolute; z-index: 3; text-align: center; white-space: pre-wrap; word-break: break-word; pointer-events: none; font-weight: bold; text-shadow: 1px 1px 2px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8); }
     .preview-canvas .preview-placeholder { color: var(--text-muted); font-size: .9rem; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 8px; }
     .preview-canvas .preview-placeholder .ph-icon { font-size: 3rem; opacity: .3; }
     .preview-anim-badge { position: absolute; bottom: 10px; right: 10px; z-index: 5; display: flex; gap: 4px; flex-wrap: wrap; }
@@ -300,6 +301,36 @@
     .omni-status-badge.done { background: rgba(0,200,83,.12); color: #00c853; border: 1px solid rgba(0,200,83,.3); }
     .omni-status-badge.error { background: rgba(239,68,68,.12); color: #ef4444; border: 1px solid rgba(239,68,68,.3); }
 
+    /* ── Textos sobrepostos ── */
+    .text-overlay-item {
+        border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 10px 12px;
+        margin-bottom: 8px; background: rgba(255,255,255,.02); position: relative;
+    }
+    .text-overlay-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .text-overlay-num { background: linear-gradient(135deg,#ff6f00,#ffa000); color:#fff; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:.72rem; font-weight:700; flex-shrink:0; }
+    .text-overlay-title { flex:1; font-size:.85rem; font-weight:600; }
+    .text-overlay-remove { background:none; border:none; color:rgba(239,68,68,.7); cursor:pointer; font-size:0.9rem; padding:2px 4px; border-radius:4px; }
+    .text-overlay-remove:hover { color:#ef4444; background:rgba(239,68,68,.1); }
+    .text-overlay-item label { font-size: .75rem; margin: 4px 0 2px; }
+    .text-overlay-item textarea.text-content { height: 38px; min-height: 38px; padding: 6px 10px; font-size: .88rem; box-sizing: border-box; }
+    .text-overlay-item select, .text-overlay-item input[type=number] { padding: 6px 8px; font-size: .85rem; height: 34px; box-sizing: border-box; }
+    .text-overlay-item .color-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+    .text-overlay-item input[type=color] { width:32px; height:28px; border:none; border-radius:6px; cursor:pointer; background:transparent; padding:0; }
+
+    /* ── Áudios Secundários (múltiplos) ── */
+    .sec-audio-item {
+        border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 10px 12px;
+        margin-bottom: 8px; background: rgba(255,255,255,.02); position: relative;
+    }
+    .sec-audio-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .sec-audio-num { background: linear-gradient(135deg,#ab47bc,#7c4dff); color:#fff; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:.72rem; font-weight:700; flex-shrink:0; }
+    .sec-audio-title { flex:1; font-size:.85rem; font-weight:600; }
+    .sec-audio-remove { background:none; border:none; color:rgba(239,68,68,.7); cursor:pointer; font-size:0.9rem; padding:2px 4px; border-radius:4px; }
+    .sec-audio-remove:hover { color:#ef4444; background:rgba(239,68,68,.1); }
+    .sec-audio-item .vc-file-drop { padding: 8px 10px; }
+    .sec-audio-item label { font-size: .75rem; margin: 4px 0 2px; }
+    .sec-audio-item input[type=number] { padding: 6px 8px; font-size: .85rem; height: 34px; box-sizing: border-box; }
+
     @media (max-width: 900px) { .vc-grid { grid-template-columns: 1fr; } .omni-params-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
@@ -352,26 +383,16 @@
                     </div>
                 </div>
 
-                <!-- 🎶 Áudio Secundário (fundo) -->
+                <!-- 🎶 Áudios Secundários (fundo) -->
                 <div class="vc-card">
                     <div class="section-header" onclick="toggleSection(this)">
                         <span class="chevron">▼</span>
-                        <h2>🎶 Áudio Secundário <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
+                        <h2>🎶 Áudios Secundários <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
                     </div>
                     <div class="section-body">
-                        <div class="vc-file-drop" id="secAudioDropZone">
-                            <input type="file" name="secondary_audio_file" id="secondary_audio_file" accept="audio/*">
-                            <div class="icon">🎶</div>
-                            <div class="text">Música de fundo ou efeito sonoro</div>
-                            <div class="hint">Reproduzido ao longo de todo o vídeo</div>
-                            <div class="file-name" id="secAudioFileName"></div>
-                        </div>
-                        <div class="volume-control">
-                            <label>🔈 Vol</label>
-                            <input type="range" min="0" max="100" value="20" name="secondary_audio_volume" id="secVolume" oninput="updateVolDisplay(this,'secVolValue')">
-                            <span class="vol-value" id="secVolValue">20%</span>
-                        </div>
-                        <p class="hint">💡 Ex: Voz 100%, música ambiente 20%</p>
+                        <p class="muted" style="margin-bottom:10px;">Músicas de fundo ou efeitos sonoros. Configure volume, tempo e loop de cada um.</p>
+                        <div id="secAudioList"></div>
+                        <button type="button" class="add-btn" onclick="addSecAudio()">➕ Adicionar áudio secundário</button>
                     </div>
                 </div>
 
@@ -407,6 +428,19 @@
                 </div>
 
 
+                <!-- 📝 Textos Sobrepostos -->
+                <div class="vc-card">
+                    <div class="section-header" onclick="toggleSection(this)">
+                        <span class="chevron">▼</span>
+                        <h2>📝 Textos <span class="muted" style="font-size:.75rem;">(Opcional)</span></h2>
+                    </div>
+                    <div class="section-body">
+                        <p class="muted" style="margin-bottom:10px;">Adicione textos sobre o vídeo. Configure fonte, cor, tamanho, posição e tempo.</p>
+                        <div id="textOverlaysList"></div>
+                        <button type="button" class="add-btn" onclick="addTextOverlay()">➕ Adicionar texto</button>
+                    </div>
+                </div>
+
                 <!-- 🎞️ Animações Customizadas -->
                 <div class="vc-card">
                     <div class="section-header" onclick="toggleSection(this)">
@@ -425,13 +459,14 @@
             </div><!-- /vc-col-config -->
 
             <!-- ═══ Coluna Direita — Preview & Camadas ═══ -->
-            <div class="vc-col-preview" style="position: sticky; top: 100px;">
+            <div class="vc-col-preview" style="position: sticky; top: 15px; align-self: start;">
                 <!-- Pré-visualização -->
                 <div class="vc-card">
                     <h2>👁️ Pré-visualização</h2>
                     <div class="preview-canvas" id="previewCanvas">
                         <img class="preview-bg" id="previewBg" style="display:none;" alt="">
                         <div id="previewOverlaysContainer"></div>
+                        <div id="previewTextsContainer"></div>
                         <div class="preview-placeholder" id="previewPlaceholder">
                             <span class="ph-icon">🎨</span>
                             <span>Adicione uma imagem de fundo para ver a prévia</span>
@@ -844,5 +879,136 @@
 </div>
 </template>
 
-<script src="/static/video_compositor.js?v=9"></script>
+<!-- Template: texto sobreposto -->
+<template id="tplTextOverlay">
+<div class="text-overlay-item">
+    <div class="text-overlay-header">
+        <div class="text-overlay-num"></div>
+        <span class="text-overlay-title">Texto</span>
+        <button type="button" class="text-overlay-remove" onclick="removeTextOverlay(this)" title="Remover">✕</button>
+    </div>
+    <textarea rows="1" class="text-content" placeholder="Digite o texto que aparecerá no vídeo..."></textarea>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:6px;">
+        <div>
+            <label>Fonte</label>
+            <select class="text-font">
+                <option value="sans">Liberation Sans</option>
+                <option value="serif">Liberation Serif</option>
+                <option value="mono">Liberation Mono</option>
+                <option value="free_sans">Free Sans</option>
+                <option value="free_serif">Free Serif</option>
+                <option value="free_mono">Free Mono</option>
+            </select>
+        </div>
+        <div>
+            <label>Tamanho (px)</label>
+            <input type="number" class="text-size" min="8" max="300" value="48" step="1">
+        </div>
+    </div>
+    <!-- Estilo do texto (Negrito / Itálico) -->
+    <div style="display:flex; gap:16px; margin-top:8px;">
+        <label style="display:flex; align-items:center; gap:6px; margin:0; cursor:pointer; font-size:.82rem;">
+            <input type="checkbox" class="text-bold" style="width:auto; accent-color:#e040fb;">
+            <span><b>B</b> Negrito</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; margin:0; cursor:pointer; font-size:.82rem;">
+            <input type="checkbox" class="text-italic" style="width:auto; accent-color:#e040fb;">
+            <span><i>I</i> Itálico</span>
+        </label>
+    </div>
+    <div class="color-row" style="margin-top:6px;">
+        <label style="margin:0;">Cor</label>
+        <input type="color" class="text-color" value="#ffffff">
+        <span class="text-color-label" style="font-size:.82rem; font-weight:600;">Branco</span>
+    </div>
+    <div class="seg-time-row" style="margin-top:6px;">
+        <div>
+            <label>Início (segundos)</label>
+            <input type="number" class="seg-start" min="0" step="0.1" placeholder="0" value="0">
+        </div>
+        <div>
+            <label>Fim (segundos)</label>
+            <input type="number" class="seg-end" min="0" step="0.1" placeholder="(fim do vídeo)">
+        </div>
+    </div>
+    <div style="margin-top:12px;">
+        <label>Posição</label>
+        <div class="position-grid text-pos-grid">
+            <button type="button" data-pos="superior esquerda" onclick="selectTextPos(this)">↖ Sup.Esq.</button>
+            <button type="button" data-pos="superior" onclick="selectTextPos(this)">↑ Superior</button>
+            <button type="button" data-pos="superior direita" onclick="selectTextPos(this)">↗ Sup.Dir.</button>
+            <button type="button" data-pos="esquerda" onclick="selectTextPos(this)">← Esq.</button>
+            <button type="button" data-pos="centro" class="active" onclick="selectTextPos(this)">● Centro</button>
+            <button type="button" data-pos="direita" onclick="selectTextPos(this)">Dir. →</button>
+            <button type="button" data-pos="inferior esquerda" onclick="selectTextPos(this)">↙ Inf.Esq.</button>
+            <button type="button" data-pos="inferior" onclick="selectTextPos(this)">↓ Inferior</button>
+            <button type="button" data-pos="inferior direita" onclick="selectTextPos(this)">↘ Inf.Dir.</button>
+        </div>
+    </div>
+
+    <!-- Controle fino: posição X, Y em pixels -->
+    <details class="text-fine-ctrl" style="margin-top:10px; border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:8px 12px;">
+        <summary style="cursor:pointer; font-weight:600; font-size:.82rem; user-select:none;">
+            🎯 Controle fino (posição em pixels)
+        </summary>
+        <p class="hint" style="margin:4px 0 8px; font-size:.7rem;">Baseado na resolução de saída. Deixe em branco para usar a posição rápida acima.</p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <div>
+                <label style="font-size:.75rem;">Posição X (px)</label>
+                <input type="number" class="text-px-x" step="1" placeholder="(centro)">
+                <div class="hint" style="font-size:.65rem; opacity:.5;">Distância da borda esquerda</div>
+            </div>
+            <div>
+                <label style="font-size:.75rem;">Posição Y (px)</label>
+                <input type="number" class="text-px-y" step="1" placeholder="(centro)">
+                <div class="hint" style="font-size:.65rem; opacity:.5;">Distância da borda superior</div>
+            </div>
+        </div>
+        <button type="button" class="text-apply-btn" onclick="refreshPreviewNow()" style="margin-top:8px; padding:5px 10px; font-size:.75rem; border-radius:6px; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.2); color:#fff; cursor:pointer; width: 100%;">
+            ▶ Aplicar ao preview
+        </button>
+    </details>
+</div>
+</template>
+
+<!-- Template: áudio secundário -->
+<template id="tplSecAudio">
+<div class="sec-audio-item">
+    <div class="sec-audio-header">
+        <div class="sec-audio-num"></div>
+        <span class="sec-audio-title">Áudio Secundário</span>
+        <button type="button" class="sec-audio-remove" onclick="removeSecAudio(this)" title="Remover">✕</button>
+    </div>
+    <div class="vc-file-drop">
+        <input type="file" accept="audio/*" class="sec-audio-input">
+        <div class="icon">🎶</div>
+        <div class="text">Música de fundo ou efeito sonoro</div>
+        <div class="hint">MP3, WAV, OGG — Máx 50MB</div>
+        <div class="file-name"></div>
+    </div>
+    <div class="volume-control">
+        <label>🔈 Vol</label>
+        <input type="range" min="0" max="100" value="20" class="sec-audio-vol">
+        <span class="vol-value sec-audio-vol-display">20%</span>
+    </div>
+    <div class="seg-time-row" style="margin-top:10px;">
+        <div>
+            <label>Início (segundos)</label>
+            <input type="number" class="seg-start" min="0" step="0.1" placeholder="0" value="0">
+        </div>
+        <div>
+            <label>Fim (segundos)</label>
+            <input type="number" class="seg-end" min="0" step="0.1" placeholder="(fim do vídeo)">
+        </div>
+    </div>
+    <div style="margin-top:8px;">
+        <label style="display:flex; align-items:center; gap:8px; margin:0;">
+            <input type="checkbox" class="sec-audio-loop" checked style="width:auto; accent-color:#e040fb;">
+            <span style="font-size:.82rem;">🔄 Repetir em loop no intervalo</span>
+        </label>
+    </div>
+</div>
+</template>
+
+<script src="/static/video_compositor.js?v=14"></script>
 {% endblock %}
