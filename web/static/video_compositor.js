@@ -1591,10 +1591,6 @@ async function submitCompositor() {
 
     btn.disabled = true;
     btn.textContent = '⏳ Enviando...';
-    progressSection.classList.remove('hidden');
-    progressSection.classList.remove('error'); // Limpa erro anterior
-    resultSection.classList.add('hidden');
-    state.jobFinished = false; // Reseta flag de fim
 
     const formData = new FormData();
     formData.set('title', title);
@@ -1661,74 +1657,104 @@ async function submitCompositor() {
         const response = await fetch('/video-compositor/render', { method: 'POST', body: formData });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Erro ao enviar');
-        state.jobId = data.job_id;
-        showToast(`Job ${data.job_id} criado com sucesso!`, 'success');
-        updateProgress('pending', 0, 'Job enviado, aguardando worker...');
-        startProgressStream(data.job_id);
+        
+        showToast(`Vídeo "${title}" enviado com sucesso!`, 'success');
+        
+        // Adicionar à fila visual
+        addToQueue(data.job_id, title);
+        
+        // Resetar título e habilitar o botão para gerar outros
+        document.getElementById('title').value = '';
+        btn.disabled = false;
+        btn.textContent = '🚀 Gerar Vídeo';
     } catch (err) {
         showToast(err.message, 'error');
         btn.disabled = false;
         btn.textContent = '🚀 Gerar Vídeo';
-        progressSection.classList.add('hidden');
     }
 }
 
-function startProgressStream(jobId) {
-    if (state.eventSource) state.eventSource.close();
+function addToQueue(jobId, title) {
+    const queueContainer = document.getElementById('compositor-queue');
+    if (!queueContainer) return;
+
+    const item = document.createElement('div');
+    item.className = 'vb-queue-item';
+    item.id = `qi-${jobId}`;
+    item.innerHTML = `
+        <div class="qi-header">
+            <span class="qi-title">🎬 ${escapeHtml(title)}</span>
+            <span class="qi-status pending">⏳ Na fila</span>
+        </div>
+        <div class="vb-progress">
+            <div class="bar"><div class="fill" style="width: 5%;"></div></div>
+        </div>
+        <div class="qi-detail">Aguardando worker...</div>
+    `;
+    queueContainer.prepend(item);
+
+    trackJobProgress(jobId);
+}
+
+function trackJobProgress(jobId) {
+    const item = document.getElementById(`qi-${jobId}`);
+    if (!item) return;
+
+    const statusEl = item.querySelector('.qi-status');
+    const fillEl = item.querySelector('.fill');
+    const detailEl = item.querySelector('.qi-detail');
+
     const es = new EventSource(`/api/jobs/${jobId}/stream`);
-    state.eventSource = es;
+
     es.onmessage = (event) => {
         try {
-            const data = JSON.parse(event.data);
-            updateProgress(data.status, data.progress, data.detail);
-            if (data.status === 'done') { 
-                state.jobFinished = true;
-                es.close(); 
-                showResult(data); 
+            const msg = JSON.parse(event.data);
+            if (msg.progress !== undefined) {
+                fillEl.style.width = msg.progress + '%';
             }
-            else if (data.status === 'error') {
-                state.jobFinished = true;
+            if (msg.detail) {
+                detailEl.textContent = msg.detail;
+            }
+            
+            const statusMap = {
+                pending: { label: '⏳ Na fila', class: 'pending' },
+                preparing: { label: '📦 Preparando', class: 'processing' },
+                generating_audio: { label: '🎵 Áudio', class: 'processing' },
+                rendering: { label: '🎬 Renderizando', class: 'processing' },
+                composing: { label: '🎨 Compondo', class: 'processing' },
+                done: { label: '✅ Pronto', class: 'done' },
+                error: { label: '❌ Erro', class: 'error' }
+            };
+
+            const info = statusMap[msg.status];
+            if (info) {
+                statusEl.textContent = info.label;
+                statusEl.className = `qi-status ${info.class}`;
+            }
+
+            if (msg.status === 'done') {
                 es.close();
-                showToast(`Erro: ${data.detail}`, 'error');
-                document.getElementById('btnGenerate').disabled = false;
-                document.getElementById('btnGenerate').textContent = '🚀 Gerar Vídeo';
+                fillEl.style.width = '100%';
+                detailEl.innerHTML = `<a href="/video-compositor/video/${jobId}" class="qi-link">Ver detalhes →</a>`;
             }
-        } catch (e) { /* ignore heartbeat */ }
+            if (msg.status === 'error') {
+                es.close();
+                fillEl.style.width = '0%';
+                detailEl.textContent = msg.detail || 'Erro desconhecido';
+            }
+        } catch (e) {}
     };
+
     es.onerror = () => {
         es.close();
-        if (!state.jobFinished) {
-            setTimeout(() => { if (state.jobId && !state.jobFinished) startProgressStream(state.jobId); }, 5000);
-        }
+        detailEl.textContent = 'Conexão perdida. Verifique no histórico.';
     };
 }
 
-function updateProgress(status, progress, detail) {
-    const statusMap = {
-        pending:'⏳ Na fila', preparing:'📦 Preparando', generating_audio:'🎵 Gerando áudio',
-        rendering:'🎬 Renderizando', composing:'🎨 Compondo', done:'✅ Concluído', error:'❌ Erro',
-    };
-    
-    const progressSection = document.getElementById('progressSection');
-    if (status === 'error') {
-        progressSection.classList.add('error');
-    } else {
-        progressSection.classList.remove('error');
-    }
-
-    document.getElementById('progressFill').style.width = `${progress}%`;
-    document.getElementById('progressLabel').textContent = statusMap[status] || status;
-    document.getElementById('progressPercent').textContent = `${Math.round(progress)}%`;
-    document.getElementById('progressDetail').textContent = detail || '';
-}
-
-function showResult(data) {
-    const resultSection = document.getElementById('resultSection');
-    resultSection.classList.remove('hidden');
-    const link = document.getElementById('resultLink');
-    link.href = data.video_url || `/video-compositor/video/${state.jobId}`;
-    document.getElementById('btnGenerate').disabled = false;
-    document.getElementById('btnGenerate').textContent = '🚀 Gerar Outro Vídeo';
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 // ══════════════════════════════════════════

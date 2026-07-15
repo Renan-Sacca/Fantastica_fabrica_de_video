@@ -19,6 +19,8 @@
     .detail-item .label { font-size: .78rem; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .5px; }
     .detail-item .value { font-size: 1rem; font-weight: 600; }
 
+    .video-player { width: 100%; max-width: 720px; border-radius: 12px; background: #000; margin: 16px 0; border: 1px solid rgba(255, 255, 255, 0.08); }
+
     @media (max-width: 600px) { .detail-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
@@ -58,10 +60,17 @@
         {% endif %}
 
         {% if status == 'done' and job.video_url %}
-        <div style="margin-top: 16px; display: flex; gap: 12px; flex-wrap: wrap;">
-            <a href="{{ job.video_url }}" target="_blank" class="vc-btn vc-btn-primary">📥 Ver Vídeo no Drive</a>
+        <div style="margin-top: 16px;">
+            <video class="video-player" controls style="max-height: 500px;">
+                <source src="{{ job.video_url }}" type="video/mp4">
+                Seu navegador não suporta a tag video.
+            </video>
+        </div>
+        <div style="margin-top: 12px; display: flex; gap: 12px; flex-wrap: wrap;">
+            <a href="https://drive.google.com/uc?export=download&id={{ job.video_drive_id or job_info.video_drive_id }}" class="vc-btn vc-btn-primary" download>⬇️ Baixar Vídeo</a>
+            <a href="{{ job.video_url }}" target="_blank" class="vc-btn vc-btn-ghost">🔗 Abrir no Drive</a>
             {% if drive_link %}
-            <a href="{{ drive_link }}" target="_blank" class="vc-btn vc-btn-ghost">📂 Abrir Pasta</a>
+            <a href="{{ drive_link }}" target="_blank" class="vc-btn vc-btn-ghost">📂 Pasta do Job</a>
             {% endif %}
         </div>
         {% endif %}
@@ -133,7 +142,7 @@
 <script>
     // Auto-refresh para acompanhar o progresso
     const jobId = '{{ job.job_id }}';
-    const es = new EventSource(`/api/progress/${jobId}/stream`);
+    const es = new EventSource(`/api/jobs/${jobId}/stream`);
     es.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
@@ -149,7 +158,10 @@
             }
         } catch(e) {}
     };
-    es.onerror = () => { es.close(); setTimeout(() => location.reload(), 10000); };
+    es.onerror = () => {
+        es.close();
+        setTimeout(() => location.reload(), 10000);
+    };
 </script>
 {% endif %}
 {% endblock %}
