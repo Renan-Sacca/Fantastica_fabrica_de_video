@@ -2000,6 +2000,533 @@ async function generateOmniAudio(btn) {
 }
 
 // ══════════════════════════════════════════
+// Templates: Salvar / Carregar / Aplicar
+// ══════════════════════════════════════════
+
+/**
+ * Coleta todo o estado atual do editor num JSON limpo (sem arquivos).
+ */
+function collectTemplateData() {
+    const overlayMeta = collectOverlayMeta().map(o => {
+        const { has_file, ...rest } = o;
+        return rest;
+    });
+
+    const bgMeta = collectBgMeta().map(b => {
+        const { has_file, ...rest } = b;
+        return rest;
+    });
+
+    const customAnimMeta = collectCustomAnimMeta().map(c => {
+        const { has_file, ...rest } = c;
+        return rest;
+    });
+
+    const secAudioMeta = collectSecAudioMeta().map(s => {
+        const { has_file, ...rest } = s;
+        return rest;
+    });
+
+    // Quantidade de áudios e seus tipos (upload/omni), sem conteúdo
+    const audioSlots = [];
+    document.querySelectorAll('#audioItemsList .audio-item').forEach((item, i) => {
+        const activePanel = item.querySelector('.audio-panel.active');
+        const type = activePanel ? activePanel.dataset.panelType : 'upload';
+        const volRange = activePanel ? activePanel.querySelector('.audio-vol-range') : null;
+        audioSlots.push({
+            index: i,
+            type: type,
+            volume: volRange ? parseInt(volRange.value) : 100,
+        });
+    });
+
+    return {
+        resolution: state.resolution,
+        audio_slots: audioSlots,
+        bg_segments: bgMeta,
+        overlay_segments: overlayMeta,
+        animations: collectAnimationMeta(),
+        elements: collectElementMeta(),
+        custom_anims: customAnimMeta,
+        text_overlays: collectTextOverlayMeta(),
+        sec_audios: secAudioMeta,
+        layers: state.layers,
+    };
+}
+
+/**
+ * Abre o modal de salvar template.
+ */
+function openSaveTemplateModal() {
+    const modal = document.getElementById('templateSaveModal');
+    if (!modal) return;
+    modal.classList.add('open');
+    document.getElementById('tplSaveName').value = '';
+    document.getElementById('tplSaveDesc').value = '';
+    document.getElementById('tplSaveName').focus();
+}
+
+function closeSaveTemplateModal() {
+    document.getElementById('templateSaveModal')?.classList.remove('open');
+}
+
+async function confirmSaveTemplate() {
+    const name = document.getElementById('tplSaveName').value.trim();
+    if (!name) { showToast('Informe o nome do template.', 'error'); return; }
+    const description = document.getElementById('tplSaveDesc').value.trim();
+    const templateData = collectTemplateData();
+
+    const btn = document.getElementById('tplSaveBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Salvando...';
+
+    try {
+        const resp = await fetch('/video-compositor/api/templates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description, template_data: templateData }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
+        showToast(`Template "${name}" salvo com sucesso!`, 'success');
+        closeSaveTemplateModal();
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 Salvar';
+    }
+}
+
+/**
+ * Abre o modal de carregar template.
+ */
+async function openLoadTemplateModal() {
+    const modal = document.getElementById('templateLoadModal');
+    if (!modal) return;
+    modal.classList.add('open');
+
+    const listEl = document.getElementById('tplLoadList');
+    listEl.innerHTML = '<div style="text-align:center; padding:30px; opacity:.5;">⏳ Carregando...</div>';
+
+    try {
+        const resp = await fetch('/video-compositor/api/templates');
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao carregar');
+
+        const tpls = data.templates || [];
+        if (tpls.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center; padding:30px; opacity:.5;"><span style="font-size:2rem; display:block; margin-bottom:8px;">📂</span>Nenhum template salvo ainda</div>';
+            return;
+        }
+
+        listEl.innerHTML = tpls.map(t => {
+            const date = t.created_at ? new Date(t.created_at).toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+            const desc = t.description ? `<div class="tpl-item-desc">${escapeHtml(t.description)}</div>` : '';
+            const resLabel = t.template_data?.resolution || '—';
+            const overlayCount = (t.template_data?.overlay_segments || []).length;
+            const textCount = (t.template_data?.text_overlays || []).length;
+            const animCount = (t.template_data?.animations || []).length;
+
+            const badges = [];
+            if (resLabel !== '—') badges.push(`📐 ${resLabel}`);
+            if (overlayCount) badges.push(`📸 ${overlayCount} overlay${overlayCount > 1 ? 's' : ''}`);
+            if (textCount) badges.push(`📝 ${textCount} texto${textCount > 1 ? 's' : ''}`);
+            if (animCount) badges.push(`✨ ${animCount} anim.`);
+
+            return `
+            <div class="tpl-item" data-tpl-id="${t.template_id}">
+                <div class="tpl-item-header">
+                    <div class="tpl-item-info">
+                        <div class="tpl-item-name">${escapeHtml(t.name)}</div>
+                        ${desc}
+                        <div class="tpl-item-badges">${badges.map(b => `<span>${b}</span>`).join('')}</div>
+                        <div class="tpl-item-date">${date}</div>
+                    </div>
+                    <div class="tpl-item-actions">
+                        <button type="button" class="vc-btn vc-btn-primary vc-btn-sm" onclick="loadTemplate('${t.template_id}')">📂 Carregar</button>
+                        <button type="button" class="vc-btn vc-btn-danger vc-btn-sm" onclick="deleteTemplate('${t.template_id}', this)">🗑️</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+    } catch (e) {
+        listEl.innerHTML = `<div style="text-align:center; padding:30px; color:#ef4444;">❌ ${e.message}</div>`;
+    }
+}
+
+function closeLoadTemplateModal() {
+    document.getElementById('templateLoadModal')?.classList.remove('open');
+}
+
+/**
+ * Carrega um template específico e aplica no editor.
+ */
+async function loadTemplate(templateId) {
+    try {
+        const resp = await fetch(`/video-compositor/api/templates/${templateId}`);
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao carregar template');
+
+        const td = data.template?.template_data;
+        if (!td) throw new Error('Template sem dados');
+
+        applyTemplateData(td);
+        closeLoadTemplateModal();
+        showToast(`Template "${data.template.name}" carregado!`, 'success');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+/**
+ * Deleta um template.
+ */
+async function deleteTemplate(templateId, btn) {
+    if (!confirm('Tem certeza que deseja excluir este template?')) return;
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳';
+
+    try {
+        const resp = await fetch(`/video-compositor/api/templates/${templateId}`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erro ao deletar');
+
+        const item = btn.closest('.tpl-item');
+        if (item) {
+            item.style.opacity = '0';
+            item.style.transform = 'translateX(20px)';
+            item.style.transition = 'all .3s';
+            setTimeout(() => item.remove(), 300);
+        }
+        showToast('Template excluído!', 'success');
+
+        // Se lista ficou vazia
+        setTimeout(() => {
+            const listEl = document.getElementById('tplLoadList');
+            if (listEl && !listEl.querySelector('.tpl-item')) {
+                listEl.innerHTML = '<div style="text-align:center; padding:30px; opacity:.5;"><span style="font-size:2rem; display:block; margin-bottom:8px;">📂</span>Nenhum template salvo</div>';
+            }
+        }, 350);
+    } catch (e) {
+        showToast(e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+/**
+ * Aplica os dados de um template ao editor, recriando os componentes.
+ */
+function applyTemplateData(td) {
+    // 1. Resolução
+    if (td.resolution) {
+        state.resolution = td.resolution;
+        document.getElementById('resolution').value = td.resolution;
+        document.querySelectorAll('.res-chip').forEach(c => {
+            c.classList.toggle('active', c.dataset.res === td.resolution);
+        });
+        const canvas = document.getElementById('previewCanvas');
+        const [w, h] = td.resolution.split('x').map(Number);
+        canvas.style.aspectRatio = `${w}/${h}`;
+    }
+
+    // 2. Limpar tudo antes de recriar
+    _clearAllSections();
+
+    // 3. Recriar áudios (slots vazios)
+    const audioSlots = td.audio_slots || [];
+    const audioCount = Math.max(audioSlots.length, 1);
+    for (let i = 0; i < audioCount; i++) {
+        addAudioItem();
+        if (audioSlots[i]) {
+            const items = document.querySelectorAll('#audioItemsList .audio-item');
+            const item = items[items.length - 1];
+            const slot = audioSlots[i];
+            // Setar tipo
+            if (slot.type === 'omni') {
+                const omniTab = item.querySelector('.audio-tab:nth-child(2)');
+                if (omniTab) switchAudioType(omniTab, 'omni');
+            }
+            // Setar volume
+            const activePanel = item.querySelector('.audio-panel.active');
+            const volRange = activePanel?.querySelector('.audio-vol-range');
+            if (volRange && slot.volume !== undefined) {
+                volRange.value = slot.volume;
+                const display = volRange.nextElementSibling;
+                if (display) display.textContent = slot.volume + '%';
+            }
+        }
+    }
+
+    // 4. Recriar backgrounds
+    const bgSegs = td.bg_segments || [];
+    const bgCount = Math.max(bgSegs.length, 1);
+    for (let i = 0; i < bgCount; i++) {
+        addBgSegment();
+        if (bgSegs[i]) {
+            const segs = document.querySelectorAll('#bgSegmentsList .img-segment');
+            const seg = segs[segs.length - 1];
+            const data = bgSegs[i];
+            const startInput = seg.querySelector('.seg-start');
+            const endInput = seg.querySelector('.seg-end');
+            if (startInput && data.start_sec !== undefined && data.start_sec !== null) startInput.value = data.start_sec;
+            if (endInput && data.end_sec !== undefined && data.end_sec !== null) endInput.value = data.end_sec;
+        }
+    }
+
+    // 5. Recriar overlays
+    const ovSegs = td.overlay_segments || [];
+    for (const ovData of ovSegs) {
+        addOverlaySegment();
+        const segs = document.querySelectorAll('#overlaySegmentsList .img-segment');
+        const seg = segs[segs.length - 1];
+        const startInput = seg.querySelector('.seg-start');
+        const endInput = seg.querySelector('.seg-end');
+        if (startInput && ovData.start_sec !== undefined && ovData.start_sec !== null) startInput.value = ovData.start_sec;
+        if (endInput && ovData.end_sec !== undefined && ovData.end_sec !== null) endInput.value = ovData.end_sec;
+
+        // Posição
+        if (ovData.position) {
+            seg.querySelectorAll('.overlay-pos-grid button').forEach(b => {
+                b.classList.toggle('active', b.dataset.pos === ovData.position);
+            });
+        }
+        // Scale
+        const scaleRange = seg.querySelector('.overlay-scale-range');
+        if (scaleRange && ovData.scale !== undefined) {
+            scaleRange.value = ovData.scale;
+            const scaleDisplay = scaleRange.nextElementSibling;
+            if (scaleDisplay) scaleDisplay.textContent = ovData.scale + '%';
+        }
+        // Controle fino em px
+        if (ovData.px_width !== undefined && ovData.px_width !== null) {
+            const pxW = seg.querySelector('.overlay-px-w');
+            if (pxW) pxW.value = ovData.px_width;
+        }
+        if (ovData.px_height !== undefined && ovData.px_height !== null) {
+            const pxH = seg.querySelector('.overlay-px-h');
+            if (pxH) pxH.value = ovData.px_height;
+        }
+        if (ovData.px_x !== undefined && ovData.px_x !== null) {
+            const pxX = seg.querySelector('.overlay-px-x');
+            if (pxX) pxX.value = ovData.px_x;
+        }
+        if (ovData.px_y !== undefined && ovData.px_y !== null) {
+            const pxY = seg.querySelector('.overlay-px-y');
+            if (pxY) pxY.value = ovData.px_y;
+        }
+    }
+
+    // 6. Recriar textos sobrepostos
+    const textOverlays = td.text_overlays || [];
+    for (const txt of textOverlays) {
+        addTextOverlay();
+        const items = document.querySelectorAll('#textOverlaysList .text-overlay-item');
+        const item = items[items.length - 1];
+        const content = item.querySelector('.text-content');
+        if (content && txt.text) content.value = txt.text;
+
+        // Fonte: buscar a key pelo path do font file
+        const fontSelect = item.querySelector('.text-font');
+        if (fontSelect && txt.font) {
+            // Procurar no FONT_FAMILY_MAP qual key tem esse file
+            for (const [key, family] of Object.entries(FONT_FAMILY_MAP)) {
+                if (Object.values(family).includes(txt.font)) {
+                    fontSelect.value = key;
+                    break;
+                }
+            }
+        }
+
+        const sizeInput = item.querySelector('.text-size');
+        if (sizeInput && txt.size) sizeInput.value = txt.size;
+
+        const colorInput = item.querySelector('.text-color');
+        const colorLabel = item.querySelector('.text-color-label');
+        if (colorInput && txt.color) {
+            colorInput.value = txt.color;
+            if (colorLabel) {
+                colorLabel.textContent = txt.color.toUpperCase();
+                colorLabel.style.color = txt.color;
+            }
+        }
+
+        const startInput = item.querySelector('.seg-start');
+        const endInput = item.querySelector('.seg-end');
+        if (startInput && txt.start_sec !== undefined && txt.start_sec !== null) startInput.value = txt.start_sec;
+        if (endInput && txt.end_sec !== undefined && txt.end_sec !== null) endInput.value = txt.end_sec;
+
+        // Posição
+        if (txt.position) {
+            item.querySelectorAll('.text-pos-grid button').forEach(b => {
+                b.classList.toggle('active', b.dataset.pos === txt.position);
+            });
+        }
+
+        // Px fino
+        if (txt.px_x !== undefined && txt.px_x !== null) {
+            const pxX = item.querySelector('.text-px-x');
+            if (pxX) pxX.value = txt.px_x;
+        }
+        if (txt.px_y !== undefined && txt.px_y !== null) {
+            const pxY = item.querySelector('.text-px-y');
+            if (pxY) pxY.value = txt.px_y;
+        }
+    }
+
+    // 7. Animações (selecionar na galeria)
+    const animations = td.animations || [];
+    state.selectedAnimations = [];
+    document.querySelectorAll('#animationsCtrlList .effect-ctrl-item').forEach(el => el.remove());
+    for (const anim of animations) {
+        // Selecionar na galeria
+        const galleryItem = document.querySelector(`#animationsGallery .gallery-item[data-name="${anim.name}"]`);
+        if (galleryItem && !galleryItem.classList.contains('selected')) {
+            galleryItem.click();
+        }
+        // Aplicar settings ao painel de controle
+        const ctrlItem = document.querySelector(`#animationsCtrlList .effect-ctrl-item[data-effect-name="${anim.name}"]`);
+        if (ctrlItem) {
+            const fullCheck = ctrlItem.querySelector('.effect-full-video');
+            if (fullCheck && anim.full_video !== undefined) fullCheck.checked = anim.full_video;
+            const startInput = ctrlItem.querySelector('.effect-start');
+            const endInput = ctrlItem.querySelector('.effect-end');
+            if (startInput && anim.start_sec !== undefined && anim.start_sec !== null) startInput.value = anim.start_sec;
+            if (endInput && anim.end_sec !== undefined && anim.end_sec !== null) endInput.value = anim.end_sec;
+            const intensityRange = ctrlItem.querySelector('.effect-intensity');
+            if (intensityRange && anim.intensity !== undefined) {
+                intensityRange.value = anim.intensity;
+                const display = intensityRange.nextElementSibling;
+                if (display) display.textContent = anim.intensity + '%';
+            }
+        }
+    }
+
+    // 8. Elementos (selecionar na galeria)
+    const elements = td.elements || [];
+    state.selectedElements = [];
+    document.querySelectorAll('#elementsCtrlList .effect-ctrl-item').forEach(el => el.remove());
+    for (const elem of elements) {
+        const galleryItem = document.querySelector(`#elementsGallery .gallery-item[data-name="${elem.name}"]`);
+        if (galleryItem && !galleryItem.classList.contains('selected')) {
+            galleryItem.click();
+        }
+        const ctrlItem = document.querySelector(`#elementsCtrlList .effect-ctrl-item[data-effect-name="${elem.name}"]`);
+        if (ctrlItem) {
+            const fullCheck = ctrlItem.querySelector('.effect-full-video');
+            if (fullCheck && elem.full_video !== undefined) fullCheck.checked = elem.full_video;
+            const startInput = ctrlItem.querySelector('.effect-start');
+            const endInput = ctrlItem.querySelector('.effect-end');
+            if (startInput && elem.start_sec !== undefined && elem.start_sec !== null) startInput.value = elem.start_sec;
+            if (endInput && elem.end_sec !== undefined && elem.end_sec !== null) endInput.value = elem.end_sec;
+        }
+    }
+
+    // 9. Animações customizadas (slots vazios)
+    const customAnims = td.custom_anims || [];
+    for (const ca of customAnims) {
+        addCustomAnim();
+        const items = document.querySelectorAll('#customAnimsList .custom-anim-item');
+        const item = items[items.length - 1];
+        const startInput = item.querySelector('.seg-start');
+        const endInput = item.querySelector('.seg-end');
+        if (startInput && ca.start_sec !== undefined && ca.start_sec !== null) startInput.value = ca.start_sec;
+        if (endInput && ca.end_sec !== undefined && ca.end_sec !== null) endInput.value = ca.end_sec;
+
+        if (ca.position) {
+            item.querySelectorAll('.custom-anim-pos-grid button').forEach(b => {
+                b.classList.toggle('active', b.dataset.pos === ca.position);
+            });
+        }
+        const scaleRange = item.querySelector('.custom-anim-scale');
+        if (scaleRange && ca.scale !== undefined) {
+            scaleRange.value = ca.scale;
+            const scaleDisplay = scaleRange.nextElementSibling;
+            if (scaleDisplay) scaleDisplay.textContent = ca.scale + '%';
+        }
+        const loopCheck = item.querySelector('.custom-anim-loop');
+        if (loopCheck && ca.loop !== undefined) loopCheck.checked = ca.loop;
+    }
+
+    // 10. Áudios secundários (slots vazios)
+    const secAudios = td.sec_audios || [];
+    for (const sa of secAudios) {
+        addSecAudio();
+        const items = document.querySelectorAll('#secAudioList .sec-audio-item');
+        const item = items[items.length - 1];
+        const volRange = item.querySelector('.sec-audio-vol');
+        const volDisplay = item.querySelector('.sec-audio-vol-display');
+        if (volRange && sa.volume !== undefined) {
+            volRange.value = sa.volume;
+            if (volDisplay) volDisplay.textContent = sa.volume + '%';
+        }
+        const startInput = item.querySelector('.seg-start');
+        const endInput = item.querySelector('.seg-end');
+        if (startInput && sa.start_sec !== undefined && sa.start_sec !== null) startInput.value = sa.start_sec;
+        if (endInput && sa.end_sec !== undefined && sa.end_sec !== null) endInput.value = sa.end_sec;
+        const loopCheck = item.querySelector('.sec-audio-loop');
+        if (loopCheck && sa.loop !== undefined) loopCheck.checked = sa.loop;
+    }
+
+    // 11. Camadas
+    if (td.layers && td.layers.length) {
+        state.layers = td.layers;
+        renderLayers();
+    } else {
+        updateLayers();
+    }
+
+    refreshTimelineUI();
+    refreshPreviewNow();
+}
+
+/**
+ * Limpa todos os itens do editor (para poder recriar do template).
+ */
+function _clearAllSections() {
+    // Áudios
+    document.querySelectorAll('#audioItemsList .audio-item').forEach(item => {
+        if (item._omniEventSource) { item._omniEventSource.close(); item._omniEventSource = null; }
+        const audioEl = item.querySelector('.audio-preview-el');
+        if (audioEl && audioEl.src && audioEl.src.startsWith('blob:')) URL.revokeObjectURL(audioEl.src);
+        item.remove();
+    });
+    audioItemCounter = 0;
+
+    // Backgrounds
+    document.querySelectorAll('#bgSegmentsList .img-segment').forEach(s => s.remove());
+    bgSegmentCounter = 0;
+
+    // Overlays
+    document.querySelectorAll('#overlaySegmentsList .img-segment').forEach(s => s.remove());
+    overlaySegmentCounter = 0;
+
+    // Textos
+    document.querySelectorAll('#textOverlaysList .text-overlay-item').forEach(s => s.remove());
+    textOverlayCounter = 0;
+
+    // Animações customizadas
+    document.querySelectorAll('#customAnimsList .custom-anim-item').forEach(s => s.remove());
+    customAnimCounter = 0;
+
+    // Áudios secundários
+    document.querySelectorAll('#secAudioList .sec-audio-item').forEach(s => s.remove());
+    secAudioCounter = 0;
+
+    // Animações e elementos da galeria
+    state.selectedAnimations = [];
+    state.selectedElements = [];
+    document.querySelectorAll('#animationsGallery .gallery-item.selected').forEach(g => g.classList.remove('selected'));
+    document.querySelectorAll('#elementsGallery .gallery-item.selected').forEach(g => g.classList.remove('selected'));
+    document.querySelectorAll('#animationsCtrlList .effect-ctrl-item').forEach(el => el.remove());
+    document.querySelectorAll('#elementsCtrlList .effect-ctrl-item').forEach(el => el.remove());
+}
+
+// ══════════════════════════════════════════
 // Init
 // ══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
@@ -2027,4 +2554,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     updateLayers();
     refreshTimelineUI();
+
+    // Fechar modais com Escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeSaveTemplateModal();
+            closeLoadTemplateModal();
+        }
+    });
 });

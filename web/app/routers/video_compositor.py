@@ -24,6 +24,7 @@ from app.config import BASE_DIR, TEMPLATES_DIR
 from app.drive import get_drive
 from app.publisher import publish_job
 from app.repositories import jobs as jobs_repo
+from app.repositories import compositor_templates as templates_repo
 from app.video_types import get_video_type
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,104 @@ async def compositor_detail(request: Request, job_id: str):
             "user": user,
         },
     )
+
+# ── Templates API ──
+
+@router.get("/api/templates")
+async def list_templates(request: Request):
+    """Lista todos os templates do usuário."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+    user_templates = templates_repo.get_user_templates(user["id"])
+    return JSONResponse({"templates": user_templates})
+
+
+@router.get("/api/templates/{template_id}")
+async def get_template(request: Request, template_id: str):
+    """Busca um template específico."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+    template = templates_repo.get_template(template_id)
+    if not template:
+        return JSONResponse({"error": "Template não encontrado"}, status_code=404)
+    if template["user_id"] != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
+    return JSONResponse({"template": template})
+
+
+@router.post("/api/templates")
+async def create_template(request: Request):
+    """Cria um novo template."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
+    import json as _json
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"error": "Informe o nome do template."}, status_code=400)
+
+    description = (body.get("description") or "").strip()
+    template_data = body.get("template_data", {})
+
+    template = templates_repo.create_template(
+        user_id=user["id"],
+        name=name,
+        description=description,
+        template_data=template_data,
+    )
+    return JSONResponse({"template": template}, status_code=201)
+
+
+@router.put("/api/templates/{template_id}")
+async def update_template(request: Request, template_id: str):
+    """Atualiza um template existente."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
+    existing = templates_repo.get_template(template_id)
+    if not existing:
+        return JSONResponse({"error": "Template não encontrado"}, status_code=404)
+    if existing["user_id"] != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
+
+    body = await request.json()
+    name = body.get("name")
+    description = body.get("description")
+    template_data = body.get("template_data")
+
+    ok = templates_repo.update_template(
+        template_id=template_id,
+        name=name,
+        description=description,
+        template_data=template_data,
+    )
+    if not ok:
+        return JSONResponse({"error": "Falha ao atualizar"}, status_code=500)
+    return JSONResponse({"ok": True})
+
+
+@router.delete("/api/templates/{template_id}")
+async def delete_template(request: Request, template_id: str):
+    """Deleta (soft) um template."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
+    existing = templates_repo.get_template(template_id)
+    if not existing:
+        return JSONResponse({"error": "Template não encontrado"}, status_code=404)
+    if existing["user_id"] != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
+
+    ok = templates_repo.soft_delete_template(template_id)
+    if not ok:
+        return JSONResponse({"error": "Falha ao deletar"}, status_code=500)
+    return JSONResponse({"ok": True})
 
 
 # ── Submit ──

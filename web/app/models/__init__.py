@@ -11,6 +11,7 @@ from .permission import Permission
 from .voice_plan import VoicePlan
 from .user_voice import UserVoice
 from .audio_preset import AudioPreset
+from .compositor_template import CompositorTemplate
 
 __all__ = [
     "Job",
@@ -25,4 +26,5 @@ __all__ = [
     "VoicePlan",
     "UserVoice",
     "AudioPreset",
+    "CompositorTemplate",
 ]

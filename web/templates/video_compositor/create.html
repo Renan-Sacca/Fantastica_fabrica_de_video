@@ -378,6 +378,73 @@
     .vb-queue-item .qi-link:hover { text-decoration: underline; }
 
     @media (max-width: 900px) { .vc-grid { grid-template-columns: 1fr; } .omni-params-grid { grid-template-columns: 1fr; } }
+
+    /* ── Template Modals ── */
+    .tpl-modal-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,.65); backdrop-filter: blur(6px);
+        z-index: 9999; display: none; align-items: center; justify-content: center;
+        animation: tplFadeIn .2s ease;
+    }
+    .tpl-modal-overlay.open { display: flex; }
+    @keyframes tplFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .tpl-modal {
+        background: #1a1a2e; border: 1px solid rgba(255,255,255,.1);
+        border-radius: 18px; padding: 28px; width: 95%; max-width: 520px;
+        max-height: 80vh; overflow-y: auto; position: relative;
+        box-shadow: 0 20px 60px rgba(0,0,0,.5), 0 0 40px rgba(224,64,251,.08);
+        animation: tplSlideIn .25s ease;
+    }
+    @keyframes tplSlideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    .tpl-modal-close {
+        position: absolute; top: 14px; right: 16px; background: none; border: none;
+        color: rgba(255,255,255,.5); font-size: 1.4rem; cursor: pointer; padding: 4px;
+        border-radius: 8px; transition: all .2s;
+    }
+    .tpl-modal-close:hover { color: #fff; background: rgba(255,255,255,.1); }
+
+    .tpl-modal h3 {
+        font-size: 1.15rem; font-weight: 700; margin-bottom: 16px;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .tpl-modal label { display: block; font-size: .82rem; font-weight: 500; margin: 10px 0 4px; color: var(--text-secondary); }
+    .tpl-modal input[type=text], .tpl-modal textarea {
+        width: 100%; background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.12);
+        border-radius: 10px; color: inherit; padding: 10px 14px; font-family: inherit;
+        font-size: .92rem; box-sizing: border-box; transition: border-color .2s;
+    }
+    .tpl-modal input[type=text]:focus, .tpl-modal textarea:focus {
+        border-color: #e040fb; outline: none;
+    }
+    .tpl-modal textarea { min-height: 60px; resize: vertical; }
+    .tpl-modal-actions { display: flex; gap: 10px; margin-top: 18px; justify-content: flex-end; }
+
+    /* Template list items */
+    .tpl-item {
+        border: 1px solid rgba(255,255,255,.08); border-radius: 12px;
+        padding: 14px 16px; margin-bottom: 10px; background: rgba(255,255,255,.03);
+        transition: all .25s;
+    }
+    .tpl-item:hover { border-color: rgba(224,64,251,.25); background: rgba(224,64,251,.04); }
+    .tpl-item-header { display: flex; align-items: center; gap: 12px; }
+    .tpl-item-info { flex: 1; min-width: 0; }
+    .tpl-item-name { font-size: .95rem; font-weight: 700; color: #fff; margin-bottom: 3px; }
+    .tpl-item-desc { font-size: .78rem; color: var(--text-secondary); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tpl-item-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+    .tpl-item-badges span {
+        font-size: .65rem; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+        background: rgba(124,77,255,.12); color: #a78bfa; border: 1px solid rgba(124,77,255,.25);
+    }
+    .tpl-item-date { font-size: .68rem; color: var(--text-muted); }
+    .tpl-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+    /* Template button styles */
+    .vc-btn-tpl {
+        background: rgba(124,77,255,.12); border: 1px solid rgba(124,77,255,.3);
+        color: #a78bfa; transition: all .2s;
+    }
+    .vc-btn-tpl:hover { background: rgba(124,77,255,.2); border-color: rgba(124,77,255,.5); transform: translateY(-1px); }
 </style>
 {% endblock %}
 
@@ -388,6 +455,8 @@
         <h1>🎨 Vídeo Compositor</h1>
         <span class="vc-badge">NOVO</span>
         <div class="vc-head-actions">
+            <button type="button" class="vc-btn vc-btn-tpl" style="margin-top:0;" onclick="openLoadTemplateModal()">📂 Carregar Template</button>
+            <button type="button" class="vc-btn vc-btn-tpl" style="margin-top:0;" onclick="openSaveTemplateModal()">💾 Salvar Template</button>
             <a href="/video-compositor/jobs" class="vc-btn vc-btn-ghost" style="margin-top:0;">📋 Meus Vídeos</a>
         </div>
     </div>
@@ -556,6 +625,33 @@
             </div>
         </div><!-- /vc-grid -->
     </form>
+
+    <!-- ═══ Modal: Salvar Template ═══ -->
+    <div class="tpl-modal-overlay" id="templateSaveModal" onclick="if(event.target===this)closeSaveTemplateModal()">
+        <div class="tpl-modal">
+            <button type="button" class="tpl-modal-close" onclick="closeSaveTemplateModal()">✕</button>
+            <h3>💾 Salvar Template</h3>
+            <p style="font-size:.82rem; opacity:.6; margin-bottom:12px;">Salve a estrutura atual (posições, textos, animações, resolução) para reutilizar em outros vídeos. Os arquivos (imagens/áudios) não são salvos.</p>
+            <label for="tplSaveName">Nome do Template *</label>
+            <input type="text" id="tplSaveName" placeholder="Ex: Vídeo produto vertical com logo">
+            <label for="tplSaveDesc">Descrição (opcional)</label>
+            <textarea id="tplSaveDesc" placeholder="Descreva a estrutura para lembrar depois..."></textarea>
+            <div class="tpl-modal-actions">
+                <button type="button" class="vc-btn vc-btn-ghost" onclick="closeSaveTemplateModal()">Cancelar</button>
+                <button type="button" class="vc-btn vc-btn-primary" id="tplSaveBtn" onclick="confirmSaveTemplate()">💾 Salvar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Modal: Carregar Template ═══ -->
+    <div class="tpl-modal-overlay" id="templateLoadModal" onclick="if(event.target===this)closeLoadTemplateModal()">
+        <div class="tpl-modal" style="max-width:600px;">
+            <button type="button" class="tpl-modal-close" onclick="closeLoadTemplateModal()">✕</button>
+            <h3>📂 Carregar Template</h3>
+            <p style="font-size:.82rem; opacity:.6; margin-bottom:12px;">Selecione um template para aplicar a estrutura. Os elementos atuais serão substituídos.</p>
+            <div id="tplLoadList"></div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
