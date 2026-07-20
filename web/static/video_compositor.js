@@ -24,6 +24,12 @@ const state = {
     omniVoices: [],
     omniPresets: [],
     totalDuration: 0,
+    // Scene mode
+    scenes: [],
+    useEventTimeline: false,
+    sceneResourceDurations: {},
+    resolvedTimeline: null,
+    totalDurationScenes: 0,
 };
 
 let audioItemCounter = 0;
@@ -638,6 +644,22 @@ function computeTotalDuration() {
 }
 
 function getBgSegmentsData() {
+    if (state.useEventTimeline) {
+        if (!state.resolvedTimeline) return [];
+        return Array.from(document.querySelectorAll('#scenesList .scene-element')).filter(el => {
+            const sceneId = el.closest('.scene-card').dataset.sceneId;
+            const scene = state.scenes.find(s => s.scene_id === sceneId);
+            const elConfig = scene?.elements.find(e => e.id === el.dataset.elementId);
+            return elConfig && elConfig.type === 'background';
+        }).map(seg => {
+            const id = seg.dataset.elementId;
+            const times = state.resolvedTimeline.resolved.get(id);
+            const start = times ? times.start : 0;
+            const end = times ? times.end : null;
+            return { seg, start, end };
+        });
+    }
+
     return Array.from(document.querySelectorAll('#bgSegmentsList .img-segment')).map(seg => {
         const startInput = seg.querySelector('.seg-start');
         const endInput = seg.querySelector('.seg-end');
@@ -649,6 +671,22 @@ function getBgSegmentsData() {
 }
 
 function getOverlaySegmentsData() {
+    if (state.useEventTimeline) {
+        if (!state.resolvedTimeline) return [];
+        return Array.from(document.querySelectorAll('#scenesList .scene-element')).filter(el => {
+            const sceneId = el.closest('.scene-card').dataset.sceneId;
+            const scene = state.scenes.find(s => s.scene_id === sceneId);
+            const elConfig = scene?.elements.find(e => e.id === el.dataset.elementId);
+            return elConfig && (elConfig.type === 'overlay' || elConfig.type === 'custom_anim');
+        }).map(seg => {
+            const id = seg.dataset.elementId;
+            const times = state.resolvedTimeline.resolved.get(id);
+            const start = times ? times.start : 0;
+            const end = times ? times.end : null;
+            return { seg, start, end };
+        });
+    }
+
     return Array.from(document.querySelectorAll('#overlaySegmentsList .img-segment')).map(seg => {
         const startInput = seg.querySelector('.seg-start');
         const endInput = seg.querySelector('.seg-end');
@@ -803,7 +841,7 @@ function refreshPreviewNow() {
         })
         .filter(Boolean);
 
-    updatePreview(bgUrl, activeOverlays, activeTextList);
+    updatePreview(bgUrl, activeOverlays, activeTextList, t);
     updateTimelineStatusLabel(activeBg, activeOvList);
 }
 
@@ -873,6 +911,42 @@ function getResolvedFont(familyKey, isBold, isItalic) {
 }
 
 function getTextOverlaysData() {
+    if (state.useEventTimeline) {
+        if (!state.resolvedTimeline) return [];
+        const list = [];
+        document.querySelectorAll('#scenesList .scene-element').forEach(item => {
+            const sceneId = item.closest('.scene-card').dataset.sceneId;
+            const scene = state.scenes.find(s => s.scene_id === sceneId);
+            const elConfig = scene?.elements.find(e => e.id === item.dataset.elementId);
+            if (!elConfig || elConfig.type !== 'text') return;
+
+            const id = elConfig.id;
+            const times = state.resolvedTimeline.resolved.get(id);
+            const start = times ? times.start : 0;
+            const end = times ? times.end : null;
+
+            const props = elConfig.properties || {};
+            const fontResolved = getResolvedFont(props.font || 'sans', props.bold || false, props.italic || false);
+
+            list.push({
+                text: props.text || '',
+                font: fontResolved.file,
+                fontFamily: fontResolved.family,
+                fontStyle: fontResolved.style,
+                fontWeight: fontResolved.weight,
+                size: props.size || 48,
+                color: props.color || '#ffffff',
+                start,
+                end,
+                position: props.position || 'centro',
+                px_x: null,
+                px_y: null,
+                seg: item
+            });
+        });
+        return list;
+    }
+
     const list = [];
     document.querySelectorAll('#textOverlaysList .text-overlay-item').forEach(item => {
         const text = item.querySelector('.text-content')?.value || '';
@@ -913,7 +987,7 @@ function getTextOverlaysData() {
     return list;
 }
 
-function updatePreview(bgUrl, activeOverlays, activeTexts) {
+function updatePreview(bgUrl, activeOverlays, activeTexts, t) {
     const bgEl = document.getElementById('previewBg');
     const overlaysContainer = document.getElementById('previewOverlaysContainer');
     const textsContainer = document.getElementById('previewTextsContainer');
@@ -976,9 +1050,9 @@ function updatePreview(bgUrl, activeOverlays, activeTexts) {
             div.style.fontSize = `${scaledSize}px`;
             div.style.color = txt.color;
 
-            div.style.fontFamily = txt.fontFamily;
-            div.style.fontStyle = txt.fontStyle;
-            div.style.fontWeight = txt.fontWeight;
+            div.style.fontFamily = txt.fontFamily || 'Arial, "Liberation Sans", sans-serif';
+            div.style.fontStyle = txt.fontStyle || 'normal';
+            div.style.fontWeight = txt.fontWeight || 'bold';
 
             if (txt.px_x !== null || txt.px_y !== null) {
                 applyFinePositionToEl(div, null, null, txt.px_x, txt.px_y);
@@ -996,9 +1070,32 @@ function updatePreview(bgUrl, activeOverlays, activeTexts) {
     }
 
     // Animações badges
-    const animBadges = state.selectedAnimations.map(a => `<span>${getAnimName(a.name || a)}</span>`).join('');
-    const customAnimBadges = document.querySelectorAll('#customAnimsList .custom-anim-item').length;
-    const customBadge = customAnimBadges > 0 ? `<span>🎞️ ${customAnimBadges} custom</span>` : '';
+    let animBadges = '';
+    let customAnimBadgesCount = 0;
+
+    if (state.useEventTimeline) {
+        if (state.resolvedTimeline) {
+            const activeAnims = [];
+            state.scenes.forEach(scene => {
+                scene.elements.forEach(el => {
+                    const times = state.resolvedTimeline.resolved.get(el.id);
+                    if (times && times.start <= t && (times.end === null || t < times.end)) {
+                        if (el.type === 'animation') {
+                            activeAnims.push(el.properties?.name || el.label);
+                        } else if (el.type === 'custom_anim') {
+                            customAnimBadgesCount++;
+                        }
+                    }
+                });
+            });
+            animBadges = activeAnims.map(name => `<span>${getAnimName(name)}</span>`).join('');
+        }
+    } else {
+        animBadges = state.selectedAnimations.map(a => `<span>${getAnimName(a.name || a)}</span>`).join('');
+        customAnimBadgesCount = document.querySelectorAll('#customAnimsList .custom-anim-item').length;
+    }
+
+    const customBadge = customAnimBadgesCount > 0 ? `<span>🎞️ ${customAnimBadgesCount} custom</span>` : '';
     document.getElementById('previewAnimBadges').innerHTML = animBadges + customBadge;
 }
 
@@ -1556,6 +1653,13 @@ async function submitCompositor() {
     const title = document.getElementById('title').value.trim();
     if (!title) { showToast('Informe o título do vídeo.', 'error'); return; }
 
+    // ── Modo Cenas: montar submit a partir das cenas resolvidas ──
+    if (state.useEventTimeline && state.scenes && state.scenes.length > 0) {
+        await submitCompositorSceneMode(btn, title);
+        return;
+    }
+
+    // ── Modo Clássico (abaixo) ──
     const audioItems = document.querySelectorAll('#audioItemsList .audio-item');
     if (audioItems.length === 0) { showToast('Adicione ao menos um áudio principal.', 'error'); return; }
 
@@ -1795,6 +1899,16 @@ function setupAudioPreviewFromFile(panel, file) {
             const min = Math.floor(dur / 60);
             const sec = Math.floor(dur % 60);
             durationEl.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
+
+            // Suporte Modo Cenas
+            if (state.useEventTimeline) {
+                const sceneEl = panel.closest('.scene-element');
+                if (sceneEl && sceneEl.dataset.elementId) {
+                    if (!state.sceneResourceDurations) state.sceneResourceDurations = {};
+                    state.sceneResourceDurations[sceneEl.dataset.elementId] = dur;
+                    resolveAndRefreshTimeline();
+                }
+            }
         }
         refreshTimelineUI();
     }, { once: true });
@@ -1817,6 +1931,16 @@ function setupAudioPreviewFromUrl(panel, url) {
             const min = Math.floor(dur / 60);
             const sec = Math.floor(dur % 60);
             durationEl.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
+
+            // Suporte Modo Cenas
+            if (state.useEventTimeline) {
+                const sceneEl = panel.closest('.scene-element');
+                if (sceneEl && sceneEl.dataset.elementId) {
+                    if (!state.sceneResourceDurations) state.sceneResourceDurations = {};
+                    state.sceneResourceDurations[sceneEl.dataset.elementId] = dur;
+                    resolveAndRefreshTimeline();
+                }
+            }
         }
         refreshTimelineUI();
     }, { once: true });
@@ -2074,7 +2198,7 @@ async function confirmSaveTemplate() {
     const name = document.getElementById('tplSaveName').value.trim();
     if (!name) { showToast('Informe o nome do template.', 'error'); return; }
     const description = document.getElementById('tplSaveDesc').value.trim();
-    const templateData = collectTemplateData();
+    const templateData = collectTemplateDataWithScenes();
 
     const btn = document.getElementById('tplSaveBtn');
     btn.disabled = true;
@@ -2172,7 +2296,7 @@ async function loadTemplate(templateId) {
         const td = data.template?.template_data;
         if (!td) throw new Error('Template sem dados');
 
-        applyTemplateData(td);
+        applyTemplateDataWithScenes(td);
         closeLoadTemplateModal();
         showToast(`Template "${data.template.name}" carregado!`, 'success');
     } catch (e) {
@@ -2527,8 +2651,1584 @@ function _clearAllSections() {
 }
 
 // ══════════════════════════════════════════
+// Submit: Scene Mode
+// ══════════════════════════════════════════
+
+/**
+ * Submit em modo cenas — resolve a timeline e envia tempos absolutos ao backend.
+ */
+async function submitCompositorSceneMode(btn, title) {
+    // Validar que existem cenas com pelo menos 1 elemento
+    const totalElements = state.scenes.reduce((sum, s) => sum + s.elements.length, 0);
+    if (totalElements === 0) {
+        showToast('Adicione pelo menos um elemento a uma cena.', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Resolvendo timeline...';
+
+    // Resolver timeline
+    resolveAndRefreshTimeline();
+    const scenesData = collectScenesForSubmit();
+    if (!scenesData) {
+        showToast('Erro ao resolver a timeline.', 'error');
+        btn.disabled = false;
+        btn.textContent = '🚀 Gerar Vídeo';
+        return;
+    }
+
+    btn.textContent = '⏳ Enviando...';
+
+    const formData = new FormData();
+    formData.set('title', title);
+    formData.set('resolution', state.resolution);
+
+    // Metadados JSON resolvidos
+    formData.set('audio_items_json', JSON.stringify(scenesData.audioItems));
+    formData.set('bg_segments_json', JSON.stringify(scenesData.bgSegments));
+    formData.set('overlay_segments_json', JSON.stringify(scenesData.overlaySegments));
+    formData.set('animations_json', JSON.stringify([]));
+    formData.set('elements_json', JSON.stringify([]));
+    formData.set('custom_anims_json', JSON.stringify(scenesData.customAnims || []));
+    formData.set('text_overlays_json', JSON.stringify(scenesData.textOverlays));
+    formData.set('sec_audios_json', JSON.stringify(scenesData.secAudios));
+    formData.set('layers_json', JSON.stringify(state.layers || []));
+
+    // Coletar arquivos dos elementos de cena
+    let audioFileIdx = 0;
+    let bgFileIdx = 0;
+    let ovFileIdx = 0;
+    let saFileIdx = 0;
+    let caFileIdx = 0;
+
+    for (const scene of state.scenes) {
+        for (const el of scene.elements) {
+            const fileInput = document.querySelector(`.scene-element-file[data-element-id="${el.id}"]`);
+
+            if (el.type === 'background') {
+                if (fileInput && fileInput.files[0]) {
+                    formData.append(`bg_image_${bgFileIdx}`, fileInput.files[0]);
+                }
+                bgFileIdx++;
+            } else if (el.type === 'audio') {
+                const elementDiv = document.querySelector(`.scene-element[data-element-id="${el.id}"]`);
+                const activePanel = elementDiv?.querySelector('.audio-panel.active');
+                const panelType = activePanel ? activePanel.dataset.panelType : 'upload';
+
+                if (panelType === 'upload') {
+                    if (fileInput && fileInput.files[0]) {
+                        formData.append(`audio_file_${audioFileIdx}`, fileInput.files[0]);
+                    }
+                } else if (panelType === 'omni') {
+                    if (elementDiv && elementDiv._omniGenerated && elementDiv._omniGenerated.blob) {
+                        formData.append(`audio_file_${audioFileIdx}`, elementDiv._omniGenerated.blob, `omni_audio_${audioFileIdx}.wav`);
+                    }
+                }
+                audioFileIdx++;
+            } else if (el.type === 'overlay') {
+                if (fileInput && fileInput.files[0]) {
+                    formData.append(`overlay_image_${ovFileIdx}`, fileInput.files[0]);
+                }
+                ovFileIdx++;
+            } else if (el.type === 'secondary_audio') {
+                if (fileInput && fileInput.files[0]) {
+                    formData.append(`sec_audio_file_${saFileIdx}`, fileInput.files[0]);
+                }
+                saFileIdx++;
+            } else if (el.type === 'custom_anim') {
+                if (fileInput && fileInput.files[0]) {
+                    formData.append(`custom_anim_${caFileIdx}`, fileInput.files[0]);
+                }
+                caFileIdx++;
+            }
+        }
+    }
+
+    try {
+        const response = await fetch('/video-compositor/render', { method: 'POST', body: formData });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Erro ao enviar');
+        
+        showToast(`Vídeo "${title}" enviado com sucesso!`, 'success');
+        addToQueue(data.job_id, title);
+        
+        document.getElementById('title').value = '';
+        btn.disabled = false;
+        btn.textContent = '🚀 Gerar Vídeo';
+    } catch (err) {
+        showToast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '🚀 Gerar Vídeo';
+    }
+}
+
+// ══════════════════════════════════════════
+// Modo Cenas — Timeline Dinâmica por Eventos
+// ══════════════════════════════════════════
+
+let sceneCounter = 0;
+
+// ══════════════════════════════════════════
+// Gerenciamento de Presets Customizados de Cena
+// ══════════════════════════════════════════
+
+/**
+ * Renderiza o painel de presets de cenas (padrões + customizados).
+ */
+function renderPresetSelector() {
+    const container = document.getElementById('presetSelector');
+    if (!container) return;
+
+    // Presets padrão
+    const defaultPresets = [
+        { key: 'quiz_question', name: 'Pergunta Quiz', icon: '❓', desc: 'Fundo + narração + timer + resposta' },
+        { key: 'intro', name: 'Intro / Abertura', icon: '🎬', desc: 'Fundo + logo + narração + SFX' },
+        { key: 'answer_reveal', name: 'Revelação', icon: '🎯', desc: 'Resposta + destaque + narração' },
+        { key: 'simple', name: 'Simples', icon: '📄', desc: 'Fundo + narração' },
+        { key: 'empty', name: 'Vazia', icon: '🆕', desc: 'Monte do zero' },
+    ];
+
+    // Presets do usuário
+    const customPresets = JSON.parse(localStorage.getItem('custom_scene_presets') || '{}');
+
+    let html = defaultPresets.map(p => `
+        <div class="preset-card" onclick="addSceneFromPreset('${p.key}')">
+            <span class="pc-icon">${p.icon}</span>
+            <div class="pc-name">${p.name}</div>
+            <div class="pc-desc">${p.desc}</div>
+        </div>
+    `).join('');
+
+    // Adicionar presets salvos
+    for (const [key, p] of Object.entries(customPresets)) {
+        html += `
+            <div class="preset-card" style="border-color: rgba(124,77,255,.3); position:relative;" onclick="addSceneFromPreset('${key}')">
+                <span class="pc-icon">💾</span>
+                <div class="pc-name">${escapeHtml(p.name)}</div>
+                <div class="pc-desc">${escapeHtml(p.description)}</div>
+                <button type="button" class="sc-btn-danger" style="position:absolute; top:4px; right:4px; border:none; background:none; color:#ef4444; font-size:.78rem; cursor:pointer;" onclick="event.stopPropagation(); deleteCustomScenePreset('${key}')" title="Excluir preset">✕</button>
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
+}
+
+/**
+ * Salva a cena atual como preset.
+ */
+function saveSceneAsPreset(sceneId) {
+    const scene = (state.scenes || []).find(s => s.scene_id === sceneId);
+    if (!scene) return;
+
+    const presetName = prompt('Nome do preset da cena:', scene.name.replace(/#\d+/, ''));
+    if (!presetName) return;
+
+    // Limpar IDs e mapear parasuffixes dinâmicos
+    const elementsTemplate = scene.elements.map(el => {
+        const suffix = el.id.split('_').slice(-1)[0] || el.id_suffix;
+        return {
+            id_suffix: suffix,
+            label: el.label,
+            type: el.type,
+            trigger: el.trigger,
+            end_mode: el.end_mode,
+            z_level: el.z_level,
+            properties: JSON.parse(JSON.stringify(el.properties || {})),
+        };
+    });
+
+    const customPresets = JSON.parse(localStorage.getItem('custom_scene_presets') || '{}');
+    const key = `custom_${Date.now()}`;
+    customPresets[key] = {
+        name: `💾 ${presetName}`,
+        description: 'Preset salvo por você',
+        elements: elementsTemplate,
+    };
+
+    localStorage.setItem('custom_scene_presets', JSON.stringify(customPresets));
+    showToast(`Preset "${presetName}" salvo com sucesso!`, 'success');
+
+    renderPresetSelector();
+}
+
+/**
+ * Exclui um preset customizado.
+ */
+function deleteCustomScenePreset(presetKey) {
+    if (!confirm('Excluir este preset de cena permanentemente?')) return;
+    const customPresets = JSON.parse(localStorage.getItem('custom_scene_presets') || '{}');
+    delete customPresets[presetKey];
+    localStorage.setItem('custom_scene_presets', JSON.stringify(customPresets));
+    showToast('Preset excluído!', 'info');
+    renderPresetSelector();
+}
+
+/**
+ * Alterna entre modo Clássico e modo Cenas.
+ */
+function switchEditorMode(btn, mode) {
+    document.querySelectorAll('.mode-chip').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+
+    const classicEl = document.getElementById('classicMode');
+    const scenesEl = document.getElementById('scenesMode');
+
+    if (mode === 'classic') {
+        classicEl.classList.add('active');
+        scenesEl.classList.remove('active');
+        state.useEventTimeline = false;
+    } else {
+        classicEl.classList.remove('active');
+        scenesEl.classList.add('active');
+        state.useEventTimeline = true;
+    }
+}
+
+/**
+ * Adiciona uma cena a partir de um preset.
+ */
+function addSceneFromPreset(presetKey) {
+    sceneCounter++;
+    let sceneConfig;
+    
+    // Verificar se é preset customizado do localStorage
+    const customPresets = JSON.parse(localStorage.getItem('custom_scene_presets') || '{}');
+    if (customPresets[presetKey]) {
+        const preset = customPresets[presetKey];
+        const sceneId = `scene_${sceneCounter}_${Date.now().toString(36)}`;
+        const elements = (preset.elements || []).map((el, i) => ({
+            ...el,
+            id: `${sceneId}_${el.id_suffix || i}`,
+            scene_id: sceneId,
+        }));
+        sceneConfig = {
+            scene_id: sceneId,
+            name: `${preset.name.replace('💾 ', '')} #${sceneCounter}`,
+            description: preset.description,
+            preset_key: presetKey,
+            elements,
+        };
+    } else {
+        sceneConfig = instantiatePreset(presetKey, sceneCounter);
+    }
+
+    if (!state.scenes) state.scenes = [];
+    state.scenes.push(sceneConfig);
+
+    renderScene(sceneConfig, state.scenes.length - 1);
+    resolveAndRefreshTimeline();
+    showToast(`Cena "${sceneConfig.name}" adicionada!`, 'success');
+}
+
+/**
+ * Renderiza um card de cena no DOM.
+ */
+function renderScene(sceneConfig, index) {
+    const container = document.getElementById('scenesList');
+    if (!container) return;
+
+    const card = document.createElement('div');
+    card.className = 'scene-card';
+    card.dataset.sceneId = sceneConfig.scene_id;
+
+    const elemCount = sceneConfig.elements.length;
+
+    card.innerHTML = `
+        <div class="scene-card-header" onclick="toggleSceneCard(this)">
+            <span class="scene-chevron">▼</span>
+            <div class="scene-card-num">${index + 1}</div>
+            <span class="scene-card-name">${escapeHtml(sceneConfig.name)}</span>
+            <span class="scene-card-badge">${elemCount} elemento${elemCount !== 1 ? 's' : ''}</span>
+            <div class="scene-card-actions" onclick="event.stopPropagation()">
+                <button type="button" title="Mover para cima" onclick="moveScene('${sceneConfig.scene_id}', -1)">⬆️</button>
+                <button type="button" title="Mover para baixo" onclick="moveScene('${sceneConfig.scene_id}', 1)">⬇️</button>
+                <button type="button" title="Duplicar cena" onclick="duplicateScene('${sceneConfig.scene_id}')">📋</button>
+                <button type="button" title="Salvar como Preset" onclick="saveSceneAsPreset('${sceneConfig.scene_id}')">💾</button>
+                <button type="button" class="sc-btn-danger" title="Remover cena" onclick="removeScene('${sceneConfig.scene_id}')">🗑️</button>
+            </div>
+        </div>
+        <div class="scene-card-body">
+            <div class="scene-elements-list" data-scene-id="${sceneConfig.scene_id}"></div>
+            <div style="position:relative; display:inline-block;">
+                <button type="button" class="add-element-btn" onclick="toggleAddElementDropdown(this, '${sceneConfig.scene_id}')">
+                    ➕ Adicionar Elemento
+                </button>
+            </div>
+        </div>
+    `;
+
+    container.appendChild(card);
+
+    // Renderizar elementos
+    const elemList = card.querySelector('.scene-elements-list');
+    for (const el of sceneConfig.elements) {
+        renderSceneElement(elemList, el, sceneConfig);
+    }
+}
+
+/**
+ * Renderiza um elemento dentro de uma cena.
+ */
+function renderSceneElement(container, elementConfig, sceneConfig) {
+    const tpl = document.getElementById('tplSceneElement').content.cloneNode(true);
+    const el = tpl.querySelector('.scene-element');
+    el.dataset.elementId = elementConfig.id;
+
+    if (elementConfig.type === 'audio') {
+        el.classList.add('audio-item');
+        el._omniGenerated = null;
+        el._omniEventSource = null;
+    }
+
+    // Icon por tipo
+    const icons = {
+        background: '🖼️', audio: '🎵', overlay: '📸',
+        text: '📝', secondary_audio: '🎶',
+        animation: '✨', custom_anim: '🎞️',
+    };
+    const typeLabels = {
+        background: 'Fundo', audio: 'Áudio', overlay: 'Sobreposta',
+        text: 'Texto', secondary_audio: 'Áudio Sec.',
+        animation: 'Animação', custom_anim: 'GIF/Vídeo',
+    };
+
+    el.querySelector('.scene-element-icon').textContent = icons[elementConfig.type] || '📦';
+    el.querySelector('.scene-element-label').textContent = elementConfig.label || elementConfig.id;
+    const typeBadge = el.querySelector('.scene-element-type');
+    typeBadge.textContent = typeLabels[elementConfig.type] || elementConfig.type;
+    typeBadge.classList.add(elementConfig.type === 'background' ? 'bg' : elementConfig.type);
+
+    // Populate trigger event dropdown
+    const triggerSelect = el.querySelector('.trigger-event');
+    const engine = new TimelineEngine();
+    engine.scenes = state.scenes || [];
+    const availableEvents = engine.getAvailableEvents(sceneConfig.scene_id, elementConfig.id);
+    triggerSelect.innerHTML = availableEvents.map(e =>
+        `<option value="${e.value}"${elementConfig.trigger?.event === e.value ? ' selected' : ''}>${e.label}</option>`
+    ).join('');
+
+    // Offset
+    const offsetInput = el.querySelector('.trigger-offset');
+    offsetInput.value = elementConfig.trigger?.offset || 0;
+
+    // End mode
+    const endModeSelect = el.querySelector('.end-mode-select');
+    const endMode = elementConfig.end_mode;
+    if (typeof endMode === 'string') {
+        endModeSelect.value = endMode;
+    } else if (endMode && endMode.duration !== undefined) {
+        endModeSelect.value = 'duration';
+    } else if (endMode && endMode.event) {
+        endModeSelect.value = 'event';
+    }
+
+    // End mode extra fields
+    _populateEndModeExtra(el, elementConfig, sceneConfig);
+
+    // Z-Level
+    const zInput = el.querySelector('.z-level-input');
+    zInput.value = elementConfig.z_level || 0;
+
+    // Content area (file drops, text inputs etc.)
+    const contentArea = el.querySelector('.scene-element-content');
+    _renderElementContent(contentArea, elementConfig);
+
+    // Event listeners para triggers e modo de fim
+    triggerSelect.addEventListener('change', () => {
+        elementConfig.trigger.event = triggerSelect.value;
+        resolveAndRefreshTimeline();
+    });
+    offsetInput.addEventListener('change', () => {
+        elementConfig.trigger.offset = parseFloat(offsetInput.value) || 0;
+        resolveAndRefreshTimeline();
+    });
+    endModeSelect.addEventListener('change', () => {
+        onEndModeChange(endModeSelect);
+    });
+    zInput.addEventListener('change', () => {
+        elementConfig.z_level = parseInt(zInput.value) || 0;
+        resolveAndRefreshTimeline();
+    });
+
+    // Exportar Eventos
+    const exportCheck = el.querySelector('.export-events-check');
+    if (exportCheck) {
+        exportCheck.checked = elementConfig.export_events || false;
+        exportCheck.addEventListener('change', () => {
+            elementConfig.export_events = exportCheck.checked;
+            resolveAndRefreshTimeline();
+        });
+    }
+
+    container.appendChild(el);
+}
+
+/**
+ * Popula campos extras do end mode (duração fixa, evento de fim).
+ */
+function _populateEndModeExtra(el, elementConfig, sceneConfig) {
+    const extra = el.querySelector('.end-mode-extra');
+    const endMode = elementConfig.end_mode;
+
+    if (typeof endMode === 'object' && endMode.duration !== undefined) {
+        extra.innerHTML = `
+            <label>Duração (s)</label>
+            <input type="number" class="end-duration-input" step="0.1" min="0.1" value="${endMode.duration}" placeholder="5.0">
+        `;
+        const durInput = extra.querySelector('.end-duration-input');
+        durInput.addEventListener('change', () => {
+            elementConfig.end_mode = { duration: parseFloat(durInput.value) || 5 };
+            resolveAndRefreshTimeline();
+        });
+    } else if (typeof endMode === 'object' && endMode.event) {
+        const engine = new TimelineEngine();
+        engine.scenes = state.scenes || [];
+        const events = engine.getAvailableEvents(sceneConfig.scene_id, elementConfig.id);
+        extra.innerHTML = `
+            <label>Evento de Fim</label>
+            <select class="end-event-select">
+                ${events.map(e => `<option value="${e.value}"${endMode.event === e.value ? ' selected' : ''}>${e.label}</option>`).join('')}
+            </select>
+        `;
+        const evtSelect = extra.querySelector('.end-event-select');
+        evtSelect.addEventListener('change', () => {
+            elementConfig.end_mode = { event: evtSelect.value, offset: 0 };
+            resolveAndRefreshTimeline();
+        });
+    } else {
+        extra.innerHTML = '';
+    }
+}
+
+/**
+ * Renderiza o conteúdo específico de um elemento (file drop, textarea etc.)
+ */
+function _renderElementContent(container, elementConfig) {
+    const type = elementConfig.type;
+    if (!elementConfig.properties) elementConfig.properties = {};
+    const props = elementConfig.properties;
+
+    if (type === 'background' || type === 'overlay' || type === 'custom_anim') {
+        let accept = 'image/*';
+        let label = '📁 Imagem de fundo';
+        if (type === 'overlay') label = '📸 Imagem sobreposta';
+        if (type === 'custom_anim') {
+            accept = 'video/*,image/gif,image/webp,image/apng';
+            label = '🎞️ Vídeo ou GIF Animado';
+        }
+
+        container.innerHTML = `
+            <div class="scene-file-drop">
+                <input type="file" accept="${accept}" class="scene-element-file" data-element-id="${elementConfig.id}">
+                <div class="sfd-label">${label}</div>
+                <div class="sfd-hint">PNG, JPG, WEBP${type === 'custom_anim' ? ', GIF, MP4' : ''}</div>
+                <div class="file-name"></div>
+                <img class="preview" alt="" style="display:none; max-width:100%; border-radius:6px; margin-top:8px;">
+            </div>
+        `;
+        const fileInput = container.querySelector('.scene-element-file');
+        const fileName = container.querySelector('.file-name');
+        const preview = container.querySelector('.preview');
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files[0]) {
+                fileName.textContent = '✅ ' + fileInput.files[0].name;
+                fileName.style.display = 'block';
+                if (!fileInput.files[0].type.startsWith('video/')) {
+                    const reader = new FileReader();
+                    reader.onload = ev => {
+                        preview.src = ev.target.result;
+                        preview.style.display = 'block';
+                        preview.onload = () => {
+                            if (type === 'overlay' || type === 'custom_anim') {
+                                _syncFineFromQuickForSceneElement(container, props);
+                            }
+                            refreshPreviewNow();
+                        };
+                    };
+                    reader.readAsDataURL(fileInput.files[0]);
+                } else {
+                    preview.style.display = 'none';
+                    refreshPreviewNow();
+                }
+            }
+        });
+
+        // Controles de Transição para Background
+        if (type === 'background') {
+            container.insertAdjacentHTML('beforeend', `
+                <div style="margin-top:8px;">
+                    <label style="font-size:.75rem;">Efeito de Transição (Entrada)</label>
+                    <select class="scene-element-transition" style="width: 100%;">
+                        <option value="none" ${props.transition === 'none' ? 'selected' : ''}>Seco</option>
+                        <option value="fade" ${props.transition === 'fade' ? 'selected' : ''}>Esmaecer (Fade)</option>
+                    </select>
+                </div>
+            `);
+            const transSelect = container.querySelector('.scene-element-transition');
+            transSelect.addEventListener('change', () => {
+                props.transition = transSelect.value;
+            });
+        }
+
+        // Controles de Posição, Escala e Transição para Overlay e Custom Anim
+        if (type === 'overlay' || type === 'custom_anim') {
+            container.insertAdjacentHTML('beforeend', `
+                <div style="margin-top:8px;">
+                    <label style="font-size:.75rem;">Posição rápida</label>
+                    <div class="position-grid overlay-pos-grid" style="max-width:180px;">
+                        <button type="button" data-pos="superior esquerda" class="${props.position === 'superior esquerda' ? 'active' : ''}">↖</button>
+                        <button type="button" data-pos="superior" class="${props.position === 'superior' ? 'active' : ''}">↑</button>
+                        <button type="button" data-pos="superior direita" class="${props.position === 'superior direita' ? 'active' : ''}">↗</button>
+                        <button type="button" data-pos="esquerda" class="${props.position === 'esquerda' ? 'active' : ''}">←</button>
+                        <button type="button" data-pos="centro" class="${(!props.position || props.position === 'centro') ? 'active' : ''}">●</button>
+                        <button type="button" data-pos="direita" class="${props.position === 'direita' ? 'active' : ''}">→</button>
+                        <button type="button" data-pos="inferior esquerda" class="${props.position === 'inferior esquerda' ? 'active' : ''}">↙</button>
+                        <button type="button" data-pos="inferior" class="${props.position === 'inferior' ? 'active' : ''}">↓</button>
+                        <button type="button" data-pos="inferior direita" class="${props.position === 'inferior direita' ? 'active' : ''}">↘</button>
+                    </div>
+                    <div class="volume-control" style="margin-top:6px;">
+                        <label>📐 Tamanho</label>
+                        <input type="range" min="5" max="100" value="${props.scale || (type === 'custom_anim' ? 30 : 50)}" class="overlay-scale-range">
+                        <span class="vol-value">${props.scale || (type === 'custom_anim' ? 30 : 50)}%</span>
+                    </div>
+                    <div style="margin-top:8px;">
+                        <label style="font-size:.75rem;">Efeito de Transição (Entrada)</label>
+                        <select class="scene-element-transition" style="width: 100%;">
+                            <option value="none" ${props.transition === 'none' ? 'selected' : ''}>Seco</option>
+                            <option value="fade" ${props.transition === 'fade' ? 'selected' : ''}>Esmaecer (Fade)</option>
+                            <option value="slide_left" ${props.transition === 'slide_left' ? 'selected' : ''}>Deslizar da Esquerda</option>
+                            <option value="slide_right" ${props.transition === 'slide_right' ? 'selected' : ''}>Deslizar da Direita</option>
+                            <option value="slide_up" ${props.transition === 'slide_up' ? 'selected' : ''}>Deslizar de Baixo</option>
+                            <option value="slide_down" ${props.transition === 'slide_down' ? 'selected' : ''}>Deslizar de Cima</option>
+                        </select>
+                    </div>
+
+                    <!-- Controle fino: tamanho em px e posição X, Y -->
+                    <details class="overlay-fine-ctrl" style="margin-top:10px; border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:8px 12px;">
+                        <summary style="cursor:pointer; font-weight:600; font-size:.85rem; user-select:none;">
+                            🎯 Controle fino (pixels)
+                        </summary>
+                        <p class="hint" style="margin:6px 0 10px; font-size:.7rem; opacity:.7;">Baseado na resolução de saída. Deixe em branco para usar os controles rápidos.</p>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+                            <div>
+                                <label style="font-size:.7rem;">Largura (px)</label>
+                                <input type="number" class="overlay-px-w" min="1" step="1" placeholder="auto" value="${props.px_width || ''}" style="padding:4px; font-size:.78rem; width:100%;">
+                            </div>
+                            <div>
+                                <label style="font-size:.7rem;">Altura (px)</label>
+                                <input type="number" class="overlay-px-h" min="1" step="1" placeholder="auto" value="${props.px_height || ''}" style="padding:4px; font-size:.78rem; width:100%;">
+                            </div>
+                            <div>
+                                <label style="font-size:.7rem;">Posição X (px)</label>
+                                <input type="number" class="overlay-px-x" step="1" placeholder="(centro)" value="${props.px_x !== undefined && props.px_x !== null ? props.px_x : ''}" style="padding:4px; font-size:.78rem; width:100%;">
+                            </div>
+                            <div>
+                                <label style="font-size:.7rem;">Posição Y (px)</label>
+                                <input type="number" class="overlay-px-y" step="1" placeholder="(centro)" value="${props.px_y !== undefined && props.px_y !== null ? props.px_y : ''}" style="padding:4px; font-size:.78rem; width:100%;">
+                            </div>
+                        </div>
+                        <button type="button" class="vc-btn vc-btn-primary vc-btn-sm overlay-apply-btn" style="width:100%; font-size:.75rem; padding:4px;">
+                            ▶ Aplicar ao preview
+                        </button>
+                    </details>
+                </div>
+            `);
+
+            // Loop para Custom Anim
+            if (type === 'custom_anim') {
+                container.insertAdjacentHTML('beforeend', `
+                    <label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:.82rem;">
+                        <input type="checkbox" class="custom-anim-loop" ${props.loop !== false ? 'checked' : ''} style="width:auto; accent-color:#e040fb;">
+                        🔄 Loop
+                    </label>
+                `);
+                const loopCheck = container.querySelector('.custom-anim-loop');
+                loopCheck.addEventListener('change', () => {
+                    props.loop = loopCheck.checked;
+                });
+            }
+
+            // Grid Pos click listener
+            const posGrid = container.querySelector('.overlay-pos-grid');
+            posGrid.querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    posGrid.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    props.position = btn.dataset.pos;
+                    _syncFineFromQuickForSceneElement(container, props);
+                    refreshPreviewNow();
+                });
+            });
+
+            // Scale listener
+            const scaleRange = container.querySelector('.overlay-scale-range');
+            scaleRange.addEventListener('input', () => {
+                scaleRange.nextElementSibling.textContent = scaleRange.value + '%';
+                props.scale = parseInt(scaleRange.value);
+                _syncFineFromQuickForSceneElement(container, props);
+                refreshPreviewNow();
+            });
+
+            // Transition listener
+            const transSelect = container.querySelector('.scene-element-transition');
+            transSelect.addEventListener('change', () => {
+                props.transition = transSelect.value;
+            });
+
+            // Controle fino listeners
+            const pxWInput = container.querySelector('.overlay-px-w');
+            const pxHInput = container.querySelector('.overlay-px-h');
+            const pxXInput = container.querySelector('.overlay-px-x');
+            const pxYInput = container.querySelector('.overlay-px-y');
+            const applyBtn = container.querySelector('.overlay-apply-btn');
+
+            const saveFineProps = () => {
+                props.px_width = pxWInput.value.trim() !== '' ? parseInt(pxWInput.value) : null;
+                props.px_height = pxHInput.value.trim() !== '' ? parseInt(pxHInput.value) : null;
+                props.px_x = pxXInput.value.trim() !== '' ? parseInt(pxXInput.value) : null;
+                props.px_y = pxYInput.value.trim() !== '' ? parseInt(pxYInput.value) : null;
+            };
+
+            [pxWInput, pxHInput, pxXInput, pxYInput].forEach(inp => {
+                inp.addEventListener('change', saveFineProps);
+                inp.addEventListener('input', saveFineProps);
+            });
+
+            applyBtn.addEventListener('click', () => {
+                saveFineProps();
+                refreshPreviewNow();
+                showToast('Preview atualizado com controle fino!', 'success');
+            });
+        }
+    } else if (type === 'audio' || type === 'secondary_audio') {
+        if (type === 'audio') {
+            container.innerHTML = `
+                <div class="audio-tabs" style="margin-bottom:10px;">
+                    <button type="button" class="audio-tab active" onclick="switchAudioType(this,'upload')">📁 Arquivo</button>
+                    <button type="button" class="audio-tab" onclick="switchAudioType(this,'omni')">🤖 IA (OmniVoice)</button>
+                </div>
+                <div class="audio-panels-wrap"></div>
+            `;
+            const panelsWrap = container.querySelector('.audio-panels-wrap');
+
+            const uploadTpl = document.getElementById('tplAudioUpload').content.cloneNode(true);
+            const fileInp = uploadTpl.querySelector('.audio-file-input');
+            if (fileInp) {
+                fileInp.className = 'scene-element-file';
+                fileInp.dataset.elementId = elementConfig.id;
+            }
+            panelsWrap.appendChild(uploadTpl);
+
+            const omniTpl = document.getElementById('tplAudioOmni').content.cloneNode(true);
+            const omniPanel = omniTpl.querySelector('.audio-panel');
+            omniPanel.classList.remove('active');
+            panelsWrap.appendChild(omniTpl);
+
+            // Inicializar inputs e seletores do OmniVoice
+            const wrapper = container.closest('.scene-element');
+            const fileInput = wrapper.querySelector('.scene-element-file');
+            const fileName = wrapper.querySelector('.audio-panel[data-panel-type=upload] .file-name');
+            const uploadPanel = wrapper.querySelector('.audio-panel[data-panel-type=upload]');
+
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files[0]) {
+                    fileName.textContent = '✅ ' + fileInput.files[0].name;
+                    fileName.style.display = 'block';
+                    setupAudioPreviewFromFile(uploadPanel, fileInput.files[0]);
+
+                    // Decodificação binária imediata para obter a duração exata do áudio
+                    const file = fileInput.files[0];
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        ctx.decodeAudioData(e.target.result).then(buffer => {
+                            const dur = buffer.duration;
+                            if (isFinite(dur) && dur > 0) {
+                                if (!state.sceneResourceDurations) state.sceneResourceDurations = {};
+                                state.sceneResourceDurations[elementConfig.id] = dur;
+                                resolveAndRefreshTimeline();
+                            }
+                        }).catch(err => {
+                            console.warn("Erro ao decodificar áudio via AudioContext:", err);
+                        });
+                    };
+                    reader.readAsArrayBuffer(file);
+                }
+            });
+
+            wrapper.querySelectorAll('.audio-vol-range').forEach(range => {
+                range.addEventListener('input', () => {
+                    range.nextElementSibling.textContent = range.value + '%';
+                });
+            });
+
+            const voiceSel = wrapper.querySelector('.omni-voice-select');
+            if (state.omniVoices.length) {
+                voiceSel.innerHTML = state.omniVoices.map(v => `<option value="${v.id}">${v.name}</option>`).join('');
+            } else {
+                voiceSel.innerHTML = '<option value="">Nenhuma voz — crie em Gerar Áudio</option>';
+            }
+
+            const presetSel = wrapper.querySelector('.omni-preset-select');
+            presetSel.innerHTML = '<option value="">Selecione um preset...</option>' +
+                state.omniPresets.map(p => `<option value="${p.preset_id}">${p.name}</option>`).join('');
+            presetSel.addEventListener('change', () => applyPresetToBlock(presetSel));
+        } else {
+            // Secondary Audio
+            container.innerHTML = `
+                <div class="scene-file-drop">
+                    <input type="file" accept="audio/*" class="scene-element-file" data-element-id="${elementConfig.id}">
+                    <div class="sfd-label">🎵 Arquivo de áudio secundário</div>
+                    <div class="sfd-hint">MP3, WAV, OGG</div>
+                    <div class="file-name"></div>
+                </div>
+                <div class="audio-player-wrap" style="display:none; margin-top:8px;">
+                    <div class="audio-player-header">
+                        <span class="player-icon">🎧</span>
+                        <span class="player-label">Preview</span>
+                        <span class="player-duration"></span>
+                    </div>
+                    <audio controls preload="metadata" class="audio-preview-el scene-audio-preview"></audio>
+                </div>
+                <div class="volume-control" style="margin-top:6px;">
+                    <label>🔈 Vol</label>
+                    <input type="range" min="0" max="100" value="${props.volume || 20}" class="sec-audio-vol">
+                    <span class="vol-value">${props.volume || 20}%</span>
+                </div>
+                <label style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:.82rem;">
+                    <input type="checkbox" class="sec-audio-loop" ${props.loop !== false ? 'checked' : ''} style="width:auto; accent-color:#e040fb;">
+                    🔄 Loop
+                </label>
+            `;
+
+            const volRange = container.querySelector('.sec-audio-vol');
+            const loopCheck = container.querySelector('.sec-audio-loop');
+
+            volRange.addEventListener('input', () => {
+                volRange.nextElementSibling.textContent = volRange.value + '%';
+                props.volume = parseInt(volRange.value);
+            });
+            loopCheck.addEventListener('change', () => {
+                props.loop = loopCheck.checked;
+            });
+
+            const fileInput = container.querySelector('.scene-element-file');
+            const fileName = container.querySelector('.file-name');
+            const playerWrap = container.querySelector('.audio-player-wrap');
+            const audioEl = container.querySelector('.scene-audio-preview');
+            const durationEl = container.querySelector('.player-duration');
+
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files[0]) {
+                    fileName.textContent = '✅ ' + fileInput.files[0].name;
+                    fileName.style.display = 'block';
+                    const url = URL.createObjectURL(fileInput.files[0]);
+                    audioEl.src = url;
+                    playerWrap.style.display = 'block';
+
+                    // Decodificação binária imediata para obter a duração exata do áudio
+                    const file = fileInput.files[0];
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        ctx.decodeAudioData(e.target.result).then(buffer => {
+                            const dur = buffer.duration;
+                            if (isFinite(dur) && dur > 0) {
+                                durationEl.textContent = `${Math.floor(dur / 60)}:${Math.floor(dur % 60).toString().padStart(2, '0')}`;
+                                if (!state.sceneResourceDurations) state.sceneResourceDurations = {};
+                                state.sceneResourceDurations[elementConfig.id] = dur;
+                                resolveAndRefreshTimeline();
+                            }
+                        }).catch(err => {
+                            console.warn("Erro ao decodificar áudio secundário via AudioContext:", err);
+                        });
+                    };
+                    reader.readAsArrayBuffer(file);
+                }
+            });
+        }
+    } else if (type === 'text') {
+        container.innerHTML = `
+            <textarea rows="2" class="scene-text-input" placeholder="Digite o texto...">${props.text || ''}</textarea>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px;">
+                <div>
+                    <label style="font-size:.75rem;">Tamanho</label>
+                    <input type="number" class="scene-text-size" min="8" max="300" value="${props.size || 48}" step="1">
+                </div>
+                <div>
+                    <label style="font-size:.75rem;">Cor</label>
+                    <input type="color" class="scene-text-color" value="${props.color || '#ffffff'}" style="width:100%; height:34px;">
+                </div>
+            </div>
+            <div style="margin-top:6px;">
+                <label style="font-size:.75rem;">Posição</label>
+                <div class="position-grid text-pos-grid" style="max-width:180px;">
+                    <button type="button" data-pos="superior esquerda" class="${props.position === 'superior esquerda' ? 'active' : ''}">↖</button>
+                    <button type="button" data-pos="superior" class="${props.position === 'superior' ? 'active' : ''}">↑</button>
+                    <button type="button" data-pos="superior direita" class="${props.position === 'superior direita' ? 'active' : ''}">↗</button>
+                    <button type="button" data-pos="esquerda" class="${props.position === 'esquerda' ? 'active' : ''}">←</button>
+                    <button type="button" data-pos="centro" class="${(!props.position || props.position === 'centro') ? 'active' : ''}">●</button>
+                    <button type="button" data-pos="direita" class="${props.position === 'direita' ? 'active' : ''}">→</button>
+                    <button type="button" data-pos="inferior esquerda" class="${props.position === 'inferior esquerda' ? 'active' : ''}">↙</button>
+                    <button type="button" data-pos="inferior" class="${props.position === 'inferior' ? 'active' : ''}">↓</button>
+                    <button type="button" data-pos="inferior direita" class="${props.position === 'inferior direita' ? 'active' : ''}">↘</button>
+                </div>
+            </div>
+            <div style="margin-top:8px;">
+                <label style="font-size:.75rem;">Efeito de Transição (Entrada)</label>
+                <select class="scene-element-transition" style="width: 100%;">
+                    <option value="none" ${props.transition === 'none' ? 'selected' : ''}>Seco</option>
+                    <option value="fade" ${props.transition === 'fade' ? 'selected' : ''}>Esmaecer (Fade)</option>
+                    <option value="slide_left" ${props.transition === 'slide_left' ? 'selected' : ''}>Deslizar da Esquerda</option>
+                    <option value="slide_right" ${props.transition === 'slide_right' ? 'selected' : ''}>Deslizar da Direita</option>
+                    <option value="slide_up" ${props.transition === 'slide_up' ? 'selected' : ''}>Deslizar de Baixo</option>
+                    <option value="slide_down" ${props.transition === 'slide_down' ? 'selected' : ''}>Deslizar de Cima</option>
+                </select>
+            </div>
+
+            <!-- Controle fino: posição X, Y em pixels -->
+            <details class="text-fine-ctrl" style="margin-top:10px; border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:8px 12px;">
+                <summary style="cursor:pointer; font-weight:600; font-size:.85rem; user-select:none;">
+                    🎯 Controle fino (pixels)
+                </summary>
+                <p class="hint" style="margin:6px 0 10px; font-size:.7rem; opacity:.7;">Baseado na resolução de saída. Deixe em branco para usar a posição rápida.</p>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+                    <div>
+                        <label style="font-size:.7rem;">Posição X (px)</label>
+                        <input type="number" class="text-px-x" step="1" placeholder="(centro)" value="${props.px_x !== undefined && props.px_x !== null ? props.px_x : ''}" style="padding:4px; font-size:.78rem; width:100%;">
+                    </div>
+                    <div>
+                        <label style="font-size:.7rem;">Posição Y (px)</label>
+                        <input type="number" class="text-px-y" step="1" placeholder="(centro)" value="${props.px_y !== undefined && props.px_y !== null ? props.px_y : ''}" style="padding:4px; font-size:.78rem; width:100%;">
+                    </div>
+                </div>
+                <button type="button" class="vc-btn vc-btn-primary vc-btn-sm text-apply-btn" style="width:100%; font-size:.75rem; padding:4px;">
+                    ▶ Aplicar ao preview
+                </button>
+            </details>
+        `;
+
+        const textarea = container.querySelector('.scene-text-input');
+        const sizeInput = container.querySelector('.scene-text-size');
+        const colorInput = container.querySelector('.scene-text-color');
+        const textGrid = container.querySelector('.text-pos-grid');
+        const transSelect = container.querySelector('.scene-element-transition');
+
+        textarea.addEventListener('input', () => {
+            props.text = textarea.value;
+            refreshPreviewNow();
+        });
+        sizeInput.addEventListener('input', () => {
+            props.size = parseInt(sizeInput.value) || 48;
+            _syncFineFromQuickForTextElement(container, props);
+            refreshPreviewNow();
+        });
+        colorInput.addEventListener('input', () => {
+            props.color = colorInput.value;
+            refreshPreviewNow();
+        });
+        textGrid.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                textGrid.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                props.position = btn.dataset.pos;
+                _syncFineFromQuickForTextElement(container, props);
+                refreshPreviewNow();
+            });
+        });
+        transSelect.addEventListener('change', () => {
+            props.transition = transSelect.value;
+        });
+
+        // Controle fino listeners
+        const pxXInput = container.querySelector('.text-px-x');
+        const pxYInput = container.querySelector('.text-px-y');
+        const applyBtn = container.querySelector('.text-apply-btn');
+
+        const saveFineProps = () => {
+            props.px_x = pxXInput.value.trim() !== '' ? parseInt(pxXInput.value) : null;
+            props.px_y = pxYInput.value.trim() !== '' ? parseInt(pxYInput.value) : null;
+        };
+
+        [pxXInput, pxYInput].forEach(inp => {
+            inp.addEventListener('change', saveFineProps);
+            inp.addEventListener('input', saveFineProps);
+        });
+
+        applyBtn.addEventListener('click', () => {
+            saveFineProps();
+            refreshPreviewNow();
+            showToast('Preview atualizado com controle fino!', 'success');
+        });
+    } else if (type === 'animation') {
+        container.innerHTML = `
+            <label style="font-size:.75rem;">Animação da Galeria</label>
+            <select class="scene-anim-select">
+                <option value="particulas" ${props.name === 'particulas' ? 'selected' : ''}>✨ Partículas</option>
+                <option value="fumaca" ${props.name === 'fumaca' ? 'selected' : ''}>🌫️ Fumaça</option>
+                <option value="brilho" ${props.name === 'brilho' ? 'selected' : ''}>💎 Brilho</option>
+                <option value="fogo" ${props.name === 'fogo' ? 'selected' : ''}>🔥 Fogo</option>
+                <option value="chuva" ${props.name === 'chuva' ? 'selected' : ''}>🌧️ Chuva</option>
+                <option value="neve" ${props.name === 'neve' ? 'selected' : ''}>❄️ Neve</option>
+                <option value="faiscas" ${props.name === 'faiscas' ? 'selected' : ''}>⚡ Faíscas</option>
+                <option value="explosao" ${props.name === 'explosao' ? 'selected' : ''}>💥 Explosão</option>
+                <option value="luz" ${props.name === 'luz' ? 'selected' : ''}>💡 Luz</option>
+                <option value="loop_bg" ${props.name === 'loop_bg' ? 'selected' : ''}>🔄 Loop Background</option>
+            </select>
+            <div class="volume-control" style="margin-top:6px;">
+                <label>🔥 Intensidade</label>
+                <input type="range" min="10" max="100" value="${props.intensity || 50}" class="scene-anim-intensity">
+                <span class="vol-value">${props.intensity || 50}%</span>
+            </div>
+        `;
+        if (!props.name) props.name = 'particulas';
+        if (!props.intensity) props.intensity = 50;
+
+        const animSelect = container.querySelector('.scene-anim-select');
+        const intensityRange = container.querySelector('.scene-anim-intensity');
+
+        animSelect.addEventListener('change', () => {
+            props.name = animSelect.value;
+            refreshPreviewNow();
+        });
+        intensityRange.addEventListener('input', () => {
+            intensityRange.nextElementSibling.textContent = intensityRange.value + '%';
+            props.intensity = parseInt(intensityRange.value);
+            refreshPreviewNow();
+        });
+    }
+}
+
+/**
+ * Toggle do accordion interno de um elemento de cena (minimizar/expandir).
+ */
+function toggleSceneElement(header) {
+    const el = header.closest('.scene-element');
+    el.classList.toggle('collapsed');
+}
+
+/**
+ * Toggle o card da cena (expandir/colapsar).
+ */
+function toggleSceneCard(header) {
+    const card = header.closest('.scene-card');
+    card.classList.toggle('collapsed');
+}
+
+/**
+ * Remove uma cena.
+ */
+function removeScene(sceneId) {
+    if (!confirm('Remover esta cena e todos os seus elementos?')) return;
+    state.scenes = (state.scenes || []).filter(s => s.scene_id !== sceneId);
+    const card = document.querySelector(`.scene-card[data-scene-id="${sceneId}"]`);
+    if (card) {
+        card.style.opacity = '0';
+        card.style.transform = 'translateX(20px)';
+        card.style.transition = 'all .3s';
+        setTimeout(() => card.remove(), 300);
+    }
+    setTimeout(() => {
+        renumberScenes();
+        resolveAndRefreshTimeline();
+    }, 350);
+    showToast('Cena removida!', 'info');
+}
+
+/**
+ * Duplica uma cena.
+ */
+function duplicateScene(sceneId) {
+    const source = (state.scenes || []).find(s => s.scene_id === sceneId);
+    if (!source) return;
+
+    sceneCounter++;
+    const newScene = duplicateSceneConfig(source, sceneCounter);
+    const sourceIndex = state.scenes.indexOf(source);
+    state.scenes.splice(sourceIndex + 1, 0, newScene);
+
+    // Re-render all scenes
+    _rerenderAllScenes();
+    resolveAndRefreshTimeline();
+    showToast(`Cena duplicada!`, 'success');
+}
+
+/**
+ * Move uma cena para cima ou para baixo.
+ */
+function moveScene(sceneId, direction) {
+    const idx = (state.scenes || []).findIndex(s => s.scene_id === sceneId);
+    if (idx < 0) return;
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= state.scenes.length) return;
+
+    const [scene] = state.scenes.splice(idx, 1);
+    state.scenes.splice(newIdx, 0, scene);
+
+    _rerenderAllScenes();
+    resolveAndRefreshTimeline();
+}
+
+/**
+ * Remove um elemento de uma cena.
+ */
+function removeSceneElement(btn) {
+    const el = btn.closest('.scene-element');
+    const elementId = el.dataset.elementId;
+    const sceneCard = el.closest('.scene-card');
+    const sceneId = sceneCard?.dataset.sceneId;
+
+    // Remove do config
+    const scene = (state.scenes || []).find(s => s.scene_id === sceneId);
+    if (scene) {
+        scene.elements = scene.elements.filter(e => e.id !== elementId);
+    }
+
+    el.remove();
+
+    // Update badge
+    if (scene && sceneCard) {
+        const badge = sceneCard.querySelector('.scene-card-badge');
+        const n = scene.elements.length;
+        badge.textContent = `${n} elemento${n !== 1 ? 's' : ''}`;
+    }
+
+    resolveAndRefreshTimeline();
+}
+
+/**
+ * Toggle do dropdown de adicionar elemento.
+ */
+function toggleAddElementDropdown(btn, sceneId) {
+    // Remove existing dropdown and active classes
+    document.querySelectorAll('.add-element-dropdown').forEach(d => d.remove());
+    document.querySelectorAll('.scene-card').forEach(c => c.classList.remove('dropdown-active'));
+
+    const card = btn.closest('.scene-card');
+    if (card) card.classList.add('dropdown-active');
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'add-element-dropdown';
+    dropdown.innerHTML = `
+        <button type="button" onclick="addElementToScene('${sceneId}', 'background')">🖼️ Fundo</button>
+        <button type="button" onclick="addElementToScene('${sceneId}', 'audio')">🎵 Áudio</button>
+        <button type="button" onclick="addElementToScene('${sceneId}', 'overlay')">📸 Imagem Sobreposta</button>
+        <button type="button" onclick="addElementToScene('${sceneId}', 'text')">📝 Texto</button>
+        <button type="button" onclick="addElementToScene('${sceneId}', 'secondary_audio')">🎶 Áudio Secundário</button>
+        <button type="button" onclick="addElementToScene('${sceneId}', 'custom_anim')">🎞️ GIF / Vídeo (Custom)</button>
+    `;
+
+    btn.parentElement.appendChild(dropdown);
+
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', function handler(e) {
+            if (!dropdown.contains(e.target) && e.target !== btn) {
+                dropdown.remove();
+                if (card) card.classList.remove('dropdown-active');
+                document.removeEventListener('click', handler);
+            }
+        });
+    }, 50);
+}
+
+/**
+ * Adiciona um novo elemento a uma cena.
+ */
+function addElementToScene(sceneId, type) {
+    const scene = (state.scenes || []).find(s => s.scene_id === sceneId);
+    if (!scene) return;
+
+    // Close dropdown and remove active classes
+    document.querySelectorAll('.add-element-dropdown').forEach(d => d.remove());
+    document.querySelectorAll('.scene-card').forEach(c => c.classList.remove('dropdown-active'));
+
+    const labels = {
+        background: 'Fundo', audio: 'Áudio', overlay: 'Imagem Sobreposta',
+        text: 'Texto', secondary_audio: 'Áudio Secundário',
+        animation: 'Animação Galeria', custom_anim: 'GIF / Vídeo Custom',
+    };
+
+    const existingOfType = scene.elements.filter(e => e.type === type).length;
+    const suffix = `${type}_${existingOfType + 1}`;
+    const id = `${sceneId}_${suffix}`;
+
+    const newElement = {
+        id,
+        id_suffix: suffix,
+        label: `${labels[type]} ${existingOfType + 1}`,
+        type,
+        scene_id: sceneId,
+        trigger: { event: 'SCENE_START', offset: 0 },
+        end_mode: type === 'audio' ? 'resource_duration' : 'scene_end',
+        z_level: scene.elements.length,
+        properties: {},
+    };
+
+    scene.elements.push(newElement);
+
+    // Render element
+    const elemList = document.querySelector(`.scene-elements-list[data-scene-id="${sceneId}"]`);
+    if (elemList) {
+        renderSceneElement(elemList, newElement, scene);
+    }
+
+    // Update badge
+    const card = document.querySelector(`.scene-card[data-scene-id="${sceneId}"]`);
+    if (card) {
+        const badge = card.querySelector('.scene-card-badge');
+        const n = scene.elements.length;
+        badge.textContent = `${n} elemento${n !== 1 ? 's' : ''}`;
+    }
+
+    resolveAndRefreshTimeline();
+}
+
+/**
+ * Callback quando o end mode muda.
+ */
+function onEndModeChange(select) {
+    const el = select.closest('.scene-element');
+    const elementId = el.dataset.elementId;
+    const sceneCard = el.closest('.scene-card');
+    const sceneId = sceneCard?.dataset.sceneId;
+    const value = select.value;
+
+    const scene = (state.scenes || []).find(s => s.scene_id === sceneId);
+    const elementConfig = scene?.elements.find(e => e.id === elementId);
+    if (!elementConfig) return;
+
+    if (value === 'resource_duration' || value === 'scene_end') {
+        elementConfig.end_mode = value;
+    } else if (value === 'duration') {
+        elementConfig.end_mode = { duration: 5.0 };
+    } else if (value === 'event') {
+        elementConfig.end_mode = { event: 'SCENE_END', offset: 0 };
+    }
+
+    _populateEndModeExtra(el, elementConfig, scene);
+    resolveAndRefreshTimeline();
+}
+
+/**
+ * Re-renderiza todas as cenas (após reordenar/duplicar).
+ */
+function _rerenderAllScenes() {
+    const container = document.getElementById('scenesList');
+    if (!container) return;
+    container.innerHTML = '';
+    (state.scenes || []).forEach((scene, i) => renderScene(scene, i));
+}
+
+/**
+ * Renumera as cenas visualmente.
+ */
+function renumberScenes() {
+    document.querySelectorAll('#scenesList .scene-card').forEach((card, i) => {
+        const num = card.querySelector('.scene-card-num');
+        if (num) num.textContent = i + 1;
+    });
+}
+
+// ══════════════════════════════════════════
+// Timeline Resolution & Visual
+// ══════════════════════════════════════════
+
+/**
+ * Resolve toda a timeline e atualiza a visualização.
+ */
+function resolveAndRefreshTimeline() {
+    if (!state.scenes || state.scenes.length === 0) {
+        document.getElementById('timelineVisual').style.display = 'none';
+        return;
+    }
+
+    const engine = new TimelineEngine();
+
+    // Adicionar cenas
+    for (const scene of state.scenes) {
+        engine.addScene(scene);
+    }
+
+    // Informar durações dos áudios
+    const durations = state.sceneResourceDurations || {};
+    for (const [id, dur] of Object.entries(durations)) {
+        engine.setResourceDuration(id, dur);
+    }
+
+    // Resolver
+    const result = engine.resolve();
+
+    // Mostrar warnings apenas no console para evitar spam de toasts
+    if (result.warnings.length > 0) {
+        result.warnings.forEach(w => console.warn(w));
+    }
+
+    // Salvar resultado
+    state.resolvedTimeline = result;
+    state.totalDurationScenes = result.totalDuration;
+
+    // Atualizar selects de eventos em todos os elementos do DOM
+    refreshAllEventSelects();
+
+    // Atualizar timeline visual
+    renderTimelineVisual(engine, result);
+
+    // Atualizar slider de preview
+    const slider = document.getElementById('previewTimeSlider');
+    const totalLabel = document.getElementById('previewTotalDuration');
+    if (slider && state.useEventTimeline) {
+        if (result.totalDuration > 0) {
+            slider.disabled = false;
+            slider.max = result.totalDuration.toFixed(1);
+            totalLabel.textContent = `${result.totalDuration.toFixed(1)}s total`;
+        } else {
+            slider.disabled = true;
+            slider.max = 0;
+            totalLabel.textContent = '0.0s total';
+        }
+    }
+
+    // Atualizar o canvas de preview na hora
+    refreshPreviewNow();
+}
+
+/**
+ * Atualiza dinamicamente as opções em todos os selects de evento do DOM (Modo Cenas).
+ */
+function refreshAllEventSelects() {
+    if (!state.useEventTimeline) return;
+    const engine = new TimelineEngine();
+    engine.scenes = state.scenes || [];
+    
+    document.querySelectorAll('#scenesList .scene-element').forEach(el => {
+        const sceneCard = el.closest('.scene-card');
+        if (!sceneCard) return;
+        const sceneId = sceneCard.dataset.sceneId;
+        const elementId = el.dataset.elementId;
+        const scene = state.scenes.find(s => s.scene_id === sceneId);
+        if (!scene) return;
+        const elementConfig = scene.elements.find(e => e.id === elementId);
+        if (!elementConfig) return;
+
+        const availableEvents = engine.getAvailableEvents(sceneId, elementId);
+
+        // 1. Atualizar o select de Trigger Event (Evento de Início)
+        const triggerSelect = el.querySelector('.trigger-event');
+        if (triggerSelect) {
+            const currentVal = triggerSelect.value || elementConfig.trigger?.event;
+            triggerSelect.innerHTML = availableEvents.map(e =>
+                `<option value="${e.value}"${currentVal === e.value ? ' selected' : ''}>${e.label}</option>`
+            ).join('');
+            if (elementConfig.trigger) {
+                elementConfig.trigger.event = triggerSelect.value;
+            }
+        }
+
+        // 2. Atualizar o select de End Event (Modo de fim até evento) se ativo
+        const endEventSelect = el.querySelector('.end-event-select');
+        if (endEventSelect) {
+            const currentVal = endEventSelect.value || (typeof elementConfig.end_mode === 'object' ? elementConfig.end_mode.event : '');
+            endEventSelect.innerHTML = availableEvents.map(e =>
+                `<option value="${e.value}"${currentVal === e.value ? ' selected' : ''}>${e.label}</option>`
+            ).join('');
+            if (typeof elementConfig.end_mode === 'object' && elementConfig.end_mode.event) {
+                elementConfig.end_mode.event = endEventSelect.value;
+            }
+        }
+    });
+}
+
+/**
+ * Renderiza a barra visual da timeline.
+ */
+function renderTimelineVisual(engine, result) {
+    const container = document.getElementById('timelineVisual');
+    const tracksEl = document.getElementById('timelineTracks');
+    const rulerEl = document.getElementById('timelineRuler');
+    const durationEl = document.getElementById('tlTotalDuration');
+
+    if (!container || !tracksEl) return;
+
+    const totalDuration = result.totalDuration;
+    if (totalDuration <= 0) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'block';
+    durationEl.textContent = `${totalDuration.toFixed(1)}s`;
+
+    // Build timeline items
+    const timeline = engine.getResolvedTimeline();
+
+    // Group by type for tracks
+    const typeOrder = ['background', 'audio', 'overlay', 'text', 'secondary_audio'];
+    const typeLabels = {
+        background: '🖼️ Fundo',
+        audio: '🎵 Áudio',
+        overlay: '📸 Overlay',
+        text: '📝 Texto',
+        secondary_audio: '🎶 Sec.Audio',
+    };
+
+    const tracksByType = {};
+    for (const item of timeline) {
+        if (!tracksByType[item.type]) tracksByType[item.type] = [];
+        tracksByType[item.type].push(item);
+    }
+
+    // Scene separators (background color bands)
+    let sceneColors = ['rgba(124,77,255,.08)', 'rgba(224,64,251,.06)'];
+
+    let tracksHTML = '';
+    for (const type of typeOrder) {
+        const items = tracksByType[type];
+        if (!items || items.length === 0) continue;
+
+        let blocksHTML = '';
+        for (const item of items) {
+            const left = (item.start / totalDuration * 100).toFixed(2);
+            const width = Math.max(0.5, ((item.end - item.start) / totalDuration * 100)).toFixed(2);
+            const typeClass = type === 'background' ? 'bg' : type;
+            const label = item.label || item.id.split('_').slice(-2).join(' ');
+            blocksHTML += `<div class="timeline-block ${typeClass}" style="left:${left}%; width:${width}%;" title="${item.id}\n${item.start.toFixed(1)}s → ${item.end.toFixed(1)}s\nZ: ${item.z_level}">${label}</div>`;
+        }
+
+        tracksHTML += `
+            <div class="timeline-track">
+                <div class="timeline-track-label">${typeLabels[type] || type}</div>
+                <div class="timeline-track-bar">${blocksHTML}</div>
+            </div>
+        `;
+    }
+
+    // Scene boundaries
+    let sceneMarkersHTML = '';
+    for (const scene of state.scenes) {
+        const start = result.sceneStarts.get(scene.scene_id) || 0;
+        const end = result.sceneEnds.get(scene.scene_id) || 0;
+        if (start > 0) {
+            const left = (start / totalDuration * 100).toFixed(2);
+            sceneMarkersHTML += `<div style="position:absolute; top:0; bottom:0; left:${left}%; width:1px; background:rgba(124,77,255,.3); z-index:5;" title="${scene.name} start"></div>`;
+        }
+    }
+
+    tracksEl.innerHTML = sceneMarkersHTML + tracksHTML;
+
+    // Time ruler
+    const steps = Math.min(10, Math.ceil(totalDuration));
+    const stepSize = totalDuration / steps;
+    let rulerHTML = '';
+    for (let i = 0; i <= steps; i++) {
+        rulerHTML += `<span>${(i * stepSize).toFixed(1)}s</span>`;
+    }
+    rulerEl.innerHTML = rulerHTML;
+}
+
+// ══════════════════════════════════════════
+// Scene Mode: Submit — resolve tempos e monta formData
+// ══════════════════════════════════════════
+
+/**
+ * Coleta dados das cenas para submissão (resolve tempos e monta como modo clássico).
+ */
+function collectScenesForSubmit() {
+    if (!state.scenes || state.scenes.length === 0) return null;
+
+    // Ensure resolved
+    resolveAndRefreshTimeline();
+    const result = state.resolvedTimeline;
+    if (!result) return null;
+
+    const audioItems = [];
+    const bgSegments = [];
+    const overlaySegments = [];
+    const textOverlays = [];
+    const secAudios = [];
+    const customAnims = [];
+
+    let audioIdx = 0, bgIdx = 0, ovIdx = 0, txtIdx = 0, saIdx = 0, caIdx = 0;
+
+    for (const scene of state.scenes) {
+        for (const el of scene.elements) {
+            const r = result.resolved.get(el.id);
+            if (!r) continue;
+
+            const start = r.start || 0;
+            const end = r.end || 0;
+
+            if (el.type === 'background') {
+                bgSegments.push({
+                    index: bgIdx++,
+                    start_sec: start,
+                    end_sec: end,
+                    element_id: el.id,
+                    z_level: el.z_level || 0,
+                    transition: el.properties?.transition || 'none',
+                });
+            } else if (el.type === 'audio') {
+                audioItems.push({
+                    index: audioIdx++,
+                    type: 'upload',
+                    volume: 100,
+                    element_id: el.id,
+                });
+            } else if (el.type === 'overlay') {
+                const props = el.properties || {};
+                overlaySegments.push({
+                    index: ovIdx++,
+                    start_sec: start,
+                    end_sec: end,
+                    position: props.position || 'centro',
+                    scale: props.scale || 50,
+                    element_id: el.id,
+                    z_level: el.z_level || 0,
+                    transition: props.transition || 'none',
+                    px_width: props.px_width !== undefined ? props.px_width : null,
+                    px_height: props.px_height !== undefined ? props.px_height : null,
+                    px_x: props.px_x !== undefined ? props.px_x : null,
+                    px_y: props.px_y !== undefined ? props.px_y : null,
+                });
+            } else if (el.type === 'custom_anim') {
+                const props = el.properties || {};
+                customAnims.push({
+                    index: caIdx++,
+                    start_sec: start,
+                    end_sec: end,
+                    position: props.position || 'centro',
+                    scale: props.scale || 30,
+                    loop: props.loop !== false,
+                    element_id: el.id,
+                    z_level: el.z_level || 0,
+                    transition: props.transition || 'none',
+                    px_width: props.px_width !== undefined ? props.px_width : null,
+                    px_height: props.px_height !== undefined ? props.px_height : null,
+                    px_x: props.px_x !== undefined ? props.px_x : null,
+                    px_y: props.px_y !== undefined ? props.px_y : null,
+                });
+            } else if (el.type === 'text') {
+                const props = el.properties || {};
+                textOverlays.push({
+                    index: txtIdx++,
+                    text: props.text || '',
+                    font: '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+                    size: props.size || 48,
+                    color: props.color || '#ffffff',
+                    start_sec: start,
+                    end_sec: end,
+                    position: props.position || 'centro',
+                    z_level: el.z_level || 0,
+                    transition: props.transition || 'none',
+                    px_x: props.px_x !== undefined ? props.px_x : null,
+                    px_y: props.px_y !== undefined ? props.px_y : null,
+                });
+            } else if (el.type === 'secondary_audio') {
+                const props = el.properties || {};
+                secAudios.push({
+                    index: saIdx++,
+                    volume: props.volume || 20,
+                    start_sec: start,
+                    end_sec: end,
+                    loop: props.loop !== false,
+                    element_id: el.id,
+                    z_level: el.z_level || 0,
+                });
+            }
+        }
+    }
+
+    return { audioItems, bgSegments, overlaySegments, textOverlays, secAudios, customAnims };
+}
+
+// ══════════════════════════════════════════
+// Templates: Scene Mode Support
+// ══════════════════════════════════════════
+
+/**
+ * Override collectTemplateData para incluir cenas quando em modo cenas.
+ */
+const _originalCollectTemplateData = typeof collectTemplateData === 'function' ? collectTemplateData : null;
+
+function collectTemplateDataWithScenes() {
+    if (state.useEventTimeline && state.scenes && state.scenes.length > 0) {
+        // Salvar no formato de cenas
+        return {
+            mode: 'scenes',
+            resolution: state.resolution,
+            scenes: state.scenes.map(s => ({
+                scene_id: s.scene_id,
+                name: s.name,
+                description: s.description,
+                preset_key: s.preset_key,
+                elements: s.elements.map(el => ({
+                    id: el.id,
+                    id_suffix: el.id_suffix,
+                    label: el.label,
+                    type: el.type,
+                    trigger: el.trigger,
+                    end_mode: el.end_mode,
+                    z_level: el.z_level,
+                    properties: el.properties,
+                })),
+            })),
+        };
+    }
+    // Fallback para modo clássico
+    return collectTemplateData();
+}
+
+/**
+ * Override applyTemplateData para suportar cenas.
+ */
+const _originalApplyTemplateData = typeof applyTemplateData === 'function' ? applyTemplateData : null;
+
+function applyTemplateDataWithScenes(td) {
+    if (td.mode === 'scenes' && td.scenes) {
+        // Mudar para modo cenas
+        const scenesChip = document.querySelector('.mode-chip[data-mode="scenes"]');
+        if (scenesChip) switchEditorMode(scenesChip, 'scenes');
+
+        // Limpar cenas existentes
+        state.scenes = [];
+        state.sceneResourceDurations = {};
+        const container = document.getElementById('scenesList');
+        if (container) container.innerHTML = '';
+
+        // Resolução
+        if (td.resolution) {
+            state.resolution = td.resolution;
+            document.getElementById('resolution').value = td.resolution;
+            document.querySelectorAll('.res-chip').forEach(c => {
+                c.classList.toggle('active', c.dataset.res === td.resolution);
+            });
+        }
+
+        // Recriar cenas
+        sceneCounter = 0;
+        for (const sceneData of td.scenes) {
+            sceneCounter++;
+            state.scenes.push(sceneData);
+            renderScene(sceneData, state.scenes.length - 1);
+        }
+
+        resolveAndRefreshTimeline();
+        return;
+    }
+
+    // Fallback para modo clássico
+    const classicChip = document.querySelector('.mode-chip[data-mode="classic"]');
+    if (classicChip) switchEditorMode(classicChip, 'classic');
+    applyTemplateData(td);
+}
+
+// ══════════════════════════════════════════
 // Init
 // ══════════════════════════════════════════
+
 document.addEventListener('DOMContentLoaded', () => {
     const secInput = document.getElementById('secondary_audio_file');
     if (secInput) {
@@ -2552,6 +4252,9 @@ document.addEventListener('DOMContentLoaded', () => {
     addAudioItem();
     addBgSegment();
 
+    // Modo cenas presets inicialização
+    renderPresetSelector();
+
     updateLayers();
     refreshTimelineUI();
 
@@ -2563,3 +4266,96 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+// Sincronização automática para imagem/gif em Modo Cenas
+function _syncFineFromQuickForSceneElement(container, props) {
+    const scaleRange = container.querySelector('.overlay-scale-range');
+    const activePos  = container.querySelector('.overlay-pos-grid button.active');
+    if (!scaleRange || !activePos) return;
+
+    const scale  = parseInt(scaleRange.value);
+    const posKey = activePos.dataset.pos || 'centro';
+    const { w, h } = _scaleToPx(container, scale);
+    const { x, y } = _posToPx(posKey, w, h || 0);
+
+    const pxW = container.querySelector('.overlay-px-w');
+    const pxH = container.querySelector('.overlay-px-h');
+    const pxX = container.querySelector('.overlay-px-x');
+    const pxY = container.querySelector('.overlay-px-y');
+
+    if (pxW) pxW.value = w;
+    if (pxH && h !== null) pxH.value = h;
+    if (pxX) pxX.value = x;
+    if (pxY) pxY.value = y;
+
+    // Salvar nas propriedades
+    props.px_width = w;
+    props.px_height = h;
+    props.px_x = x;
+    props.px_y = y;
+}
+
+// Sincronização automática para textos em Modo Cenas
+function _syncFineFromQuickForTextElement(container, props) {
+    const sizeInput = container.querySelector('.scene-text-size');
+    const activePos  = container.querySelector('.text-pos-grid button.active');
+    if (!sizeInput || !activePos) return;
+
+    const size = parseInt(sizeInput.value) || 48;
+    const posKey = activePos.dataset.pos || 'centro';
+    const { x, y } = _posToPx(posKey, 0, 0); // Texto estima no centro
+
+    const pxX = container.querySelector('.text-px-x');
+    const pxY = container.querySelector('.text-px-y');
+
+    if (pxX) pxX.value = x;
+    if (pxY) pxY.value = y;
+
+    // Salvar nas propriedades
+    props.px_x = x;
+    props.px_y = y;
+}
+
+// Intercepta enter no label editável do elemento de cena
+function handleLabelKeydown(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        e.target.blur();
+    }
+}
+
+// Salva o nome personalizado do elemento no estado
+function updateElementLabel(elSpan) {
+    const sceneEl = elSpan.closest('.scene-element');
+    const sceneCard = elSpan.closest('.scene-card');
+    if (!sceneEl || !sceneCard) return;
+
+    const sceneId = sceneCard.dataset.sceneId;
+    const elementId = sceneEl.dataset.elementId;
+
+    const scene = state.scenes.find(s => s.scene_id === sceneId);
+    if (!scene) return;
+
+    const element = scene.elements.find(e => e.id === elementId);
+    if (!element) return;
+
+    const newLabel = elSpan.textContent.trim();
+    if (newLabel) {
+        element.label = newLabel;
+        resolveAndRefreshTimeline();
+    } else {
+        // Fallback para o label original do tipo se apagado
+        const typeLabels = {
+            background: '🖼️ Fundo',
+            audio: '🎵 Áudio',
+            overlay: '📸 Overlay',
+            text: '📝 Texto',
+            secondary_audio: '🎶 Sec.Audio',
+            custom_anim: '🎞️ Anim.Custom',
+        };
+        elSpan.textContent = typeLabels[element.type] || element.type;
+        element.label = elSpan.textContent;
+        resolveAndRefreshTimeline();
+    }
+}
+

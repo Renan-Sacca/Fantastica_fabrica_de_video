@@ -205,7 +205,12 @@ class VideoCompositorRenderer(BaseRenderer):
             if end_sec <= cursor:
                 continue  # segmento totalmente fora da timeline útil
 
-            clips.append({"path": path, "start": cursor, "end": end_sec})
+            clips.append({
+                "path": path, 
+                "start": cursor, 
+                "end": end_sec,
+                "transition": seg.get("transition", "none")
+            })
             cursor = end_sec
 
         # Se restou tempo sem cobertura no final, estende o último clipe
@@ -244,6 +249,7 @@ class VideoCompositorRenderer(BaseRenderer):
                 "px_height": seg.get("px_height"),
                 "px_x": seg.get("px_x"),
                 "px_y": seg.get("px_y"),
+                "transition": seg.get("transition", "none"),
             })
         return clips
 
@@ -271,6 +277,7 @@ class VideoCompositorRenderer(BaseRenderer):
                 "position": anim.get("position", "centro"),
                 "scale": float(anim.get("scale", 30)),
                 "loop": anim.get("loop", True),
+                "transition": anim.get("transition", "none"),
             })
         return clips
 
@@ -359,9 +366,14 @@ class VideoCompositorRenderer(BaseRenderer):
                 "-i", str(clip["path"]),
             ]
             label = f"bgsrc{input_idx}"
+            
+            fade_filter = ""
+            if clip.get("transition") == "fade":
+                fade_filter = ",fade=t=in:st=0:d=0.5"
+                
             fc_parts.append(
                 f"[{input_idx}:v]scale={res_w}:{res_h}:force_original_aspect_ratio=increase,"
-                f"crop={res_w}:{res_h},setsar=1,format=yuv420p,fps={fps}[{label}]"
+                f"crop={res_w}:{res_h},setsar=1,format=yuv420p,fps={fps}{fade_filter}[{label}]"
             )
             bg_labels.append(label)
             input_idx += 1
@@ -416,19 +428,42 @@ class VideoCompositorRenderer(BaseRenderer):
                 else:
                     ov_w = max(1, int(res_w * clip["scale"] / 100))
                     scale_expr = f"{ov_w}:-1"
-                fc_parts.append(f"[{ov_in_idx}:v]scale={scale_expr},format=rgba[{ov_label}]")
+
+                # Transição Fade no Canal Alfa
+                transition = clip.get("transition", "none")
+                fade_filter = ""
+                if transition == "fade":
+                    fade_filter = f",fade=t=in:st={clip['start']}:d=0.5:alpha=1,fade=t=out:st={clip['end']-0.5}:d=0.5:alpha=1"
+
+                fc_parts.append(f"[{ov_in_idx}:v]scale={scale_expr},format=rgba{fade_filter}[{ov_label}]")
 
                 px_x = clip.get("px_x")
                 px_y = clip.get("px_y")
+                
+                pos_expr = POSITION_MAP.get(clip["position"], POSITION_MAP["centro"])
+                X_final, Y_final = pos_expr.split(':')
                 if px_x is not None and px_y is not None:
-                    pos_expr = f"{int(px_x)}:{int(px_y)}"
-                else:
-                    pos_expr = POSITION_MAP.get(clip["position"], POSITION_MAP["centro"])
+                    X_final = str(px_x)
+                    Y_final = str(px_y)
+
+                pos_x_expr = X_final
+                pos_y_expr = Y_final
+                st = clip['start']
+                dur = 0.5
+
+                if transition == "slide_left":
+                    pos_x_expr = f"if(lt(t,{st+dur}),-w+({X_final}+w)*(t-{st})/{dur},{X_final})"
+                elif transition == "slide_right":
+                    pos_x_expr = f"if(lt(t,{st+dur}),W+({X_final}-W)*(t-{st})/{dur},{X_final})"
+                elif transition == "slide_up":
+                    pos_y_expr = f"if(lt(t,{st+dur}),H+({Y_final}-H)*(t-{st})/{dur},{Y_final})"
+                elif transition == "slide_down":
+                    pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
 
                 out_label = f"vov{i}"
                 enable_expr = f"between(t,{clip['start']:.3f},{clip['end']:.3f})"
                 fc_parts.append(
-                    f"[{cur_video}][{ov_label}]overlay={pos_expr}:"
+                    f"[{cur_video}][{ov_label}]overlay={pos_x_expr}:{pos_y_expr}:"
                     f"enable='{enable_expr}':format=auto[{out_label}]"
                 )
                 cur_video = out_label
@@ -446,15 +481,36 @@ class VideoCompositorRenderer(BaseRenderer):
 
                 ca_label = f"ca{i}"
                 ca_w = max(1, int(res_w * clip["scale"] / 100))
+
+                transition = clip.get("transition", "none")
+                fade_filter = ""
+                if transition == "fade":
+                    fade_filter = f",fade=t=in:st={clip['start']}:d=0.5:alpha=1,fade=t=out:st={clip['end']-0.5}:d=0.5:alpha=1"
+
                 fc_parts.append(
-                    f"[{ca_in_idx}:v]scale={ca_w}:-1,format=rgba[{ca_label}]"
+                    f"[{ca_in_idx}:v]scale={ca_w}:-1,format=rgba{fade_filter}[{ca_label}]"
                 )
 
                 pos_expr = POSITION_MAP.get(clip["position"], POSITION_MAP["centro"])
+                X_final, Y_final = pos_expr.split(':')
+                pos_x_expr = X_final
+                pos_y_expr = Y_final
+                st = clip['start']
+                dur = 0.5
+
+                if transition == "slide_left":
+                    pos_x_expr = f"if(lt(t,{st+dur}),-w+({X_final}+w)*(t-{st})/{dur},{X_final})"
+                elif transition == "slide_right":
+                    pos_x_expr = f"if(lt(t,{st+dur}),W+({X_final}-W)*(t-{st})/{dur},{X_final})"
+                elif transition == "slide_up":
+                    pos_y_expr = f"if(lt(t,{st+dur}),H+({Y_final}-H)*(t-{st})/{dur},{Y_final})"
+                elif transition == "slide_down":
+                    pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
+
                 out_label = f"vca{i}"
                 enable_expr = f"between(t,{clip['start']:.3f},{clip['end']:.3f})"
                 fc_parts.append(
-                    f"[{cur_video}][{ca_label}]overlay={pos_expr}:"
+                    f"[{cur_video}][{ca_label}]overlay={pos_x_expr}:{pos_y_expr}:"
                     f"enable='{enable_expr}':format=auto:shortest=1[{out_label}]"
                 )
                 cur_video = out_label
@@ -581,8 +637,28 @@ class VideoCompositorRenderer(BaseRenderer):
 
             px_x = text_obj.get("px_x")
             px_y = text_obj.get("px_y")
-            x_expr = str(int(px_x)) if px_x is not None else pos["x"]
-            y_expr = str(int(px_y)) if px_y is not None else pos["y"]
+            X_final = pos["x"]
+            Y_final = pos["y"]
+            if px_x is not None: X_final = str(int(px_x))
+            if px_y is not None: Y_final = str(int(px_y))
+
+            x_expr = X_final
+            y_expr = Y_final
+            st = start
+            dur = 0.5
+
+            transition = text_obj.get("transition", "none")
+            alpha_expr = ""
+            if transition == "fade":
+                alpha_expr = f":alpha='if(lt(t,{st+dur}),(t-{st})/{dur},if(gt(t,{end-dur}),({end}-t)/{dur},1))'"
+            elif transition == "slide_left":
+                x_expr = f"if(lt(t,{st+dur}),-tw+({X_final}+tw)*(t-{st})/{dur},{X_final})"
+            elif transition == "slide_right":
+                x_expr = f"if(lt(t,{st+dur}),w+({X_final}-w)*(t-{st})/{dur},{X_final})"
+            elif transition == "slide_up":
+                y_expr = f"if(lt(t,{st+dur}),h+({Y_final}-h)*(t-{st})/{dur},{Y_final})"
+            elif transition == "slide_down":
+                y_expr = f"if(lt(t,{st+dur}),-th+({Y_final}+th)*(t-{st})/{dur},{Y_final})"
 
             # Escapar texto para o FFmpeg drawtext
             escaped_text = text_str.replace('\\', '\\\\').replace("'", "'\\''").replace(':', '\\:').replace('%', '\\%')
@@ -595,7 +671,7 @@ class VideoCompositorRenderer(BaseRenderer):
                 f"drawtext=fontfile={fontfile}:text='{escaped_text}':"
                 f"fontsize={fontsize}:fontcolor={fontcolor}:"
                 f"x='{x_expr}':y='{y_expr}':"
-                f"enable='{enable_expr}'"
+                f"enable='{enable_expr}'{alpha_expr}"
             )
 
             fc_parts.append(f"[{cur_video}]{drawtext_filter}[{out_label}]")

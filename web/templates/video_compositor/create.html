@@ -445,6 +445,118 @@
         color: #a78bfa; transition: all .2s;
     }
     .vc-btn-tpl:hover { background: rgba(124,77,255,.2); border-color: rgba(124,77,255,.5); transform: translateY(-1px); }
+
+    /* ── Mode Toggle (Classic / Scenes) ── */
+    .mode-toggle-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 10px 16px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; }
+    .mode-toggle-label { font-size: .85rem; font-weight: 600; color: var(--text-secondary); }
+    .mode-toggle-chips { display: flex; gap: 6px; }
+    .mode-chip { padding: 7px 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); cursor: pointer; font-size: .82rem; font-weight: 600; opacity: .7; transition: all .2s; background: transparent; color: inherit; }
+    .mode-chip.active { background: linear-gradient(135deg, #e040fb, #7c4dff); color: #fff; opacity: 1; border-color: #7c4dff; }
+    .mode-chip:hover:not(.active) { opacity: 1; border-color: rgba(255,255,255,.3); }
+    .mode-classic-content, .mode-scenes-content { display: none; }
+    .mode-classic-content.active, .mode-scenes-content.active { display: block; }
+
+    /* ── Scene Cards ── */
+    .scene-card { border: 1px solid rgba(124,77,255,.25); border-radius: 14px; padding: 0; margin-bottom: 14px; background: rgba(124,77,255,.04); transition: all .25s; position: relative; }
+    .scene-card.dropdown-active { z-index: 101 !important; }
+    .scene-card:hover { border-color: rgba(124,77,255,.4); }
+    .scene-card-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; background: rgba(124,77,255,.06); border-bottom: 1px solid rgba(124,77,255,.12); user-select: none; border-top-left-radius: 12px; border-top-right-radius: 12px; }
+    .scene-card-header:hover { background: rgba(124,77,255,.1); }
+    .scene-card-num { background: linear-gradient(135deg, #7c4dff, #e040fb); color: #fff; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; flex-shrink: 0; }
+    .scene-card-name { flex: 1; font-size: .95rem; font-weight: 700; }
+    .scene-card-badge { font-size: .65rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: rgba(224,64,251,.12); color: #e040fb; border: 1px solid rgba(224,64,251,.25); }
+    .scene-card-actions { display: flex; gap: 4px; }
+    .scene-card-actions button { background: none; border: none; cursor: pointer; font-size: .95rem; padding: 4px 6px; border-radius: 6px; transition: all .15s; color: rgba(255,255,255,.5); }
+    .scene-card-actions button:hover { background: rgba(255,255,255,.1); color: #fff; }
+    .scene-card-actions .sc-btn-danger:hover { color: #ef4444; background: rgba(239,68,68,.1); }
+    .scene-card-body { padding: 14px 16px; }
+    .scene-card.collapsed .scene-card-body { display: none; }
+    .scene-chevron { transition: transform .2s; font-size: .75rem; }
+    .scene-card.collapsed .scene-chevron { transform: rotate(-90deg); }
+
+    /* ── Scene Element Row ── */
+    .scene-element { border: 1px solid rgba(255,255,255,.1); border-radius: 10px; margin-bottom: 10px; background: rgba(255,255,255,.02); position: relative; transition: all .2s; }
+    .scene-element:hover { border-color: rgba(255,255,255,.2); }
+    .scene-element-header { display: flex; align-items: center; gap: 8px; padding: 12px 14px; cursor: pointer; user-select: none; border-bottom: 1px solid rgba(255,255,255,.05); }
+    .scene-element-chevron { transition: transform .2s; font-size: .65rem; color: var(--text-muted); }
+    .scene-element.collapsed .scene-element-chevron { transform: rotate(-90deg); }
+    .scene-element-icon { font-size: 1.1rem; }
+    .scene-element-label { flex: 1; font-size: .88rem; font-weight: 600; cursor: text; outline: none; border-bottom: 1px dashed rgba(255,255,255,0.25); margin-right: 8px; transition: border-color 0.2s; }
+    .scene-element-label:focus { border-bottom-color: #e040fb; }
+    .scene-element-type { font-size: .65rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
+    .scene-element-type.bg { background: rgba(33,150,243,.15); color: #42a5f5; border: 1px solid rgba(33,150,243,.25); }
+    .scene-element-type.audio { background: rgba(233,30,99,.15); color: #ec407a; border: 1px solid rgba(233,30,99,.25); }
+    .scene-element-type.overlay { background: rgba(76,175,80,.15); color: #66bb6a; border: 1px solid rgba(76,175,80,.25); }
+    .scene-element-type.text { background: rgba(255,152,0,.15); color: #ffa726; border: 1px solid rgba(255,152,0,.25); }
+    .scene-element-type.secondary_audio { background: rgba(171,71,188,.15); color: #ba68c8; border: 1px solid rgba(171,71,188,.25); }
+    .scene-element-type.animation { background: rgba(0,184,212,.15); color: #00e5ff; border: 1px solid rgba(0,184,212,.25); }
+    .scene-element-type.custom_anim { background: rgba(124,77,255,.15); color: #b388ff; border: 1px solid rgba(124,77,255,.25); }
+    .scene-element-remove { background: none; border: none; color: rgba(239,68,68,.6); cursor: pointer; font-size: .9rem; padding: 2px 6px; border-radius: 4px; }
+    .scene-element-remove:hover { color: #ef4444; background: rgba(239,68,68,.1); }
+    .scene-element-body { padding: 12px 14px; }
+    .scene-element.collapsed .scene-element-body { display: none; }
+
+    /* ── Event Selector ── */
+    .event-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: end; margin-bottom: 8px; }
+    .event-row label { font-size: .75rem; margin: 0 0 2px; color: var(--text-secondary); }
+    .event-row select, .event-row input { padding: 7px 10px; font-size: .82rem; }
+    .event-row .event-plus { display: flex; align-items: flex-end; padding-bottom: 8px; font-size: .85rem; color: var(--text-muted); }
+    .end-mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end; margin-bottom: 8px; }
+    .end-mode-row label { font-size: .75rem; margin: 0 0 2px; color: var(--text-secondary); }
+
+    /* ── Z-Level Control ── */
+    .z-level-control { display: flex; align-items: center; gap: 8px; margin-top: 6px; padding: 6px 10px; background: rgba(255,255,255,.03); border-radius: 8px; }
+    .z-level-control label { margin: 0; font-size: .75rem; color: var(--text-secondary); white-space: nowrap; }
+    .z-level-control input[type=number] { width: 60px; padding: 4px 8px; font-size: .82rem; text-align: center; }
+    .z-level-control .z-level-hint { font-size: .65rem; opacity: .45; }
+
+    /* ── Visual Timeline Bar ── */
+    .timeline-visual { margin-top: 14px; padding: 14px; background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; overflow-x: auto; }
+    .timeline-visual-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .timeline-visual-title { font-size: .85rem; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+    .timeline-visual-duration { font-size: .78rem; color: #e040fb; font-weight: 600; background: rgba(224,64,251,.12); padding: 2px 10px; border-radius: 999px; }
+    .timeline-tracks { position: relative; min-height: 60px; }
+    .timeline-track { display: flex; align-items: center; gap: 0; height: 28px; margin-bottom: 4px; position: relative; }
+    .timeline-track-label { width: 80px; flex-shrink: 0; font-size: .65rem; font-weight: 600; color: var(--text-secondary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; padding-right: 6px; }
+    .timeline-track-bar { flex: 1; height: 100%; position: relative; background: rgba(255,255,255,.03); border-radius: 4px; overflow: hidden; }
+    .timeline-block { position: absolute; height: 100%; border-radius: 4px; display: flex; align-items: center; padding: 0 6px; font-size: .6rem; font-weight: 600; color: #fff; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; transition: opacity .15s; min-width: 4px; }
+    .timeline-block:hover { opacity: .85; }
+    .timeline-block.bg { background: linear-gradient(135deg, #1565c0, #42a5f5); }
+    .timeline-block.audio { background: linear-gradient(135deg, #c2185b, #ec407a); }
+    .timeline-block.overlay { background: linear-gradient(135deg, #2e7d32, #66bb6a); }
+    .timeline-block.text { background: linear-gradient(135deg, #e65100, #ffa726); }
+    .timeline-block.secondary_audio { background: linear-gradient(135deg, #7b1fa2, #ba68c8); }
+    .timeline-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #e040fb; z-index: 10; pointer-events: none; box-shadow: 0 0 6px rgba(224,64,251,.5); }
+    .timeline-time-ruler { display: flex; justify-content: space-between; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.06); }
+    .timeline-time-ruler span { font-size: .6rem; color: var(--text-muted); font-weight: 500; }
+
+    /* ── Scene Preset Selector ── */
+    .preset-selector { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .preset-card { background: rgba(255,255,255,.03); border: 2px solid rgba(255,255,255,.08); border-radius: 12px; padding: 12px 10px; text-align: center; cursor: pointer; transition: all .2s; }
+    .preset-card:hover { border-color: rgba(224,64,251,.4); transform: translateY(-2px); background: rgba(224,64,251,.05); }
+    .preset-card .pc-icon { font-size: 1.8rem; display: block; margin-bottom: 4px; }
+    .preset-card .pc-name { font-size: .78rem; font-weight: 600; color: #fff; }
+    .preset-card .pc-desc { font-size: .65rem; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── File drop inside scenes (compact) ── */
+    .scene-file-drop { border: 2px dashed rgba(255,255,255,.12); border-radius: 10px; padding: 10px; text-align: center; cursor: pointer; position: relative; overflow: hidden; transition: all .2s; margin-top: 6px; }
+    .scene-file-drop:hover { border-color: #e040fb; background: rgba(224,64,251,.04); }
+    .scene-file-drop input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 2; }
+    .scene-file-drop .sfd-label { font-size: .78rem; color: var(--text-secondary); }
+    .scene-file-drop .sfd-hint { font-size: .65rem; color: var(--text-muted); margin-top: 2px; }
+    .scene-file-drop .file-name { font-size: .75rem; color: #e040fb; margin-top: 4px; display: none; }
+    .scene-file-drop img.preview { max-width: 100%; max-height: 100px; border-radius: 6px; margin-top: 6px; display: none; }
+
+    /* ── Add Element to Scene ── */
+    .add-element-btn { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px dashed rgba(255,255,255,.15); border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: .8rem; font-weight: 600; transition: all .2s; margin-top: 6px; }
+    .add-element-btn:hover { border-color: #e040fb; color: #e040fb; }
+    .add-element-dropdown { position: absolute; background: #1e1e36; border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: 6px 0; z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,.5); min-width: 180px; }
+    .add-element-dropdown button { display: block; width: 100%; padding: 8px 14px; background: none; border: none; color: #fff; text-align: left; font-size: .82rem; cursor: pointer; transition: background .15s; }
+    .add-element-dropdown button:hover { background: rgba(224,64,251,.1); }
+
+    /* ── Recalculate button ── */
+    .recalc-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px; border: none; border-radius: 10px; background: linear-gradient(135deg, #00b8d4, #0091ea); color: #fff; font-weight: 700; font-size: .88rem; cursor: pointer; transition: all .2s; margin-top: 8px; }
+    .recalc-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,145,234,.35); }
 </style>
 {% endblock %}
 
@@ -481,9 +593,50 @@
             </div>
         </div>
 
+        <!-- ═══ Toggle Modo Clássico / Modo Cenas ═══ -->
+        <div class="mode-toggle-wrap">
+            <span class="mode-toggle-label">Modo:</span>
+            <div class="mode-toggle-chips">
+                <button type="button" class="mode-chip active" data-mode="classic" onclick="switchEditorMode(this, 'classic')">📋 Clássico</button>
+                <button type="button" class="mode-chip" data-mode="scenes" onclick="switchEditorMode(this, 'scenes')">🎬 Cenas (Eventos)</button>
+            </div>
+            <span class="muted" style="font-size:.72rem; margin-left:auto;">💡 Modo Cenas permite timeline dinâmica baseada em eventos</span>
+        </div>
+
         <div class="vc-grid">
             <!-- ═══ Coluna Esquerda — Configurações ═══ -->
             <div class="vc-col-config">
+
+                <!-- ══════ MODO CENAS ══════ -->
+                <div class="mode-scenes-content" id="scenesMode">
+                    <!-- Preset Selector -->
+                    <div class="vc-card">
+                        <h2>🎬 Adicionar Cena</h2>
+                        <p class="muted" style="margin-bottom:10px;">Escolha um preset ou crie uma cena vazia. Depois, personalize os elementos dentro dela.</p>
+                        <div class="preset-selector" id="presetSelector"></div>
+                    </div>
+
+                    <!-- Scene List -->
+                    <div id="scenesList"></div>
+
+                    <!-- Recalculate -->
+                    <button type="button" class="recalc-btn" onclick="resolveAndRefreshTimeline()">
+                        🔄 Recalcular Timeline
+                    </button>
+
+                    <!-- Visual Timeline -->
+                    <div class="timeline-visual" id="timelineVisual" style="display:none;">
+                        <div class="timeline-visual-header">
+                            <div class="timeline-visual-title">🎞️ Timeline</div>
+                            <div class="timeline-visual-duration" id="tlTotalDuration">0.0s</div>
+                        </div>
+                        <div class="timeline-tracks" id="timelineTracks"></div>
+                        <div class="timeline-time-ruler" id="timelineRuler"></div>
+                    </div>
+                </div>
+
+                <!-- ══════ MODO CLÁSSICO ══════ -->
+                <div class="mode-classic-content active" id="classicMode">
 
                 <!-- 🎵 Áudio Principal (múltiplos) -->
                 <div class="vc-card">
@@ -571,10 +724,11 @@
                     </div>
                 </div>
 
+                </div><!-- /mode-classic-content -->
             </div><!-- /vc-col-config -->
 
             <!-- ═══ Coluna Direita — Preview & Camadas ═══ -->
-            <div class="vc-col-preview" style="position: sticky; top: 15px; align-self: start;">
+            <div class="vc-col-preview" style="position: sticky; top: 15px; align-self: start; max-width: 340px; width: 100%; margin: 0 auto;">
                 <!-- Pré-visualização -->
                 <div class="vc-card">
                     <h2>👁️ Pré-visualização</h2>
@@ -1138,5 +1292,69 @@
 </div>
 </template>
 
-<script src="/static/video_compositor.js?v=15"></script>
+<!-- ═══ Template: Elemento de cena (usado pelo JS para instanciar) ═══ -->
+<template id="tplSceneElement">
+<div class="scene-element" data-element-id="">
+    <div class="scene-element-header" onclick="toggleSceneElement(this)">
+        <span class="scene-element-chevron">▼</span>
+        <span class="scene-element-icon">📦</span>
+        <span class="scene-element-label" contenteditable="true" onclick="event.stopPropagation()" onkeydown="handleLabelKeydown(event)" onblur="updateElementLabel(this)">Elemento</span>
+        <span class="scene-element-type">tipo</span>
+        <button type="button" class="scene-element-remove" onclick="event.stopPropagation(); removeSceneElement(this)" title="Remover">✕</button>
+    </div>
+
+    <div class="scene-element-body">
+        <!-- Trigger (Evento de Início) -->
+        <div class="event-row">
+            <div>
+                <label>Evento de Início</label>
+                <select class="trigger-event"></select>
+            </div>
+            <div class="event-plus">+</div>
+            <div>
+                <label>Offset (s)</label>
+                <input type="number" class="trigger-offset" step="0.1" value="0" placeholder="0">
+            </div>
+        </div>
+
+        <!-- End Mode -->
+        <div class="end-mode-row">
+            <div>
+                <label>Modo de Fim</label>
+                <select class="end-mode-select" onchange="onEndModeChange(this)">
+                    <option value="resource_duration">📏 Duração do Recurso</option>
+                    <option value="scene_end">🏁 Até Fim da Cena</option>
+                    <option value="duration">⏱️ Duração Fixa</option>
+                    <option value="event">🔗 Até um Evento</option>
+                </select>
+            </div>
+            <div class="end-mode-extra">
+                <!-- Populated dynamically -->
+            </div>
+        </div>
+
+        <!-- Z-Level -->
+        <div class="z-level-control">
+            <label>📐 Nível (Z)</label>
+            <input type="number" class="z-level-input" min="0" max="100" step="1" value="0">
+            <span class="z-level-hint">Maior = mais à frente</span>
+        </div>
+
+        <!-- Exportar Eventos -->
+        <div class="export-events-control" style="margin-top:8px;">
+            <label style="display:flex; align-items:center; gap:6px; font-size:.82rem; user-select:none; cursor:pointer; margin:0;">
+                <input type="checkbox" class="export-events-check" style="width:auto; accent-color:#e040fb;">
+                🔗 Exportar eventos deste elemento
+            </label>
+            <span class="z-level-hint" style="display:block; margin-top:2px;">Disponibiliza os eventos de início/fim deste elemento no editor</span>
+        </div>
+
+        <!-- File / Content area (populated by JS depending on type) -->
+        <div class="scene-element-content" style="margin-top:8px;"></div>
+    </div>
+</div>
+</template>
+
+<script src="/static/timeline_engine.js?v=1"></script>
+<script src="/static/video_compositor.js?v=16"></script>
 {% endblock %}
