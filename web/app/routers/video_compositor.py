@@ -434,6 +434,8 @@ async def render_compositor(request: Request):
                 "end_sec": seg_meta.get("end_sec"),
                 "position": seg_meta.get("position", "centro"),
                 "scale": seg_meta.get("scale", 50),
+                "transition": seg_meta.get("transition", "none"),
+                "z_level": seg_meta.get("z_level", 0),
                 # Campos de controle fino (opcionais)
                 "px_width":  seg_meta.get("px_width"),
                 "px_height": seg_meta.get("px_height"),
@@ -462,6 +464,8 @@ async def render_compositor(request: Request):
                 "position": anim_meta.get("position", "centro"),
                 "scale": anim_meta.get("scale", 30),
                 "loop": anim_meta.get("loop", True),
+                "transition": anim_meta.get("transition", "none"),
+                "z_level": anim_meta.get("z_level", 0),
             })
 
         # ── Áudios secundários (múltiplos) ──

@@ -250,6 +250,7 @@ class VideoCompositorRenderer(BaseRenderer):
                 "px_x": seg.get("px_x"),
                 "px_y": seg.get("px_y"),
                 "transition": seg.get("transition", "none"),
+                "z_level": int(seg.get("z_level", 0) or 0),
             })
         return clips
 
@@ -278,6 +279,7 @@ class VideoCompositorRenderer(BaseRenderer):
                 "scale": float(anim.get("scale", 30)),
                 "loop": anim.get("loop", True),
                 "transition": anim.get("transition", "none"),
+                "z_level": int(anim.get("z_level", 0) or 0),
             })
         return clips
 
@@ -411,121 +413,138 @@ class VideoCompositorRenderer(BaseRenderer):
         if elements:
             cur_video = self._apply_elements(fc_parts, cur_video, elements, res_w, res_h, duration)
 
-        # ── Imagens sobrepostas, cada uma na sua janela de tempo ──
-        if overlay_clips:
+        # ── Camadas posicionáveis (overlays, animações customizadas e textos),
+        #    mescladas e ordenadas por z_level (maior = mais à frente) ──
+        layer_items = []
+        for clip in (overlay_clips or []):
+            layer_items.append(("overlay", clip.get("z_level", 0) or 0, clip))
+        for clip in (custom_anim_clips or []):
+            layer_items.append(("custom_anim", clip.get("z_level", 0) or 0, clip))
+        for txt in (text_overlays or []):
+            layer_items.append(("text", txt.get("z_level", 0) or 0, txt))
+        # sort estável: preserva a ordem relativa original entre itens de mesmo z_level
+        layer_items.sort(key=lambda item: item[1])
+
+        if layer_items:
             if progress_fn:
-                progress_fn("composing", 65, "Adicionando imagens sobrepostas...")
-            for i, clip in enumerate(overlay_clips):
-                inputs += ["-loop", "1", "-framerate", str(fps), "-i", str(clip["path"])]
-                ov_in_idx = input_idx
-                input_idx += 1
+                progress_fn("composing", 65, "Compondo camadas por nível (Z)...")
 
-                ov_label = f"ov{i}"
-                px_w = clip.get("px_width")
-                px_h = clip.get("px_height")
-                if px_w or px_h:
-                    scale_expr = f"{int(px_w) if px_w else -1}:{int(px_h) if px_h else -1}"
-                else:
-                    ov_w = max(1, int(res_w * clip["scale"] / 100))
-                    scale_expr = f"{ov_w}:-1"
+            ov_counter = 0
+            ca_counter = 0
+            txt_counter = 0
 
-                # Transição Fade no Canal Alfa
-                transition = clip.get("transition", "none")
-                fade_filter = ""
-                if transition == "fade":
-                    fade_filter = f",fade=t=in:st={clip['start']}:d=0.5:alpha=1,fade=t=out:st={clip['end']-0.5}:d=0.5:alpha=1"
+            for kind, _z, clip in layer_items:
+                if kind == "overlay":
+                    i = ov_counter
+                    ov_counter += 1
+                    inputs += ["-loop", "1", "-framerate", str(fps), "-i", str(clip["path"])]
+                    ov_in_idx = input_idx
+                    input_idx += 1
 
-                fc_parts.append(f"[{ov_in_idx}:v]scale={scale_expr},format=rgba{fade_filter}[{ov_label}]")
+                    ov_label = f"ov{i}"
+                    px_w = clip.get("px_width")
+                    px_h = clip.get("px_height")
+                    if px_w or px_h:
+                        scale_expr = f"{int(px_w) if px_w else -1}:{int(px_h) if px_h else -1}"
+                    else:
+                        ov_w = max(1, int(res_w * clip["scale"] / 100))
+                        scale_expr = f"{ov_w}:-1"
 
-                px_x = clip.get("px_x")
-                px_y = clip.get("px_y")
-                
-                pos_expr = POSITION_MAP.get(clip["position"], POSITION_MAP["centro"])
-                X_final, Y_final = pos_expr.split(':')
-                if px_x is not None and px_y is not None:
-                    X_final = str(px_x)
-                    Y_final = str(px_y)
+                    # Transição Fade no Canal Alfa
+                    transition = clip.get("transition", "none")
+                    fade_filter = ""
+                    if transition == "fade":
+                        fade_filter = f",fade=t=in:st={clip['start']}:d=0.5:alpha=1,fade=t=out:st={clip['end']-0.5}:d=0.5:alpha=1"
 
-                pos_x_expr = X_final
-                pos_y_expr = Y_final
-                st = clip['start']
-                dur = 0.5
+                    fc_parts.append(f"[{ov_in_idx}:v]scale={scale_expr},format=rgba{fade_filter}[{ov_label}]")
 
-                if transition == "slide_left":
-                    pos_x_expr = f"if(lt(t,{st+dur}),-w+({X_final}+w)*(t-{st})/{dur},{X_final})"
-                elif transition == "slide_right":
-                    pos_x_expr = f"if(lt(t,{st+dur}),W+({X_final}-W)*(t-{st})/{dur},{X_final})"
-                elif transition == "slide_up":
-                    pos_y_expr = f"if(lt(t,{st+dur}),H+({Y_final}-H)*(t-{st})/{dur},{Y_final})"
-                elif transition == "slide_down":
-                    pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
+                    px_x = clip.get("px_x")
+                    px_y = clip.get("px_y")
 
-                out_label = f"vov{i}"
-                enable_expr = f"between(t,{clip['start']:.3f},{clip['end']:.3f})"
-                fc_parts.append(
-                    f"[{cur_video}][{ov_label}]overlay={pos_x_expr}:{pos_y_expr}:"
-                    f"enable='{enable_expr}':format=auto[{out_label}]"
-                )
-                cur_video = out_label
+                    pos_expr = POSITION_MAP.get(clip["position"], POSITION_MAP["centro"])
+                    X_final, Y_final = pos_expr.split(':')
+                    if px_x is not None and px_y is not None:
+                        X_final = str(px_x)
+                        Y_final = str(px_y)
 
-        # ── Animações customizadas (vídeo/GIF como overlay) ──
-        if custom_anim_clips:
-            if progress_fn:
-                progress_fn("composing", 70, "Adicionando animações customizadas...")
-            for i, clip in enumerate(custom_anim_clips):
-                clip_duration = clip["end"] - clip["start"]
-                loop_flag = ["-stream_loop", "-1"] if clip.get("loop", True) else []
-                inputs += [*loop_flag, "-i", str(clip["path"])]
-                ca_in_idx = input_idx
-                input_idx += 1
+                    pos_x_expr = X_final
+                    pos_y_expr = Y_final
+                    st = clip['start']
+                    dur = 0.5
 
-                ca_label = f"ca{i}"
-                ca_w = max(1, int(res_w * clip["scale"] / 100))
+                    if transition == "slide_left":
+                        pos_x_expr = f"if(lt(t,{st+dur}),-w+({X_final}+w)*(t-{st})/{dur},{X_final})"
+                    elif transition == "slide_right":
+                        pos_x_expr = f"if(lt(t,{st+dur}),W+({X_final}-W)*(t-{st})/{dur},{X_final})"
+                    elif transition == "slide_up":
+                        pos_y_expr = f"if(lt(t,{st+dur}),H+({Y_final}-H)*(t-{st})/{dur},{Y_final})"
+                    elif transition == "slide_down":
+                        pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
 
-                transition = clip.get("transition", "none")
-                fade_filter = ""
-                if transition == "fade":
-                    fade_filter = f",fade=t=in:st={clip['start']}:d=0.5:alpha=1,fade=t=out:st={clip['end']-0.5}:d=0.5:alpha=1"
+                    out_label = f"vov{i}"
+                    enable_expr = f"between(t,{clip['start']:.3f},{clip['end']:.3f})"
+                    fc_parts.append(
+                        f"[{cur_video}][{ov_label}]overlay={pos_x_expr}:{pos_y_expr}:"
+                        f"enable='{enable_expr}':format=auto[{out_label}]"
+                    )
+                    cur_video = out_label
 
-                fc_parts.append(
-                    f"[{ca_in_idx}:v]scale={ca_w}:-1,format=rgba{fade_filter}[{ca_label}]"
-                )
+                elif kind == "custom_anim":
+                    i = ca_counter
+                    ca_counter += 1
+                    loop_flag = ["-stream_loop", "-1"] if clip.get("loop", True) else []
+                    inputs += [*loop_flag, "-i", str(clip["path"])]
+                    ca_in_idx = input_idx
+                    input_idx += 1
 
-                pos_expr = POSITION_MAP.get(clip["position"], POSITION_MAP["centro"])
-                X_final, Y_final = pos_expr.split(':')
-                pos_x_expr = X_final
-                pos_y_expr = Y_final
-                st = clip['start']
-                dur = 0.5
+                    ca_label = f"ca{i}"
+                    ca_w = max(1, int(res_w * clip["scale"] / 100))
 
-                if transition == "slide_left":
-                    pos_x_expr = f"if(lt(t,{st+dur}),-w+({X_final}+w)*(t-{st})/{dur},{X_final})"
-                elif transition == "slide_right":
-                    pos_x_expr = f"if(lt(t,{st+dur}),W+({X_final}-W)*(t-{st})/{dur},{X_final})"
-                elif transition == "slide_up":
-                    pos_y_expr = f"if(lt(t,{st+dur}),H+({Y_final}-H)*(t-{st})/{dur},{Y_final})"
-                elif transition == "slide_down":
-                    pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
+                    transition = clip.get("transition", "none")
+                    fade_filter = ""
+                    if transition == "fade":
+                        fade_filter = f",fade=t=in:st={clip['start']}:d=0.5:alpha=1,fade=t=out:st={clip['end']-0.5}:d=0.5:alpha=1"
 
-                out_label = f"vca{i}"
-                enable_expr = f"between(t,{clip['start']:.3f},{clip['end']:.3f})"
-                fc_parts.append(
-                    f"[{cur_video}][{ca_label}]overlay={pos_x_expr}:{pos_y_expr}:"
-                    f"enable='{enable_expr}':format=auto:shortest=1[{out_label}]"
-                )
-                cur_video = out_label
+                    fc_parts.append(
+                        f"[{ca_in_idx}:v]scale={ca_w}:-1,format=rgba{fade_filter}[{ca_label}]"
+                    )
+
+                    pos_expr = POSITION_MAP.get(clip["position"], POSITION_MAP["centro"])
+                    X_final, Y_final = pos_expr.split(':')
+                    pos_x_expr = X_final
+                    pos_y_expr = Y_final
+                    st = clip['start']
+                    dur = 0.5
+
+                    if transition == "slide_left":
+                        pos_x_expr = f"if(lt(t,{st+dur}),-w+({X_final}+w)*(t-{st})/{dur},{X_final})"
+                    elif transition == "slide_right":
+                        pos_x_expr = f"if(lt(t,{st+dur}),W+({X_final}-W)*(t-{st})/{dur},{X_final})"
+                    elif transition == "slide_up":
+                        pos_y_expr = f"if(lt(t,{st+dur}),H+({Y_final}-H)*(t-{st})/{dur},{Y_final})"
+                    elif transition == "slide_down":
+                        pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
+
+                    out_label = f"vca{i}"
+                    enable_expr = f"between(t,{clip['start']:.3f},{clip['end']:.3f})"
+                    fc_parts.append(
+                        f"[{cur_video}][{ca_label}]overlay={pos_x_expr}:{pos_y_expr}:"
+                        f"enable='{enable_expr}':format=auto:shortest=1[{out_label}]"
+                    )
+                    cur_video = out_label
+
+                elif kind == "text":
+                    i = txt_counter
+                    txt_counter += 1
+                    cur_video = self._apply_text_overlays(
+                        fc_parts, cur_video, [clip], res_w, res_h, duration, label_prefix=f"vtxtz{i}_"
+                    )
 
         # ── Animações sobre o vídeo final ──
         if animations:
             if progress_fn:
                 progress_fn("composing", 75, "Aplicando animações...")
             cur_video = self._apply_animations(fc_parts, cur_video, animations, res_w, res_h, duration)
-
-        # ── Textos sobrepostos (drawtext) ──
-        if text_overlays:
-            if progress_fn:
-                progress_fn("composing", 76, "Adicionando textos...")
-            cur_video = self._apply_text_overlays(fc_parts, cur_video, text_overlays, res_w, res_h, duration)
 
         # ── Áudios secundários (múltiplos, com tempo/loop/volume) ──
         if sec_audio_tracks:
@@ -603,6 +622,7 @@ class VideoCompositorRenderer(BaseRenderer):
     def _apply_text_overlays(
         self, fc_parts: list, cur_video: str,
         text_overlays: list, res_w: int, res_h: int, duration: float,
+        label_prefix: str = "vtxt",
     ) -> str:
         """Aplica textos sobrepostos ao vídeo usando o filtro drawtext do FFmpeg."""
         TEXT_POSITION_MAP = {
@@ -664,7 +684,7 @@ class VideoCompositorRenderer(BaseRenderer):
             escaped_text = text_str.replace('\\', '\\\\').replace("'", "'\\''").replace(':', '\\:').replace('%', '\\%')
 
             enable_expr = f"between(t,{start:.3f},{end:.3f})"
-            out_label = f"vtxt{i}"
+            out_label = f"{label_prefix}{i}"
 
             # Filtro drawtext
             drawtext_filter = (

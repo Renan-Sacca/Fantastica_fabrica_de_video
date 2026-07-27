@@ -683,7 +683,9 @@ function getOverlaySegmentsData() {
             const times = state.resolvedTimeline.resolved.get(id);
             const start = times ? times.start : 0;
             const end = times ? times.end : null;
-            return { seg, start, end };
+            const scene = state.scenes.find(s => s.scene_id === seg.closest('.scene-card').dataset.sceneId);
+            const elConfig = scene?.elements.find(e => e.id === id);
+            return { seg, start, end, z_level: elConfig?.z_level || 0 };
         });
     }
 
@@ -693,7 +695,7 @@ function getOverlaySegmentsData() {
         const start = startInput && startInput.value !== '' ? parseFloat(startInput.value) : 0;
         const endRaw = endInput ? endInput.value.trim() : '';
         const end = endRaw !== '' ? parseFloat(endRaw) : null;
-        return { seg, start, end };
+        return { seg, start, end, z_level: 0 };
     });
 }
 
@@ -837,7 +839,7 @@ function refreshPreviewNow() {
         .map(ov => {
             const preview = ov.seg.querySelector('.preview');
             const url = preview && preview.style.display !== 'none' && preview.src ? preview.src : null;
-            return url ? { url, seg: ov.seg } : null;
+            return url ? { url, seg: ov.seg, z_level: ov.z_level || 0 } : null;
         })
         .filter(Boolean);
 
@@ -941,6 +943,7 @@ function getTextOverlaysData() {
                 position: props.position || 'centro',
                 px_x: null,
                 px_y: null,
+                z_level: elConfig.z_level || 0,
                 seg: item
             });
         });
@@ -981,6 +984,7 @@ function getTextOverlaysData() {
             position,
             px_x: pxX !== '' && pxX !== undefined ? parseFloat(pxX) : null,
             px_y: pxY !== '' && pxY !== undefined ? parseFloat(pxY) : null,
+            z_level: 0,
             seg: item
         });
     });
@@ -1004,7 +1008,8 @@ function updatePreview(bgUrl, activeOverlays, activeTexts, t) {
     }
 
     overlaysContainer.innerHTML = '';
-    (activeOverlays || []).forEach(({ url, seg }) => {
+    const sortedOverlays = [...(activeOverlays || [])].sort((a, b) => (a.z_level || 0) - (b.z_level || 0));
+    sortedOverlays.forEach(({ url, seg, z_level }) => {
         const activePos = seg.querySelector('.overlay-pos-grid button.active');
         const scaleRange = seg.querySelector('.overlay-scale-range');
         const scale = scaleRange ? parseInt(scaleRange.value) : 50;
@@ -1023,6 +1028,7 @@ function updatePreview(bgUrl, activeOverlays, activeTexts, t) {
         img.style.right = p.right;
         img.style.bottom = p.bottom;
         img.style.transform = p.transform;
+        img.style.zIndex = String(2 + (z_level || 0));
 
         const pxW = seg.querySelector('.overlay-px-w')?.value.trim();
         const pxH = seg.querySelector('.overlay-px-h')?.value.trim();
@@ -1041,7 +1047,8 @@ function updatePreview(bgUrl, activeOverlays, activeTexts, t) {
         const [w, h] = state.resolution.split('x').map(Number);
         const scaleFactor = canvasW / w;
 
-        (activeTexts || []).forEach(txt => {
+        const sortedTexts = [...(activeTexts || [])].sort((a, b) => (a.z_level || 0) - (b.z_level || 0));
+        sortedTexts.forEach(txt => {
             const div = document.createElement('div');
             div.className = 'preview-text';
             div.textContent = txt.text;
@@ -1049,6 +1056,7 @@ function updatePreview(bgUrl, activeOverlays, activeTexts, t) {
             const scaledSize = Math.max(8, txt.size * scaleFactor);
             div.style.fontSize = `${scaledSize}px`;
             div.style.color = txt.color;
+            div.style.zIndex = String(3 + (txt.z_level || 0));
 
             div.style.fontFamily = txt.fontFamily || 'Arial, "Liberation Sans", sans-serif';
             div.style.fontStyle = txt.fontStyle || 'normal';
@@ -1612,7 +1620,8 @@ function collectTextOverlayMeta() {
             end_sec: txt.end,
             position: txt.position,
             px_x: txt.px_x,
-            px_y: txt.px_y
+            px_y: txt.px_y,
+            z_level: txt.z_level || 0
         });
     });
     return result;
