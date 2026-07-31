@@ -4,5 +4,6 @@ from .whatsapp import WhatsAppJob
 from .whatsapp_extract import WhatsAppExtractJob
 from .video_bg import VideoBgJob
 from .video_compositor import VideoCompositorJob
+from .music_visualizer import MusicVisualizerJob
 
-__all__ = ["Job", "WhatsAppJob", "WhatsAppExtractJob", "VideoBgJob", "VideoCompositorJob"]
+__all__ = ["Job", "WhatsAppJob", "WhatsAppExtractJob", "VideoBgJob", "VideoCompositorJob", "MusicVisualizerJob"]

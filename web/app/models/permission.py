@@ -29,4 +29,5 @@ class Permission(Base):
         "omnivoice_audio",
         "video_bg",
         "video_compositor",
+        "music_visualizer",
     ]

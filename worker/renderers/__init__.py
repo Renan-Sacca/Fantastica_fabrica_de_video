@@ -10,6 +10,7 @@ from renderers.base import BaseRenderer
 from renderers.whatsapp import WhatsAppRenderer
 from renderers.video_bg import VideoBgRenderer
 from renderers.video_compositor import VideoCompositorRenderer
+from renderers.music_visualizer import MusicVisualizerRenderer
 
 # ── Registry ──
 # Mapeamento: video_type → classe do renderer
@@ -17,6 +18,7 @@ RENDERER_REGISTRY: dict[str, type[BaseRenderer]] = {
     "whatsapp": WhatsAppRenderer,
     "video_bg": VideoBgRenderer,
     "video_compositor": VideoCompositorRenderer,
+    "music_visualizer": MusicVisualizerRenderer,
     # Futuramente:
     # "reddit": RedditRenderer,
     # "twitter": TwitterRenderer,

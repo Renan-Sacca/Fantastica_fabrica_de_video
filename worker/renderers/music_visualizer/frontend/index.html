@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  Music Visualizer — WebGL2 puro (sem dependências externas)
+//  Roda headless no Playwright, capturado frame a frame
+// ═══════════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2', {
+  alpha: false, antialias: true, preserveDrawingBuffer: true,
+  premultipliedAlpha: false,
+});
+if (!gl) {
+  document.title = 'ERROR: WebGL2 not available';
+  console.error('WebGL2 context creation failed');
+}
+
+// ───────────────────── Estado Global ─────────────────────────────
+let CFG = {};
+let W = 1920, H = 1080;
+let BG_TEX = null, LOGO_TEX = null;
+let TITLE_TEX = null;
+let PARTICLES = [];
+let WAVE_STATES = [];
+let SHAKE_X = 0, SHAKE_Y = 0;
+let ZOOM_T = 0;
+let SPRING_SCALE = 1.0, SPRING_VEL = 0.0;
+
+// ───────────────────── Shaders ────────────────────────────────────
+const VS_QUAD = `#version 300 es
+in vec2 a_pos;
+in vec2 a_uv;
+uniform mat3 u_matrix;
+out vec2 v_uv;
+void main(){
+  vec3 p = u_matrix * vec3(a_pos, 1.0);
+  gl_Position = vec4(p.xy, 0.0, 1.0);
+  v_uv = a_uv;
+}`;
+
+const FS_BG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform float u_brightness;
+uniform float u_vignette;
+uniform float u_chromab;
+uniform vec2 u_shake_norm;
+out vec4 fragColor;
+void main(){
+  vec2 uv = v_uv + u_shake_norm * 0.002;
+  // Chromatic aberration
+  float ca = u_chromab;
+  float r = texture(u_tex, uv + vec2(ca, 0.0)).r;
+  float g = texture(u_tex, uv).g;
+  float b = texture(u_tex, uv - vec2(ca, 0.0)).b;
+  vec4 col = vec4(r, g, b, 1.0);
+  // Brightness boost
+  col.rgb *= (1.0 + u_brightness);
+  // Vignette
+  vec2 vc = (v_uv - 0.5) * 2.0;
+  float vign = 1.0 - dot(vc * 0.65, vc * 0.65);
+  vign = clamp(pow(vign, 1.5), 0.0, 1.0);
+  col.rgb *= mix(1.0 - u_vignette, 1.0, vign);
+  fragColor = col;
+}`;
+
+const VS_CIRCLE = `#version 300 es
+in vec2 a_pos;
+uniform vec2 u_center;
+uniform float u_radius;
+uniform mat3 u_proj;
+out vec2 v_local;
+void main(){
+  v_local = a_pos;
+  vec2 world = u_center + a_pos * u_radius;
+  vec3 p = u_proj * vec3(world, 1.0);
+  gl_Position = vec4(p.xy, 0.0, 1.0);
+}`;
+
+const FS_CIRCLE = `#version 300 es
+precision highp float;
+in vec2 v_local;
+uniform vec4 u_color;
+uniform vec4 u_border_color;
+uniform float u_border_frac;
+uniform float u_glow;
+uniform vec4 u_glow_color;
+out vec4 fragColor;
+void main(){
+  float d = length(v_local);
+  if(d > 1.0) discard;
+  // Glow externo
+  float glow = pow(1.0 - d, 2.5) * u_glow;
+  // Borda
+  float border = smoothstep(1.0 - u_border_frac - 0.01, 1.0 - u_border_frac + 0.01, d);
+  vec4 base = mix(u_color, u_border_color, border);
+  vec4 glow_c = u_glow_color * glow;
+  fragColor = vec4(mix(base.rgb, glow_c.rgb, glow_c.a), base.a);
+}`;
+
+const VS_WAVE = `#version 300 es
+in vec2 a_pos;
+uniform vec2 u_center;
+uniform float u_radius;
+uniform mat3 u_proj;
+void main(){
+  vec2 world = u_center + a_pos * u_radius;
+  vec3 p = u_proj * vec3(world, 1.0);
+  gl_Position = vec4(p.xy, 0.0, 1.0);
+}`;
+
+const FS_WAVE = `#version 300 es
+precision highp float;
+uniform vec4 u_color;
+out vec4 fragColor;
+void main(){ fragColor = u_color; }`;
+
+const VS_PARTICLE = `#version 300 es
+in vec2 a_pos;
+in float a_size;
+in float a_alpha;
+uniform mat3 u_proj;
+out float v_alpha;
+void main(){
+  vec3 p = u_proj * vec3(a_pos, 1.0);
+  gl_Position = vec4(p.xy, 0.0, 1.0);
+  gl_PointSize = a_size;
+  v_alpha = a_alpha;
+}`;
+
+const FS_PARTICLE = `#version 300 es
+precision highp float;
+in float v_alpha;
+uniform vec4 u_color;
+out vec4 fragColor;
+void main(){
+  vec2 uv = gl_PointCoord - 0.5;
+  float d = length(uv);
+  if(d > 0.5) discard;
+  float soft = 1.0 - smoothstep(0.2, 0.5, d);
+  fragColor = vec4(u_color.rgb, soft * v_alpha);
+}`;
+
+const VS_SPECTRUM = `#version 300 es
+in vec2 a_pos;
+in float a_bright;
+uniform mat3 u_proj;
+out float v_bright;
+void main(){
+  vec3 p = u_proj * vec3(a_pos, 1.0);
+  gl_Position = vec4(p.xy, 0.0, 1.0);
+  v_bright = a_bright;
+}`;
+
+const FS_SPECTRUM = `#version 300 es
+precision highp float;
+in float v_bright;
+uniform vec4 u_color;
+out vec4 fragColor;
+void main(){
+  fragColor = vec4(u_color.rgb, u_color.a * v_bright);
+}`;
+
+const VS_LOGO = `#version 300 es
+in vec2 a_pos;
+in vec2 a_uv;
+uniform mat3 u_proj;
+out vec2 v_uv;
+void main(){
+  vec3 p = u_proj * vec3(a_pos, 1.0);
+  gl_Position = vec4(p.xy, 0.0, 1.0);
+  v_uv = a_uv;
+}`;
+
+const FS_LOGO = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+out vec4 fragColor;
+void main(){
+  vec4 col = texture(u_tex, v_uv);
+  // Clip circular
+  vec2 uv = v_uv - 0.5;
+  float d = length(uv) * 2.0;
+  col.a *= 1.0 - smoothstep(0.85, 1.0, d);
+  fragColor = col;
+}`;
+
+// ───────────────────── Helpers GL ─────────────────────────────────
+function compileShader(src, type) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    console.error('Shader error:', gl.getShaderInfoLog(s));
+  return s;
+}
+function makeProgram(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compileShader(vs, gl.VERTEX_SHADER));
+  gl.attachShader(p, compileShader(fs, gl.FRAGMENT_SHADER));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+    console.error('Program error:', gl.getProgramInfoLog(p));
+  return p;
+}
+function orthoMat(w, h) {
+  // NDC: x [-1,1], y [-1,1]
+  return [2/w, 0, 0,  0, -2/h, 0,  -1, 1, 1];
+}
+function makeQuadBuffer(x, y, w, h) {
+  // position + uv interleaved
+  const verts = new Float32Array([
+    x,   y,   0,0,
+    x+w, y,   1,0,
+    x,   y+h, 0,1,
+    x+w, y+h, 1,1,
+  ]);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+  return buf;
+}
+function loadTexture(src) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      resolve({ tex: t, w: img.width, h: img.height });
+    };
+    img.src = src;
+  });
+}
+function hexToRGBA(hex, alpha = 1.0) {
+  hex = hex.replace('#','');
+  if (hex.length === 8) alpha = parseInt(hex.slice(6,8), 16) / 255;
+  const r = parseInt(hex.slice(0,2),16)/255;
+  const g = parseInt(hex.slice(2,4),16)/255;
+  const b = parseInt(hex.slice(4,6),16)/255;
+  return [r, g, b, alpha];
+}
+function circleVertices(n = 128) {
+  const verts = [0, 0];
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    verts.push(Math.cos(a), Math.sin(a));
+  }
+  return new Float32Array(verts);
+}
+function ringVertices(n = 256) {
+  const verts = [];
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    verts.push(Math.cos(a), Math.sin(a));
+  }
+  return new Float32Array(verts);
+}
+</script>
+
+<script>
+// ───────────────────── Programas GL ───────────────────────────────
+let PROG_BG, PROG_CIRCLE, PROG_WAVE, PROG_PARTICLE, PROG_SPECTRUM, PROG_LOGO;
+let BG_BUF, CIRCLE_BUF, RING_BUF;
+let CIRCLE_VTXCOUNT, RING_VTXCOUNT;
+let LOGO_BUF;
+
+// ───────────────────── Geração de Textura de Texto ────────────────
+function makeTextTexture(text, fontSize, color, shadowColor, maxWidth) {
+  const canvas2d = document.createElement('canvas');
+  const ctx = canvas2d.getContext('2d');
+  const font = `bold ${fontSize}px Arial, sans-serif`;
+  ctx.font = font;
+  const metrics = ctx.measureText(text);
+  const tw = Math.min(Math.ceil(metrics.width) + fontSize, maxWidth);
+  const th = Math.ceil(fontSize * 1.6);
+  canvas2d.width = tw; canvas2d.height = th;
+  ctx.font = font;
+  ctx.textBaseline = 'middle';
+  // Sombra
+  ctx.fillStyle = shadowColor || 'rgba(0,0,0,0.7)';
+  ctx.fillText(text, 2, th / 2 + 2);
+  // Texto
+  ctx.fillStyle = color || '#ffffff';
+  ctx.fillText(text, 0, th / 2);
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas2d);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return { tex: t, w: tw, h: th };
+}
+
+function makeInitialsTexture(text, fontSize, color) {
+  const canvas2d = document.createElement('canvas');
+  const size = Math.ceil(fontSize * 2.2);
+  canvas2d.width = size; canvas2d.height = size;
+  const ctx = canvas2d.getContext('2d');
+  ctx.font = `bold ${fontSize}px Arial`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = color || '#ffffff';
+  ctx.shadowColor = 'rgba(255,255,255,0.4)';
+  ctx.shadowBlur = fontSize * 0.3;
+  ctx.fillText(text, size / 2, size / 2);
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas2d);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return { tex: t, w: size, h: size };
+}
+
+// ───────────────────── Inicialização de Partículas ─────────────────
+function initParticles(count, w, h) {
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    out.push({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      vx: (Math.random() - 0.5) * 1.5,
+      vy: -Math.random() * 1.5 - 0.5,
+      size: Math.random() * (CFG.particle_size_max - CFG.particle_size_min) + CFG.particle_size_min,
+      life: Math.random(),
+      maxLife: 0.6 + Math.random() * 0.4,
+      decay: 0.004 + Math.random() * 0.008,
+      depth: Math.random(), // 0=perto, 1=longe
+    });
+  }
+  return out;
+}
+</script>
+
+<script>
+// ───────────────────── initVisualizer ─────────────────────────────
+window.initVisualizer = async function({ bgImage, logoImage, cfg, title, totalFrames }) {
+  CFG = cfg;
+  W = cfg.width; H = cfg.height;
+  canvas.width = W; canvas.height = H;
+
+  gl.viewport(0, 0, W, H);
+  gl.enable(gl.BLEND);
+  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+  // Compilar programas
+  PROG_BG       = makeProgram(VS_QUAD,     FS_BG);
+  PROG_CIRCLE   = makeProgram(VS_CIRCLE,   FS_CIRCLE);
+  PROG_WAVE     = makeProgram(VS_WAVE,     FS_WAVE);
+  PROG_PARTICLE = makeProgram(VS_PARTICLE, FS_PARTICLE);
+  PROG_SPECTRUM = makeProgram(VS_SPECTRUM, FS_SPECTRUM);
+  PROG_LOGO     = makeProgram(VS_LOGO,     FS_LOGO);
+
+  // Texturas
+  const bgResult = await loadTexture(bgImage);
+  BG_TEX = bgResult.tex;
+
+  if (logoImage) {
+    const lr = await loadTexture(logoImage);
+    LOGO_TEX = lr;
+  } else {
+    // Gerar textura das iniciais
+    const text  = String(cfg.logo_text || '♫');
+    const fsize = parseInt(cfg.logo_font_size) || 80;
+    LOGO_TEX = makeInitialsTexture(text, fsize, cfg.logo_font_color || '#fff');
+  }
+
+  // Textura do título
+  if (cfg.show_title && title) {
+    TITLE_TEX = makeTextTexture(
+      title,
+      parseInt(cfg.title_font_size) || 32,
+      cfg.title_color || '#ffffff',
+      'rgba(0,0,0,0.8)',
+      W - 120,
+    );
+  }
+
+  // Buffer do fundo (quad tela-cheia com margem de zoom)
+  BG_BUF = makeQuadBuffer(0, 0, W, H);
+
+  // Buffer do círculo (fan)
+  const circVerts = circleVertices(192);
+  CIRCLE_BUF = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, CIRCLE_BUF);
+  gl.bufferData(gl.ARRAY_BUFFER, circVerts, gl.STATIC_DRAW);
+  CIRCLE_VTXCOUNT = circVerts.length / 2;
+
+  // Buffer do anel (line strip)
+  const ringVerts = ringVertices(256);
+  RING_BUF = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, RING_BUF);
+  gl.bufferData(gl.ARRAY_BUFFER, ringVerts, gl.STATIC_DRAW);
+  RING_VTXCOUNT = ringVerts.length / 2;
+
+  // Buffer do logo (quad)
+  LOGO_BUF = makeQuadBuffer(0, 0, 1, 1); // normalizado, escalado no draw
+
+  // Partículas
+  PARTICLES = initParticles(parseInt(cfg.particle_count) || 80, W, H);
+  WAVE_STATES = new Array(parseInt(cfg.wave_rings) || 4).fill(0);
+
+  // Pré-computar matriz de projeção ortogonal (estática)
+  window._ORTHO = orthoMat(W, H);
+};
+</script>
+
+<script>
+// ───────────────────── renderFrame ────────────────────────────────
+window.renderFrame = function({ frameIndex, totalFrames, rms, spectrum, isBeat, beatStrength, progress }) {
+  const proj = window._ORTHO;
+  const cx = W / 2, cy = H / 2;
+  const FPS = CFG.fps || 30;
+  const t = frameIndex / Math.max(1, totalFrames);
+
+  // ── Spring animation para o círculo ──
+  const targetScale = 1.0 + rms * (CFG.circle_max_scale - 1.0);
+  const springK = 280.0, springDamp = 18.0, dt = 1.0 / FPS;
+  const force = (targetScale - SPRING_SCALE) * springK - SPRING_VEL * springDamp;
+  SPRING_VEL += force * dt;
+  SPRING_SCALE += SPRING_VEL * dt;
+  SPRING_SCALE = Math.max(0.6, Math.min(SPRING_SCALE, CFG.circle_max_scale * 1.1));
+
+  const circleR = (CFG.circle_radius || 200) * SPRING_SCALE;
+
+  // ── Camera shake no beat ──
+  if (isBeat && CFG.bg_beat_shake) {
+    const shakeAmt = (CFG.bg_beat_shake_px || 8) * rms;
+    SHAKE_X = (Math.random() - 0.5) * shakeAmt * 2;
+    SHAKE_Y = (Math.random() - 0.5) * shakeAmt * 2;
+  } else {
+    SHAKE_X *= 0.55;
+    SHAKE_Y *= 0.55;
+  }
+
+  // ── Ken Burns: zoom progressivo + beat punch ──
+  ZOOM_T = Math.min(t, 1.0);
+  const baseZoom = 1.0 + (CFG.bg_zoom_speed || 0.05) * ZOOM_T;
+  const beatZoom = isBeat ? 1.0 + rms * 0.025 : 1.0;
+  const zoom = Math.min(baseZoom * beatZoom, CFG.bg_zoom_max || 1.15);
+
+  // ── Atualizar ondas ──
+  if (isBeat) {
+    for (let i = WAVE_STATES.length - 1; i > 0; i--)
+      WAVE_STATES[i] = WAVE_STATES[i - 1];
+    WAVE_STATES[0] = Math.min(1.0, rms + 0.4);
+  }
+  for (let i = 0; i < WAVE_STATES.length; i++)
+    WAVE_STATES[i] *= 0.90;
+
+  // ── Atualizar partículas ──
+  if (CFG.particles_enabled) {
+    updateParticles(rms, isBeat);
+  }
+
+  // ════ DRAW ════════════════════════════════════════════
+  gl.clearColor(0, 0, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  drawBackground(zoom, proj);
+  if (CFG.particles_enabled) drawParticlesBack(proj);
+  if (CFG.waves_enabled)     drawWaves(cx, cy, circleR, proj);
+  if (CFG.spectrum_enabled)  drawSpectrum(cx, cy, circleR, spectrum, proj);
+  drawCircle(cx, cy, circleR, rms, proj);
+  drawLogo(cx, cy, circleR, proj);
+  if (CFG.particles_enabled) drawParticlesFront(proj);
+  if (CFG.progress_bar_enabled) drawProgressBar(progress, proj);
+  if (CFG.show_title && TITLE_TEX) drawTitle(proj);
+};
+
+// ─────────────────────────────────────────────────────────────────
+//  DRAW: Fundo
+// ─────────────────────────────────────────────────────────────────
+function drawBackground(zoom, proj) {
+  gl.useProgram(PROG_BG);
+
+  // Calcular UV transform para zoom + shake + parallax
+  const margin = (zoom - 1.0) / 2.0;
+  const ux = SHAKE_X / W * 0.5;
+  const uy = SHAKE_Y / H * 0.5;
+
+  // Quad tela-cheia
+  const verts = new Float32Array([
+    0, 0,  margin+ux,       margin+uy,
+    W, 0,  1-margin+ux,     margin+uy,
+    0, H,  margin+ux,       1-margin+uy,
+    W, H,  1-margin+ux,     1-margin+uy,
+  ]);
+  if (!PROG_BG._dynbuf) PROG_BG._dynbuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, PROG_BG._dynbuf);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+
+  const aPos = gl.getAttribLocation(PROG_BG, 'a_pos');
+  const aUv  = gl.getAttribLocation(PROG_BG, 'a_uv');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(aUv);
+  gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
+
+  gl.uniformMatrix3fv(gl.getUniformLocation(PROG_BG,'u_matrix'), false, proj);
+  gl.uniform1i(gl.getUniformLocation(PROG_BG,'u_tex'), 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, BG_TEX);
+
+  // Brightness boost no beat
+  const brightnessBoost = WAVE_STATES[0] * (CFG.bg_brightness_boost || 0.25) * 0.6;
+  gl.uniform1f(gl.getUniformLocation(PROG_BG,'u_brightness'), brightnessBoost);
+  gl.uniform1f(gl.getUniformLocation(PROG_BG,'u_vignette'), CFG.vignette_enabled ? (CFG.vignette_strength || 0.45) : 0.0);
+  gl.uniform1f(gl.getUniformLocation(PROG_BG,'u_chromab'), CFG.chromatic_aberration || 0.0);
+  gl.uniform2f(gl.getUniformLocation(PROG_BG,'u_shake_norm'), SHAKE_X / W, SHAKE_Y / H);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  DRAW: Ondas de pulso
+// ─────────────────────────────────────────────────────────────────
+function drawWaves(cx, cy, baseR, proj) {
+  gl.useProgram(PROG_WAVE);
+  gl.bindBuffer(gl.ARRAY_BUFFER, RING_BUF);
+  const aPos = gl.getAttribLocation(PROG_WAVE, 'a_pos');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 8, 0);
+
+  const waveColor = hexToRGBA(CFG.wave_color || '#fff');
+  const maxOpa = CFG.wave_opacity_max || 0.7;
+
+  for (let i = 0; i < WAVE_STATES.length; i++) {
+    const s = WAVE_STATES[i];
+    if (s < 0.01) continue;
+    // Onda se expande conforme decai
+    const expand = 1.0 + (1.0 - s) * 2.2;
+    const r = baseR * expand;
+    const alpha = s * maxOpa;
+
+    // Múltiplas linhas para espessura
+    for (let th = 0; th < 3; th++) {
+      const rr = r + th * (s * 3);
+      gl.uniformMatrix3fv(gl.getUniformLocation(PROG_WAVE,'u_proj'), false, proj);
+      gl.uniform2f(gl.getUniformLocation(PROG_WAVE,'u_center'), cx, cy);
+      gl.uniform1f(gl.getUniformLocation(PROG_WAVE,'u_radius'), rr);
+      gl.uniform4f(gl.getUniformLocation(PROG_WAVE,'u_color'),
+        waveColor[0], waveColor[1], waveColor[2], alpha * (1 - th * 0.3));
+      gl.drawArrays(gl.LINE_STRIP, 0, RING_VTXCOUNT);
+    }
+  }
+}
+</script>
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+//  DRAW: Espectro de frequências (barras radiais)
+// ─────────────────────────────────────────────────────────────────
+function drawSpectrum(cx, cy, circleR, spectrum, proj) {
+  if (!spectrum || spectrum.length === 0) return;
+  gl.useProgram(PROG_SPECTRUM);
+
+  const N = spectrum.length;
+  const specRadiusOff = CFG.spectrum_radius_offset || 30;
+  const innerR = circleR + specRadiusOff;
+  const maxH   = CFG.spectrum_max_height || 120;
+  const spColor = hexToRGBA(CFG.spectrum_color || '#fff', CFG.spectrum_opacity || 0.75);
+
+  // Construir vértices das barras radiais
+  // 2 triângulos por barra = 6 vértices, cada com (x,y,bright)
+  const verts = new Float32Array(N * 12); // 6 verts * 2 coords = 12
+  const brights = new Float32Array(N * 6);
+  let vi = 0, bi = 0;
+
+  for (let i = 0; i < N; i++) {
+    const angle = ((i / N) * Math.PI * 2) - Math.PI / 2;
+    const val   = Math.pow(spectrum[i], 0.6); // compressão log suave
+    const barH  = val * maxH;
+    const barW  = 0.012; // largura angular em radianos
+
+    const a0 = angle - barW / 2;
+    const a1 = angle + barW / 2;
+
+    const ix0 = cx + Math.cos(a0) * innerR, iy0 = cy + Math.sin(a0) * innerR;
+    const ix1 = cx + Math.cos(a1) * innerR, iy1 = cy + Math.sin(a1) * innerR;
+    const ox0 = cx + Math.cos(a0) * (innerR + barH), oy0 = cy + Math.sin(a0) * (innerR + barH);
+    const ox1 = cx + Math.cos(a1) * (innerR + barH), oy1 = cy + Math.sin(a1) * (innerR + barH);
+
+    // Triângulo 1: ix0,iy0 | ix1,iy1 | ox0,oy0
+    verts[vi++]=ix0; verts[vi++]=iy0; brights[bi++]=0.4;
+    verts[vi++]=ix1; verts[vi++]=iy1; brights[bi++]=0.4;
+    verts[vi++]=ox0; verts[vi++]=oy0; brights[bi++]=val;
+    // Triângulo 2: ix1,iy1 | ox1,oy1 | ox0,oy0
+    verts[vi++]=ix1; verts[vi++]=iy1; brights[bi++]=0.4;
+    verts[vi++]=ox1; verts[vi++]=oy1; brights[bi++]=val;
+    verts[vi++]=ox0; verts[vi++]=oy0; brights[bi++]=val;
+  }
+
+  if (!PROG_SPECTRUM._vbuf) PROG_SPECTRUM._vbuf = gl.createBuffer();
+  if (!PROG_SPECTRUM._bbuf) PROG_SPECTRUM._bbuf = gl.createBuffer();
+
+  const aPos = gl.getAttribLocation(PROG_SPECTRUM, 'a_pos');
+  const aBr  = gl.getAttribLocation(PROG_SPECTRUM, 'a_bright');
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, PROG_SPECTRUM._vbuf);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 8, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, PROG_SPECTRUM._bbuf);
+  gl.bufferData(gl.ARRAY_BUFFER, brights, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(aBr);
+  gl.vertexAttribPointer(aBr, 1, gl.FLOAT, false, 4, 0);
+
+  gl.uniformMatrix3fv(gl.getUniformLocation(PROG_SPECTRUM,'u_proj'), false, proj);
+  gl.uniform4f(gl.getUniformLocation(PROG_SPECTRUM,'u_color'),
+    spColor[0], spColor[1], spColor[2], spColor[3]);
+
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive para glow
+  gl.drawArrays(gl.TRIANGLES, 0, N * 6);
+  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  DRAW: Círculo central com glow
+// ─────────────────────────────────────────────────────────────────
+function drawCircle(cx, cy, r, rms, proj) {
+  gl.useProgram(PROG_CIRCLE);
+  gl.bindBuffer(gl.ARRAY_BUFFER, CIRCLE_BUF);
+  const aPos = gl.getAttribLocation(PROG_CIRCLE, 'a_pos');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 8, 0);
+
+  const uCenter = gl.getUniformLocation(PROG_CIRCLE,'u_center');
+  const uRadius = gl.getUniformLocation(PROG_CIRCLE,'u_radius');
+  const uProj   = gl.getUniformLocation(PROG_CIRCLE,'u_proj');
+  const uColor  = gl.getUniformLocation(PROG_CIRCLE,'u_color');
+  const uBorder = gl.getUniformLocation(PROG_CIRCLE,'u_border_color');
+  const uBFrac  = gl.getUniformLocation(PROG_CIRCLE,'u_border_frac');
+  const uGlow   = gl.getUniformLocation(PROG_CIRCLE,'u_glow');
+  const uGlowC  = gl.getUniformLocation(PROG_CIRCLE,'u_glow_color');
+
+  gl.uniformMatrix3fv(uProj, false, proj);
+  gl.uniform2f(uCenter, cx, cy);
+
+  const bgColor    = hexToRGBA(CFG.circle_bg_color || '#000000cc');
+  const borderColor = hexToRGBA(CFG.circle_border_color || '#fff');
+  const glowColor  = hexToRGBA(CFG.circle_glow_color || '#fff');
+  const glowI      = (CFG.circle_glow_intensity || 1.0) * (0.5 + rms * 0.5);
+  const borderPx   = (CFG.circle_border_width || 6);
+  const borderFrac = borderPx / r;
+
+  // Camada de glow externo (círculo maior, blend aditivo)
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  const glowR = r * (1.0 + glowI * 0.45);
+  gl.uniform1f(uRadius, glowR);
+  gl.uniform4f(uColor, glowColor[0], glowColor[1], glowColor[2], 0.0);
+  gl.uniform4f(uBorder, glowColor[0], glowColor[1], glowColor[2], 0.0);
+  gl.uniform1f(uBFrac, 0.0);
+  gl.uniform1f(uGlow, glowI * 1.2);
+  gl.uniform4f(uGlowC, glowColor[0], glowColor[1], glowColor[2], 1.0);
+  gl.drawArrays(gl.TRIANGLE_FAN, 0, CIRCLE_VTXCOUNT);
+
+  // Círculo principal
+  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.uniform1f(uRadius, r);
+  gl.uniform4f(uColor, bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
+  gl.uniform4f(uBorder, borderColor[0], borderColor[1], borderColor[2], 1.0);
+  gl.uniform1f(uBFrac, borderFrac);
+  gl.uniform1f(uGlow, 0.0);
+  gl.uniform4f(uGlowC, 0,0,0,0);
+  gl.drawArrays(gl.TRIANGLE_FAN, 0, CIRCLE_VTXCOUNT);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  DRAW: Logo / Iniciais dentro do círculo
+// ─────────────────────────────────────────────────────────────────
+function drawLogo(cx, cy, circleR, proj) {
+  if (!LOGO_TEX) return;
+  gl.useProgram(PROG_LOGO);
+
+  const logoInfo = LOGO_TEX;
+  const tex = logoInfo.tex || logoInfo;
+  const lw = logoInfo.w || 128;
+  const lh = logoInfo.h || 128;
+
+  // Tamanho máximo dentro do círculo (80% do diâmetro)
+  const maxDim = circleR * 1.5;
+  const scale  = Math.min(maxDim / lw, maxDim / lh);
+  const dw = lw * scale, dh = lh * scale;
+  const dx = cx - dw / 2, dy = cy - dh / 2;
+
+  // Quad dinâmico
+  const verts = new Float32Array([
+    dx,    dy,    0, 0,
+    dx+dw, dy,    1, 0,
+    dx,    dy+dh, 0, 1,
+    dx+dw, dy+dh, 1, 1,
+  ]);
+  if (!PROG_LOGO._buf) PROG_LOGO._buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, PROG_LOGO._buf);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+
+  const aPos = gl.getAttribLocation(PROG_LOGO, 'a_pos');
+  const aUv  = gl.getAttribLocation(PROG_LOGO, 'a_uv');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(aUv);
+  gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
+
+  gl.uniformMatrix3fv(gl.getUniformLocation(PROG_LOGO,'u_proj'), false, proj);
+  gl.uniform1i(gl.getUniformLocation(PROG_LOGO,'u_tex'), 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+
+  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+</script>
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+//  Partículas: update + draw (duas camadas: fundo e frente)
+// ─────────────────────────────────────────────────────────────────
+function updateParticles(rms, isBeat) {
+  const beatBoost = isBeat ? 1.0 + rms * 3.5 : 1.0;
+  for (let i = 0; i < PARTICLES.length; i++) {
+    const p = PARTICLES[i];
+    const speed = (CFG.particle_speed || 1.0) * (1.0 + (1.0 - p.depth) * 1.5);
+    p.x  += p.vx * speed * beatBoost;
+    p.y  += p.vy * speed * beatBoost;
+    p.vy += -0.008 * speed; // aceleração suave para cima
+    p.life -= p.decay;
+
+    if (p.life <= 0 || p.y < -20 || p.x < -20 || p.x > W + 20) {
+      // Renascer na parte inferior
+      p.x    = Math.random() * W;
+      p.y    = H * 0.75 + Math.random() * H * 0.3;
+      p.vx   = (Math.random() - 0.5) * 1.8 * (CFG.particle_speed || 1);
+      p.vy   = -(Math.random() * 1.5 + 0.4) * (CFG.particle_speed || 1);
+      p.life = 0.4 + Math.random() * 0.6;
+      p.size = Math.random() * (CFG.particle_size_max - CFG.particle_size_min)
+               + CFG.particle_size_min;
+      p.depth = Math.random();
+    }
+  }
+}
+
+function _buildParticleArrays(depthMin, depthMax) {
+  const relevant = PARTICLES.filter(p => p.depth >= depthMin && p.depth < depthMax);
+  const posArr   = new Float32Array(relevant.length * 2);
+  const sizeArr  = new Float32Array(relevant.length);
+  const alphaArr = new Float32Array(relevant.length);
+  for (let i = 0; i < relevant.length; i++) {
+    const p = relevant[i];
+    posArr[i*2]   = p.x;
+    posArr[i*2+1] = p.y;
+    // Partículas mais perto (depth≈0) são maiores e mais brilhantes
+    const depthFactor = 1.0 - p.depth;
+    sizeArr[i]  = p.size * (1.0 + depthFactor * 2.0);
+    alphaArr[i] = p.life * (CFG.particle_opacity_max || 0.6) * (0.3 + depthFactor * 0.7);
+  }
+  return { count: relevant.length, posArr, sizeArr, alphaArr };
+}
+
+function _drawParticleLayer(depthMin, depthMax, proj, blendMode) {
+  const { count, posArr, sizeArr, alphaArr } = _buildParticleArrays(depthMin, depthMax);
+  if (count === 0) return;
+
+  gl.useProgram(PROG_PARTICLE);
+
+  if (!PROG_PARTICLE._pbuf) PROG_PARTICLE._pbuf = gl.createBuffer();
+  if (!PROG_PARTICLE._sbuf) PROG_PARTICLE._sbuf = gl.createBuffer();
+  if (!PROG_PARTICLE._abuf) PROG_PARTICLE._abuf = gl.createBuffer();
+
+  const aPos   = gl.getAttribLocation(PROG_PARTICLE, 'a_pos');
+  const aSize  = gl.getAttribLocation(PROG_PARTICLE, 'a_size');
+  const aAlpha = gl.getAttribLocation(PROG_PARTICLE, 'a_alpha');
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, PROG_PARTICLE._pbuf);
+  gl.bufferData(gl.ARRAY_BUFFER, posArr, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 8, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, PROG_PARTICLE._sbuf);
+  gl.bufferData(gl.ARRAY_BUFFER, sizeArr, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(aSize);
+  gl.vertexAttribPointer(aSize, 1, gl.FLOAT, false, 4, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, PROG_PARTICLE._abuf);
+  gl.bufferData(gl.ARRAY_BUFFER, alphaArr, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(aAlpha);
+  gl.vertexAttribPointer(aAlpha, 1, gl.FLOAT, false, 4, 0);
+
+  gl.uniformMatrix3fv(gl.getUniformLocation(PROG_PARTICLE,'u_proj'), false, proj);
+  const pc = hexToRGBA(CFG.particle_color || '#fff');
+  gl.uniform4f(gl.getUniformLocation(PROG_PARTICLE,'u_color'), pc[0], pc[1], pc[2], 1.0);
+
+  if (blendMode === 'add') gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  else gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+  gl.drawArrays(gl.POINTS, 0, count);
+  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+}
+
+// Camada de fundo (partículas distantes, depth 0.5–1.0)
+function drawParticlesBack(proj) {
+  _drawParticleLayer(0.5, 1.0, proj, 'normal');
+}
+
+// Camada da frente (partículas perto, depth 0.0–0.5, blend aditivo)
+function drawParticlesFront(proj) {
+  _drawParticleLayer(0.0, 0.5, proj, 'add');
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  DRAW: Barra de progresso
+// ─────────────────────────────────────────────────────────────────
+function drawProgressBar(progress, proj) {
+  const barH  = CFG.progress_bar_height || 4;
+  const color = hexToRGBA(CFG.progress_bar_color || '#fff', CFG.progress_bar_opacity || 0.7);
+  const y     = CFG.progress_bar_position === 'top' ? 0 : H - barH;
+  const barW  = W * Math.max(0, Math.min(1, progress));
+
+  gl.useProgram(PROG_WAVE); // reuso: desenha quad simples
+
+  // Fundo escuro
+  _drawRect(0, y, W, barH, [0,0,0,0.4], proj);
+  // Preenchimento
+  if (barW > 0) _drawRect(0, y, barW, barH, color, proj);
+}
+
+function _drawRect(x, y, w, h, color, proj) {
+  // Usa PROG_SPECTRUM: aceita a_pos direto + a_bright (constante 1.0)
+  gl.useProgram(PROG_SPECTRUM);
+  const verts  = new Float32Array([x, y,  x+w, y,  x, y+h,  x+w, y+h]);
+  const bright = new Float32Array([1, 1, 1, 1]);
+
+  if (!window._rectVBuf) window._rectVBuf = gl.createBuffer();
+  if (!window._rectBBuf) window._rectBBuf = gl.createBuffer();
+
+  const aPosS = gl.getAttribLocation(PROG_SPECTRUM, 'a_pos');
+  const aBrS  = gl.getAttribLocation(PROG_SPECTRUM, 'a_bright');
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, window._rectVBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(aPosS);
+  gl.vertexAttribPointer(aPosS, 2, gl.FLOAT, false, 8, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, window._rectBBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, bright, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(aBrS);
+  gl.vertexAttribPointer(aBrS, 1, gl.FLOAT, false, 4, 0);
+
+  gl.uniformMatrix3fv(gl.getUniformLocation(PROG_SPECTRUM, 'u_proj'), false, proj);
+  gl.uniform4f(gl.getUniformLocation(PROG_SPECTRUM, 'u_color'),
+    color[0], color[1], color[2], color[3]);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  DRAW: Título
+// ─────────────────────────────────────────────────────────────────
+function drawTitle(proj) {
+  const tt = TITLE_TEX;
+  const margin = CFG.title_margin || 56;
+  const opacity = CFG.title_opacity || 0.85;
+  const pos = CFG.title_position || 'bottom-center';
+
+  const x = (W - tt.w) / 2;
+  const y = pos.includes('top') ? margin : H - margin - tt.h;
+
+  const verts = new Float32Array([
+    x,      y,       0, 0,
+    x+tt.w, y,       1, 0,
+    x,      y+tt.h,  0, 1,
+    x+tt.w, y+tt.h,  1, 1,
+  ]);
+  if (!PROG_LOGO._titlebuf) PROG_LOGO._titlebuf = gl.createBuffer();
+  gl.useProgram(PROG_LOGO);
+  gl.bindBuffer(gl.ARRAY_BUFFER, PROG_LOGO._titlebuf);
+  gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+
+  const aPos = gl.getAttribLocation(PROG_LOGO,'a_pos');
+  const aUv  = gl.getAttribLocation(PROG_LOGO,'a_uv');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(aUv);
+  gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
+
+  gl.uniformMatrix3fv(gl.getUniformLocation(PROG_LOGO,'u_proj'), false, proj);
+  gl.uniform1i(gl.getUniformLocation(PROG_LOGO,'u_tex'), 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, tt.tex);
+
+  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+</script>
+</body>
+</html>

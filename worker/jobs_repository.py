@@ -11,7 +11,8 @@ from typing import Optional
 from sqlalchemy import select
 
 from database import SessionLocal
-from models import Job
+from models import Job  # noqa: F401 — importar subclasses para registrar o mapper polymorphic
+import models as _all_models  # garante que todos os subtipos sejam registrados
 
 logger = logging.getLogger("JobsRepository")
 

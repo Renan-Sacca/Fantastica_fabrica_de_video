@@ -10,6 +10,7 @@ from .whatsapp import WhatsAppVideoType
 from .whatsapp_extract import WhatsAppExtractVideoType
 from .video_bg import VideoBgVideoType
 from .video_compositor import VideoCompositorVideoType
+from .music_visualizer import MusicVisualizerVideoType
 
 # ── Registry ──
 # Para adicionar novos tipos: basta inserir aqui
@@ -18,6 +19,7 @@ REGISTRY: dict[str, VideoTypeConfig] = {
     "whatsapp_extract": WhatsAppExtractVideoType(),
     "video_bg": VideoBgVideoType(),
     "video_compositor": VideoCompositorVideoType(),
+    "music_visualizer": MusicVisualizerVideoType(),
     # Futuramente:
     # "reddit": RedditVideoType(),
     # "twitter": TwitterVideoType(),

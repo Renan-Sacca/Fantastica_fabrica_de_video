@@ -1,0 +1,663 @@
+{% extends "base.html" %}
+{% block title %}Music Visualizer — Criar{% endblock %}
+
+{% block extra_css %}
+<style>
+.mv-wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+.mv-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.mv-head h1 { font-size: 1.5rem; font-weight: 800; }
+.mv-badge { background: linear-gradient(135deg, #1d4ed8, #7c3aed); color: #fff; padding: 4px 10px; border-radius: 999px; font-size: .72rem; font-weight: 600; }
+.mv-head-actions { margin-left: auto; display: flex; gap: 8px; }
+
+.mv-grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; align-items: start; }
+.mv-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 20px; }
+.mv-card h2 { font-size: 1.05rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.mv-card h3.sub { font-size: .78rem; opacity: .6; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .5px; }
+
+.mv-card label { display: block; font-size: .82rem; font-weight: 500; margin: 10px 0 5px; color: var(--text-secondary); }
+.mv-card input[type=text], .mv-card input[type=number], .mv-card input[type=file], .mv-card select {
+    width: 100%; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 8px; color: inherit; padding: 9px 12px; font-family: inherit; font-size: .9rem;
+    box-sizing: border-box;
+}
+.mv-card input[type=range] { width: 100%; margin-top: 4px; accent-color: #3b82f6; }
+
+.hint { font-size: .72rem; opacity: .5; margin-top: 3px; }
+.hidden { display: none !important; }
+
+/* Botões */
+.mv-btn { padding: 10px 18px; border: none; border-radius: 8px; font-weight: 600; font-size: .9rem;
+    cursor: pointer; color: #fff; text-decoration: none; display: inline-block; transition: all .2s; }
+.mv-btn-primary { background: linear-gradient(135deg, #1d4ed8, #7c3aed); }
+.mv-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(59,130,246,.4); }
+.mv-btn-ghost { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit; }
+.mv-btn-ghost:hover { border-color: rgba(255,255,255,.4); }
+.mv-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+/* Toggle */
+.toggle-row { display: flex; align-items: center; gap: 10px; margin: 10px 0;
+    padding: 10px 14px; background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
+.toggle-row input[type=checkbox] { width: 18px; height: 18px; accent-color: #3b82f6; cursor: pointer; }
+.toggle-row label { margin: 0; cursor: pointer; font-size: .88rem; }
+
+/* Seletor de cor */
+.color-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+.color-dot { width: 38px; height: 38px; border-radius: 8px; cursor: pointer;
+    border: 3px solid transparent; transition: all .2s; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+.color-dot:hover { transform: scale(1.12); }
+.color-dot.selected { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.35); }
+.color-picker-wrap { position: relative; width: 38px; height: 38px; border-radius: 8px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    border: 2px dashed rgba(255,255,255,.3); overflow: hidden; transition: all .2s; }
+.color-picker-wrap:hover { border-color: #3b82f6; transform: scale(1.12); }
+.color-picker-wrap span { font-size: 1.1rem; pointer-events: none; }
+.color-picker-wrap input[type=color] { position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer; padding: 0; border: none; }
+
+/* Progress */
+.mv-progress { margin-top: 16px; }
+.mv-progress .bar { height: 8px; background: rgba(255,255,255,.1); border-radius: 999px; overflow: hidden; }
+.mv-progress .fill { height: 100%; width: 0; background: linear-gradient(90deg, #1d4ed8, #7c3aed); transition: width .3s; border-radius: 999px; }
+
+/* Fila */
+.mv-queue { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.mv-queue-item { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 10px; padding: 12px 16px; animation: slideIn .3s ease; }
+.mv-queue-item .qi-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.mv-queue-item .qi-title { font-weight: 600; font-size: .9rem; }
+.mv-queue-item .qi-status { font-size: .72rem; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
+.qi-status.pending { background: rgba(245,158,11,.15); color: #f59e0b; }
+.qi-status.processing, .qi-status.rendering, .qi-status.composing { background: rgba(59,130,246,.15); color: #3b82f6; }
+.qi-status.done { background: rgba(34,197,94,.15); color: #22c55e; }
+.qi-status.error { background: rgba(239,68,68,.15); color: #ef4444; }
+.mv-queue-item .qi-detail { font-size: .8rem; opacity: .6; margin-top: 4px; }
+.mv-queue-item .qi-link { font-size: .82rem; color: #3b82f6; font-weight: 600;
+    text-decoration: none; margin-top: 6px; display: inline-block; }
+.mv-queue-item .qi-link:hover { text-decoration: underline; }
+
+/* Preview */
+.img-preview { max-width: 100%; border-radius: 10px; margin-top: 8px;
+    display: none; max-height: 200px; object-fit: cover; }
+.img-preview.show { display: block; }
+
+/* Slider com valor */
+.slider-row { display: flex; align-items: center; gap: 10px; }
+.slider-val { font-size: .88rem; font-weight: 600; color: #3b82f6; min-width: 36px; text-align: right; }
+
+/* Seção colapsável */
+.section-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
+.section-toggle::after { content: "▾"; opacity: .5; transition: transform .2s; }
+.section-toggle.collapsed::after { transform: rotate(-90deg); }
+.section-body { transition: all .2s; }
+
+@keyframes slideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 860px) { .mv-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mv-wrap">
+  <div class="mv-head">
+    <h1>🎵 Music Visualizer</h1>
+    <span class="mv-badge">Visualizador de Áudio para YouTube</span>
+    <div class="mv-head-actions">
+      <a href="/music-visualizer/jobs" class="mv-btn mv-btn-ghost" style="margin:0;padding:6px 14px;">🗂️ Histórico</a>
+    </div>
+  </div>
+
+  <div class="mv-grid">
+
+    <!-- ── Coluna esquerda: configurações ── -->
+    <section class="mv-card">
+      <h2>🎛️ Configuração do Vídeo</h2>
+
+      <label>Título do projeto</label>
+      <input type="text" id="mv-title" placeholder="Ex: Lofi Beats — Relaxing Study Music">
+
+      <!-- Arquivos principais -->
+      <h3 class="sub">📁 Arquivos</h3>
+
+      <label>🎵 Arquivo de áudio <span style="color:#ef4444">*</span></label>
+      <input type="file" id="mv-audio" accept="audio/*">
+      <div class="hint">MP3, WAV, FLAC, OGG — a duração do áudio define a duração do vídeo.</div>
+
+      <label>🖼️ Imagem de fundo <span style="color:#ef4444">*</span></label>
+      <input type="file" id="mv-bg-image" accept="image/*">
+      <img id="mv-bg-preview" class="img-preview" alt="Preview do fundo">
+      <div class="hint">JPG, PNG, WEBP — recomendado 1920×1080 (landscape) ou 1080×1920 (portrait).</div>
+
+      <label>🔵 Logo do canal (opcional)</label>
+      <input type="file" id="mv-logo" accept="image/*">
+      <img id="mv-logo-preview" class="img-preview" alt="Preview da logo" style="border-radius: 50%; max-height: 100px; width: 100px; object-fit: cover;">
+      <div class="hint">PNG transparente recomendado. Se não enviar, usa as iniciais abaixo.</div>
+
+      <label>Iniciais / texto do círculo (quando sem logo)</label>
+      <input type="text" id="mv-logo-text" value="♫" maxlength="4" placeholder="♫">
+
+      <!-- Resolução -->
+      <h3 class="sub section-toggle" data-target="sec-resolution">📐 Resolução e FPS</h3>
+      <div id="sec-resolution" class="section-body">
+        <label>Resolução</label>
+        <select id="mv-resolution">
+          <option value="1920x1080">1920×1080 (YouTube — Landscape)</option>
+          <option value="1280x720">1280×720 (HD)</option>
+          <option value="1080x1920">1080×1920 (Shorts / Reels — Portrait)</option>
+          <option value="1080x1080">1080×1080 (Quadrado)</option>
+        </select>
+        <input type="hidden" id="mv-width" value="1920">
+        <input type="hidden" id="mv-height" value="1080">
+
+        <label>FPS</label>
+        <select id="mv-fps">
+          <option value="24">24 fps (cinematográfico)</option>
+          <option value="30" selected>30 fps (padrão YouTube)</option>
+          <option value="60">60 fps (suave)</option>
+        </select>
+      </div>
+
+      <!-- Círculo -->
+      <h3 class="sub section-toggle" data-target="sec-circle">🔵 Círculo Central</h3>
+      <div id="sec-circle" class="section-body">
+        <label>Raio base do círculo (px)</label>
+        <div class="slider-row">
+          <input type="range" id="mv-circle-radius" min="80" max="400" step="10" value="180">
+          <span class="slider-val" id="mv-circle-radius-val">180px</span>
+        </div>
+
+        <label>Escala máxima no pico de áudio</label>
+        <div class="slider-row">
+          <input type="range" id="mv-circle-scale" min="1.05" max="2.0" step="0.05" value="1.45">
+          <span class="slider-val" id="mv-circle-scale-val">1.45×</span>
+        </div>
+
+        <label>Cor da borda do círculo</label>
+        <div class="color-row" id="border-colors">
+          <div class="color-dot selected" data-color="#ffffff" style="background:#ffffff" title="Branco"></div>
+          <div class="color-dot" data-color="#3b82f6" style="background:#3b82f6" title="Azul"></div>
+          <div class="color-dot" data-color="#7c3aed" style="background:#7c3aed" title="Roxo"></div>
+          <div class="color-dot" data-color="#f59e0b" style="background:#f59e0b" title="Âmbar"></div>
+          <div class="color-dot" data-color="#22c55e" style="background:#22c55e" title="Verde"></div>
+          <div class="color-dot" data-color="#ef4444" style="background:#ef4444" title="Vermelho"></div>
+          <div class="color-dot" data-color="#000000" style="background:#000000;border:1px solid rgba(255,255,255,.2)" title="Preto"></div>
+          <label class="color-picker-wrap" title="Cor personalizada">
+            <input type="color" id="mv-border-color-picker" value="#ffffff">
+            <span>🎨</span>
+          </label>
+        </div>
+        <input type="hidden" id="mv-circle-border-color" value="#ffffff">
+
+        <label>Cor do glow</label>
+        <div class="color-row" id="glow-colors">
+          <div class="color-dot selected" data-color="#ffffff" style="background:#ffffff"></div>
+          <div class="color-dot" data-color="#3b82f6" style="background:#3b82f6"></div>
+          <div class="color-dot" data-color="#7c3aed" style="background:#7c3aed"></div>
+          <div class="color-dot" data-color="#f59e0b" style="background:#f59e0b"></div>
+          <div class="color-dot" data-color="#22c55e" style="background:#22c55e"></div>
+          <div class="color-dot" data-color="#ef4444" style="background:#ef4444"></div>
+          <label class="color-picker-wrap" title="Cor personalizada">
+            <input type="color" id="mv-glow-color-picker" value="#ffffff">
+            <span>🎨</span>
+          </label>
+        </div>
+        <input type="hidden" id="mv-circle-glow-color" value="#ffffff">
+
+        <label>Intensidade do glow</label>
+        <div class="slider-row">
+          <input type="range" id="mv-glow-intensity" min="0" max="1" step="0.05" value="0.8">
+          <span class="slider-val" id="mv-glow-intensity-val">0.80</span>
+        </div>
+      </div>
+
+      <!-- Ondas -->
+      <h3 class="sub section-toggle" data-target="sec-waves">🌊 Ondas de Pulso</h3>
+      <div id="sec-waves" class="section-body">
+        <div class="toggle-row">
+          <input type="checkbox" id="mv-waves-enabled" checked>
+          <label for="mv-waves-enabled">Ativar ondas ao redor do círculo</label>
+        </div>
+        <div id="sec-waves-opts">
+          <label>Número de anéis</label>
+          <div class="slider-row">
+            <input type="range" id="mv-wave-rings" min="1" max="6" step="1" value="3">
+            <span class="slider-val" id="mv-wave-rings-val">3</span>
+          </div>
+          <label>Opacidade máxima das ondas</label>
+          <div class="slider-row">
+            <input type="range" id="mv-wave-opacity" min="0.1" max="1" step="0.05" value="0.6">
+            <span class="slider-val" id="mv-wave-opacity-val">0.60</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fundo -->
+      <h3 class="sub section-toggle" data-target="sec-bg">🖼️ Efeitos de Fundo</h3>
+      <div id="sec-bg" class="section-body">
+        <label>Velocidade do zoom lento (Ken Burns)</label>
+        <div class="slider-row">
+          <input type="range" id="mv-zoom-speed" min="0" max="0.15" step="0.005" value="0.04">
+          <span class="slider-val" id="mv-zoom-speed-val">0.040</span>
+        </div>
+        <div class="toggle-row">
+          <input type="checkbox" id="mv-beat-shake" checked>
+          <label for="mv-beat-shake">Vibração do fundo nas batidas</label>
+        </div>
+        <label>Intensidade da vibração (px)</label>
+        <div class="slider-row">
+          <input type="range" id="mv-shake-px" min="0" max="30" step="1" value="6">
+          <span class="slider-val" id="mv-shake-px-val">6px</span>
+        </div>
+        <label>Boost de brilho no beat</label>
+        <div class="slider-row">
+          <input type="range" id="mv-brightness" min="0" max="0.5" step="0.02" value="0.18">
+          <span class="slider-val" id="mv-brightness-val">0.18</span>
+        </div>
+        <label>Blur ambiente do fundo (px)</label>
+        <div class="slider-row">
+          <input type="range" id="mv-blur" min="0" max="15" step="0.5" value="2">
+          <span class="slider-val" id="mv-blur-val">2.0px</span>
+        </div>
+      </div>
+
+      <!-- Partículas -->
+      <h3 class="sub section-toggle" data-target="sec-particles">✨ Partículas</h3>
+      <div id="sec-particles" class="section-body">
+        <div class="toggle-row">
+          <input type="checkbox" id="mv-particles-enabled" checked>
+          <label for="mv-particles-enabled">Ativar partículas flutuantes</label>
+        </div>
+        <div id="sec-particles-opts">
+          <label>Quantidade de partículas</label>
+          <div class="slider-row">
+            <input type="range" id="mv-particle-count" min="10" max="200" step="5" value="60">
+            <span class="slider-val" id="mv-particle-count-val">60</span>
+          </div>
+          <label>Velocidade</label>
+          <div class="slider-row">
+            <input type="range" id="mv-particle-speed" min="0.2" max="3" step="0.1" value="1">
+            <span class="slider-val" id="mv-particle-speed-val">1.0×</span>
+          </div>
+          <label>Opacidade máxima</label>
+          <div class="slider-row">
+            <input type="range" id="mv-particle-opacity" min="0.1" max="1" step="0.05" value="0.55">
+            <span class="slider-val" id="mv-particle-opacity-val">0.55</span>
+          </div>
+          <label>Cor das partículas</label>
+          <div class="color-row" id="particle-colors">
+            <div class="color-dot selected" data-color="#ffffff" style="background:#ffffff"></div>
+            <div class="color-dot" data-color="#3b82f6" style="background:#3b82f6"></div>
+            <div class="color-dot" data-color="#7c3aed" style="background:#7c3aed"></div>
+            <div class="color-dot" data-color="#f59e0b" style="background:#f59e0b"></div>
+            <div class="color-dot" data-color="#22c55e" style="background:#22c55e"></div>
+            <label class="color-picker-wrap">
+              <input type="color" id="mv-particle-color-picker" value="#ffffff">
+              <span>🎨</span>
+            </label>
+          </div>
+          <input type="hidden" id="mv-particle-color" value="#ffffff">
+        </div>
+      </div>
+
+      <!-- Áudio -->
+      <h3 class="sub section-toggle" data-target="sec-audio">🎚️ Sensibilidade de Áudio</h3>
+      <div id="sec-audio" class="section-body">
+        <label>Sensibilidade geral</label>
+        <div class="slider-row">
+          <input type="range" id="mv-sensitivity" min="0.3" max="3" step="0.1" value="1">
+          <span class="slider-val" id="mv-sensitivity-val">1.0×</span>
+        </div>
+        <label>Threshold de batida (maior = menos beats detectados)</label>
+        <div class="slider-row">
+          <input type="range" id="mv-beat-threshold" min="0.1" max="0.95" step="0.05" value="0.6">
+          <span class="slider-val" id="mv-beat-threshold-val">0.60</span>
+        </div>
+      </div>
+
+      <!-- Extras -->
+      <h3 class="sub section-toggle" data-target="sec-extras">🎬 Extras</h3>
+      <div id="sec-extras" class="section-body">
+        <div class="toggle-row">
+          <input type="checkbox" id="mv-progress-bar" checked>
+          <label for="mv-progress-bar">Mostrar barra de progresso</label>
+        </div>
+        <label>Posição da barra</label>
+        <select id="mv-progress-position">
+          <option value="bottom">Embaixo</option>
+          <option value="top">Em cima</option>
+        </select>
+        <div class="toggle-row" style="margin-top:12px">
+          <input type="checkbox" id="mv-show-title" checked>
+          <label for="mv-show-title">Mostrar título na tela</label>
+        </div>
+        <label>Posição do título</label>
+        <select id="mv-title-position">
+          <option value="bottom-center">Abaixo (centralizado)</option>
+          <option value="top-center">Acima (centralizado)</option>
+        </select>
+      </div>
+
+      <!-- Botão enviar -->
+      <button class="mv-btn mv-btn-primary" id="mv-submit-btn" style="width:100%;margin-top:22px;padding:14px;font-size:1rem;">
+        🎵 Gerar Music Visualizer
+      </button>
+
+      <!-- Barra de progresso do envio -->
+      <div class="mv-progress hidden" id="mv-upload-progress">
+        <div style="font-size:.82rem;opacity:.6;margin-bottom:6px" id="mv-progress-label">Enviando arquivos...</div>
+        <div class="bar"><div class="fill" id="mv-progress-fill"></div></div>
+      </div>
+
+      <!-- Fila de jobs -->
+      <div id="mv-queue" class="mv-queue"></div>
+    </section>
+
+    <!-- ── Coluna direita: preview + histórico ── -->
+    <section class="mv-card">
+      <h2>👁️ Prévia</h2>
+      <div id="mv-preview-box" style="background:rgba(0,0,0,.3);border-radius:10px;
+        aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;
+        flex-direction:column;gap:8px;font-size:.88rem;opacity:.5;overflow:hidden;position:relative;">
+        <span style="font-size:2rem">🎵</span>
+        <span>Selecione uma imagem de fundo para ver a prévia</span>
+        <img id="mv-bg-preview-box" style="display:none;width:100%;height:100%;object-fit:cover;position:absolute;inset:0;border-radius:10px;" alt="">
+        <!-- Indicador de círculo animado CSS -->
+        <div id="mv-circle-preview" style="display:none;position:absolute;
+          width:120px;height:120px;border-radius:50%;
+          border:4px solid white;background:rgba(0,0,0,0.6);
+          box-shadow:0 0 30px rgba(255,255,255,0.6);
+          animation:circlePulse 1.8s ease-in-out infinite;
+          display:none;align-items:center;justify-content:center;font-size:2rem;">
+          ♫
+        </div>
+      </div>
+
+      <h3 class="sub" style="margin-top:20px;">🗂️ Histórico recente</h3>
+      <div id="mv-recent-jobs" style="font-size:.85rem;color:var(--text-secondary);">
+        <p style="opacity:.5">Carregando...</p>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<style>
+@keyframes circlePulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 20px rgba(255,255,255,0.4); }
+  50% { transform: scale(1.15); box-shadow: 0 0 40px rgba(255,255,255,0.8); }
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(function(){
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function q(id){ return document.getElementById(id); }
+function bool(el){ return el && el.checked; }
+
+// ── Sliders com label ────────────────────────────────────────────────────────
+const sliders = [
+  ['mv-circle-radius','mv-circle-radius-val', v => v+'px'],
+  ['mv-circle-scale','mv-circle-scale-val', v => parseFloat(v).toFixed(2)+'×'],
+  ['mv-glow-intensity','mv-glow-intensity-val', v => parseFloat(v).toFixed(2)],
+  ['mv-wave-rings','mv-wave-rings-val', v => v],
+  ['mv-wave-opacity','mv-wave-opacity-val', v => parseFloat(v).toFixed(2)],
+  ['mv-zoom-speed','mv-zoom-speed-val', v => parseFloat(v).toFixed(3)],
+  ['mv-shake-px','mv-shake-px-val', v => v+'px'],
+  ['mv-brightness','mv-brightness-val', v => parseFloat(v).toFixed(2)],
+  ['mv-blur','mv-blur-val', v => parseFloat(v).toFixed(1)+'px'],
+  ['mv-particle-count','mv-particle-count-val', v => v],
+  ['mv-particle-speed','mv-particle-speed-val', v => parseFloat(v).toFixed(1)+'×'],
+  ['mv-particle-opacity','mv-particle-opacity-val', v => parseFloat(v).toFixed(2)],
+  ['mv-sensitivity','mv-sensitivity-val', v => parseFloat(v).toFixed(1)+'×'],
+  ['mv-beat-threshold','mv-beat-threshold-val', v => parseFloat(v).toFixed(2)],
+];
+sliders.forEach(([id, valId, fmt]) => {
+  const el = q(id); const vEl = q(valId);
+  if(!el || !vEl) return;
+  el.addEventListener('input', () => { vEl.textContent = fmt(el.value); });
+});
+
+// ── Resolução ────────────────────────────────────────────────────────────────
+q('mv-resolution').addEventListener('change', function(){
+  const [w,h] = this.value.split('x').map(Number);
+  q('mv-width').value = w;
+  q('mv-height').value = h;
+  // Atualizar aspect ratio da preview
+  const box = document.getElementById('mv-preview-box');
+  box.style.aspectRatio = w > h ? '16/9' : (w === h ? '1/1' : '9/16');
+});
+
+// ── Previews de imagem ───────────────────────────────────────────────────────
+q('mv-bg-image').addEventListener('change', function(){
+  const file = this.files[0];
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  q('mv-bg-preview').src = url;
+  q('mv-bg-preview').classList.add('show');
+  // Preview box
+  const box = q('mv-bg-preview-box');
+  box.src = url;
+  box.style.display = 'block';
+  q('mv-preview-box').style.opacity = '1';
+  q('mv-circle-preview').style.display = 'flex';
+  // Esconder texto placeholder
+  document.querySelectorAll('#mv-preview-box > span').forEach(s => s.style.display = 'none');
+});
+
+q('mv-logo').addEventListener('change', function(){
+  const file = this.files[0];
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  q('mv-logo-preview').src = url;
+  q('mv-logo-preview').classList.add('show');
+});
+
+// ── Seletores de cor ─────────────────────────────────────────────────────────
+function setupColorGroup(groupId, hiddenId, pickerId) {
+  const dots = document.querySelectorAll(`#${groupId} .color-dot`);
+  const hidden = q(hiddenId);
+  const picker = q(pickerId);
+  dots.forEach(d => {
+    d.addEventListener('click', () => {
+      dots.forEach(x => x.classList.remove('selected'));
+      d.classList.add('selected');
+      hidden.value = d.dataset.color;
+      if(picker) picker.value = d.dataset.color;
+    });
+  });
+  if(picker) picker.addEventListener('input', () => {
+    dots.forEach(x => x.classList.remove('selected'));
+    hidden.value = picker.value;
+  });
+}
+setupColorGroup('border-colors','mv-circle-border-color','mv-border-color-picker');
+setupColorGroup('glow-colors','mv-circle-glow-color','mv-glow-color-picker');
+setupColorGroup('particle-colors','mv-particle-color','mv-particle-color-picker');
+
+// ── Seções colapsáveis ───────────────────────────────────────────────────────
+document.querySelectorAll('.section-toggle').forEach(h => {
+  h.addEventListener('click', () => {
+    const body = q(h.dataset.target);
+    if(!body) return;
+    const collapsed = body.style.display === 'none';
+    body.style.display = collapsed ? 'block' : 'none';
+    h.classList.toggle('collapsed', !collapsed);
+  });
+});
+
+// ── Toggle waves ─────────────────────────────────────────────────────────────
+q('mv-waves-enabled').addEventListener('change', function(){
+  q('sec-waves-opts').style.display = this.checked ? 'block' : 'none';
+});
+
+// ── Toggle partículas ────────────────────────────────────────────────────────
+q('mv-particles-enabled').addEventListener('change', function(){
+  q('sec-particles-opts').style.display = this.checked ? 'block' : 'none';
+});
+
+// ── Carregar histórico recente ───────────────────────────────────────────────
+async function loadRecentJobs(){
+  try {
+    const res = await fetch('/api/jobs?type=music_visualizer&limit=5');
+    if(!res.ok) return;
+    const data = await res.json();
+    // /api/jobs retorna lista direta ou {jobs: [...]}
+    const jobs = Array.isArray(data) ? data : (data.jobs || []);
+    const container = q('mv-recent-jobs');
+    const mvJobs = jobs.filter(j => j.video_type === 'music_visualizer').slice(0, 5);
+    if(mvJobs.length === 0){
+      container.innerHTML = '<p style="opacity:.5">Nenhum job ainda.</p>';
+      return;
+    }
+    container.innerHTML = mvJobs.map(j => `
+      <div style="display:flex;justify-content:space-between;align-items:center;
+        padding:8px 10px;background:rgba(255,255,255,.03);border-radius:8px;margin-bottom:6px;">
+        <span style="font-size:.82rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;"
+          title="${j.title || 'Sem título'}">${j.title || 'Sem título'}</span>
+        <a href="/music-visualizer/video/${j.job_id}" style="font-size:.75rem;color:#3b82f6;font-weight:600;text-decoration:none;white-space:nowrap;">
+          Ver →
+        </a>
+      </div>
+    `).join('');
+  } catch(e){ console.warn('Histórico:', e); }
+}
+loadRecentJobs();
+
+// ── Envio do formulário ───────────────────────────────────────────────────────
+const submitBtn = q('mv-submit-btn');
+const progressWrap = q('mv-upload-progress');
+const progressFill = q('mv-progress-fill');
+const progressLabel = q('mv-progress-label');
+const queue = q('mv-queue');
+let activeJobs = {};
+
+submitBtn.addEventListener('click', async () => {
+  const title = q('mv-title').value.trim();
+  const audioFile = q('mv-audio').files[0];
+  const bgImageFile = q('mv-bg-image').files[0];
+  const logoFile = q('mv-logo').files[0];
+
+  if(!title){ showToast('Informe o título do projeto.', 'error'); return; }
+  if(!audioFile){ showToast('Selecione um arquivo de áudio.', 'error'); return; }
+  if(!bgImageFile){ showToast('Selecione uma imagem de fundo.', 'error'); return; }
+
+  const form = new FormData();
+  form.append('title', title);
+  form.append('audio_file', audioFile);
+  form.append('bg_image', bgImageFile);
+  if(logoFile) form.append('logo_file', logoFile);
+
+  // Parâmetros
+  form.append('logo_text', q('mv-logo-text').value || '♫');
+  form.append('width', q('mv-width').value);
+  form.append('height', q('mv-height').value);
+  form.append('fps', q('mv-fps').value);
+  form.append('circle_radius', q('mv-circle-radius').value);
+  form.append('circle_max_scale', q('mv-circle-scale').value);
+  form.append('circle_border_color', q('mv-circle-border-color').value);
+  form.append('circle_bg_color', '#000000cc');
+  form.append('circle_glow_color', q('mv-circle-glow-color').value);
+  form.append('circle_glow_intensity', q('mv-glow-intensity').value);
+  form.append('waves_enabled', bool(q('mv-waves-enabled')) ? 'on' : 'off');
+  form.append('wave_rings', q('mv-wave-rings').value);
+  form.append('wave_opacity_max', q('mv-wave-opacity').value);
+  form.append('bg_zoom_speed', q('mv-zoom-speed').value);
+  form.append('bg_beat_shake', bool(q('mv-beat-shake')) ? 'on' : 'off');
+  form.append('bg_beat_shake_px', q('mv-shake-px').value);
+  form.append('bg_brightness_boost', q('mv-brightness').value);
+  form.append('bg_blur_ambient', q('mv-blur').value);
+  form.append('particles_enabled', bool(q('mv-particles-enabled')) ? 'on' : 'off');
+  form.append('particle_count', q('mv-particle-count').value);
+  form.append('particle_color', q('mv-particle-color').value);
+  form.append('particle_opacity_max', q('mv-particle-opacity').value);
+  form.append('particle_speed', q('mv-particle-speed').value);
+  form.append('progress_bar_enabled', bool(q('mv-progress-bar')) ? 'on' : 'off');
+  form.append('progress_bar_color', q('mv-circle-border-color').value);
+  form.append('progress_bar_position', q('mv-progress-position').value);
+  form.append('show_title', bool(q('mv-show-title')) ? 'on' : 'off');
+  form.append('title_color', '#ffffff');
+  form.append('title_opacity', '0.85');
+  form.append('title_position', q('mv-title-position').value);
+  form.append('audio_sensitivity', q('mv-sensitivity').value);
+  form.append('beat_threshold', q('mv-beat-threshold').value);
+
+  submitBtn.disabled = true;
+  progressWrap.classList.remove('hidden');
+  progressFill.style.width = '20%';
+  progressLabel.textContent = 'Enviando arquivos...';
+
+  try {
+    const res = await fetch('/music-visualizer/render', { method: 'POST', body: form });
+    const data = await res.json();
+    if(!res.ok || data.error){ throw new Error(data.error || 'Erro desconhecido'); }
+
+    progressFill.style.width = '100%';
+    progressLabel.textContent = 'Job criado! Aguardando worker...';
+    if(typeof showToast === 'function') showToast('🎵 Job criado com sucesso!', 'success');
+
+    // Adicionar à fila visual
+    addToQueue(data.job_id, title);
+    submitBtn.disabled = false;
+    setTimeout(() => progressWrap.classList.add('hidden'), 2000);
+  } catch(e) {
+    if(typeof showToast === 'function') showToast('Erro: ' + e.message, 'error');
+    else alert('Erro: ' + e.message);
+    submitBtn.disabled = false;
+    progressWrap.classList.add('hidden');
+  }
+});
+
+function addToQueue(jobId, title){
+  const item = document.createElement('div');
+  item.className = 'mv-queue-item';
+  item.id = 'qi-' + jobId;
+  item.innerHTML = `
+    <div class="qi-header">
+      <span class="qi-title">${title}</span>
+      <span class="qi-status pending" id="qi-status-${jobId}">Na fila</span>
+    </div>
+    <div class="mv-progress"><div class="bar"><div class="fill" id="qi-fill-${jobId}"></div></div></div>
+    <div class="qi-detail" id="qi-detail-${jobId}">Aguardando worker...</div>
+    <a href="/music-visualizer/video/${jobId}" class="qi-link hidden" id="qi-link-${jobId}">▶️ Ver vídeo</a>
+  `;
+  queue.insertBefore(item, queue.firstChild);
+  trackJob(jobId);
+}
+
+function trackJob(jobId){
+  const evtSource = new EventSource(`/api/jobs/${jobId}/stream`);
+  evtSource.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      const status = d.status || '';
+      const progress = d.progress || 0;
+      const detail = d.detail || '';
+      const statusEl = document.getElementById('qi-status-'+jobId);
+      const fillEl = document.getElementById('qi-fill-'+jobId);
+      const detailEl = document.getElementById('qi-detail-'+jobId);
+      const linkEl = document.getElementById('qi-link-'+jobId);
+      if(statusEl){
+        statusEl.className = 'qi-status ' + status;
+        const labels = {pending:'Na fila',rendering:'Renderizando',composing:'Compondo',
+          generating_subtitles:'Legendas',preparing:'Preparando',done:'Pronto!',error:'Erro'};
+        statusEl.textContent = labels[status] || status;
+      }
+      if(fillEl) fillEl.style.width = progress + '%';
+      if(detailEl) detailEl.textContent = detail;
+      if(status === 'done'){
+        evtSource.close();
+        if(linkEl) linkEl.classList.remove('hidden');
+        loadRecentJobs();
+      } else if(status === 'error'){
+        evtSource.close();
+      }
+    } catch(err){}
+  };
+  evtSource.onerror = () => evtSource.close();
+}
+
+})();
+</script>
+{% endblock %}
