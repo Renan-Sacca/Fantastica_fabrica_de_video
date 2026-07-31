@@ -11,4 +11,18 @@ services:
       - .env
     environment:
       - TOKEN_FILE=/app/token.json
+      # Habilita todas as capacidades da GPU NVIDIA no container
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video,graphics
+    # ── Acesso à GPU NVIDIA (requer NVIDIA Container Toolkit no host) ──
+    # Usado para: encode NVENC no ffmpeg + WebGL acelerado no Chromium.
+    # Se a GPU não estiver disponível, o worker faz fallback automático
+    # para libx264 (CPU) e SwiftShader (WebGL software).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped

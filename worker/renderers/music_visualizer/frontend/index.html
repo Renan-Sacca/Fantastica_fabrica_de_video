@@ -394,17 +394,22 @@ class AudioSpectrum {
     }
     const rOff=CFG.spectrum_radius_offset||22;
     const innerR=circleR+rOff;
-    const maxH=CFG.spectrum_max_height||220;
-    // Variable bar width — wider in bass, narrower in treble
+    // Beat boost — bars jump higher on strong hits
+    const boost=1.0+BANDS.bassSmooth*(CFG.spectrum_beat_boost||0.55)
+                   +BANDS.rmsSmooth*0.18;
+    const maxH=(CFG.spectrum_max_height||220)*boost;
+    // Angular slot per bar — must cover the FULL circle (2π/N)
+    const slot=(Math.PI*2)/N;
+    const fill=CFG.spectrum_fill||0.82; // 82% of slot = thin gap between bars
     const verts=new Float32Array(N*12);
     const brights=new Float32Array(N*6);
     let vi=0,bi=0;
     for(let i=0;i<N;i++){
       const ang=(i/N*Math.PI*2)-Math.PI/2;
       const v=Math.pow(Math.max(vals[i],0),0.52);
-      const bh=v*maxH;
-      // Bass bars wider, treble bars thinner
-      const barW=0.007+0.006*(1-i/N);
+      const bh=Math.max(2.0, v*maxH); // minimum visible height
+      // Bass bars slightly wider than treble, but always filling the slot
+      const barW=slot*fill*(1.0+0.25*(1-i/N));
       const a0=ang-barW/2,a1=ang+barW/2;
       const ir=innerR, or_=innerR+bh;
       const ix0=cx+Math.cos(a0)*ir,iy0=cy+Math.sin(a0)*ir;
@@ -441,6 +446,11 @@ class CircleModule {
   constructor(){
     this.scale=1;this.vel=0;this.breatheT=0;this.glowS=0;this.borderShimmer=0;
     this.logoTex=null;this.titleTex=null;
+    // ── Floating motion state ──
+    this.offX=0; this.offY=0;          // current displacement
+    this.pushX=0; this.pushY=0;        // beat impulse (decays)
+    this.pushVX=0; this.pushVY=0;      // impulse velocity (spring)
+    this.floatT=Math.random()*100;     // desync phase
     const {buf:fb,n:fn}=fanBuf(256);this._fb=fb;this._fn=fn;
     const {buf:rb,n:rn}=ringBuf(512);this._rb=rb;this._rn=rn;
     this._logoBuf=gl.createBuffer();this._titleBuf=gl.createBuffer();
@@ -505,6 +515,7 @@ class CircleModule {
   }
   update(dt){
     this.breatheT+=dt*1.6;
+    this.floatT+=dt;
     // Bass drives circle scale (spring)
     const breathe=1+Math.sin(this.breatheT)*0.013;
     const target=breathe*(1+BANDS.bassSmooth*(CFG.circle_max_scale-1));
@@ -517,11 +528,63 @@ class CircleModule {
     this.glowS+=(tG-this.glowS)*0.12;
     // High drives border shimmer
     this.borderShimmer+=(BANDS.highSmooth-this.borderShimmer)*0.20;
+
+    // ── FLOATING MOTION ──────────────────────────────────────
+    const R=(CFG.circle_radius||200);
+    const floatAmp=(CFG.circle_float_amount||0.07)*R;   // continuous drift
+    const pushAmp =(CFG.circle_push_amount ||0.15)*R;   // beat kick
+
+    // Organic continuous float — 3 sines with different periods (Lissajous)
+    const fx=Math.sin(this.floatT*0.53)*0.6+Math.sin(this.floatT*0.21)*0.4;
+    const fy=Math.cos(this.floatT*0.41)*0.6+Math.cos(this.floatT*0.17)*0.4;
+    const baseX=fx*floatAmp;
+    const baseY=fy*floatAmp*0.75;
+
+    // Beat impulse — random direction, weighted by bass energy
+    if(BANDS.beat && BANDS.bassSmooth>0.15){
+      const ang=Math.random()*Math.PI*2;
+      const mag=pushAmp*Math.min(1,BANDS.bassSmooth*1.3);
+      this.pushVX+=Math.cos(ang)*mag*11;
+      this.pushVY+=Math.sin(ang)*mag*11;
+    }
+    // Spring back to center for the impulse component
+    const PK=95,PD=9.5;
+    this.pushVX+=(-this.pushX)*PK*dt-this.pushVX*PD*dt;
+    this.pushVY+=(-this.pushY)*PK*dt-this.pushVY*PD*dt;
+    this.pushX+=this.pushVX*dt;
+    this.pushY+=this.pushVY*dt;
+    // Clamp impulse so it never flies off
+    const maxOff=pushAmp*1.5;
+    const pm=Math.hypot(this.pushX,this.pushY);
+    if(pm>maxOff){this.pushX*=maxOff/pm;this.pushY*=maxOff/pm;}
+
+    // Final smoothed position
+    this.offX+=((baseX+this.pushX)-this.offX)*0.14;
+    this.offY+=((baseY+this.pushY)-this.offY)*0.14;
   }
+  // Real center used by every module that orbits the circle
+  center(cx,cy){return[cx+this.offX, cy+this.offY];}
   draw(cx,cy){
     const r=(CFG.circle_radius||200)*this.scale;
     const dc=DOM_COLOR;
     const gc=CFG.circle_glow_color==='auto'?dc:hexRGB(CFG.circle_glow_color||'#fff');
+
+    // ── DROP SHADOW (detaches the circle from the background) ──
+    // Offset opposite to the float direction → parallax illusion of depth
+    if(CFG.circle_shadow!==false){
+      const shOffX = -this.offX*0.35 + r*0.05;
+      const shOffY = -this.offY*0.35 + r*0.11;
+      gl.useProgram(this._pGlow);
+      gl.bindBuffer(gl.ARRAY_BUFFER,this._fb);att(this._pGlow,'a_p',2,8,0);
+      uM(this._pGlow,'u_m',PROJ);
+      bNorm();
+      for(let l=0;l<4;l++){
+        u2f(this._pGlow,'u_cen',cx+shOffX,cy+shOffY);
+        gl.uniform1f(gl.getUniformLocation(this._pGlow,'u_r'),r*(1.02+l*0.09));
+        u4f(this._pGlow,'u_col',0,0,0,0.20-l*0.045);
+        gl.drawArrays(gl.TRIANGLE_FAN,0,this._fn);
+      }
+    }
 
     // ── Close glow (2 layers, additive) ──
     gl.useProgram(this._pGlow);
@@ -777,17 +840,31 @@ window.initVisualizer = async function({bgImage,logoImage,cfg,title,totalFrames}
                      cfg.title_color||'#fff', cfg.title_font_size||32);
 };
 
-window.renderFrame = function({frameIndex,totalFrames,rms,spectrum,isBeat,beatStrength,progress}){
+// Advance simulation state WITHOUT drawing — used to fast-forward a parallel
+// worker page to the first frame of its chunk. Runs entirely inside JS so it
+// costs a single CDP round-trip instead of one per frame.
+window.fastForwardTo = function(allFrames, targetIndex){
+  for(let i=0;i<targetIndex && i<allFrames.length;i++){
+    window.renderFrame(allFrames[i], true);
+  }
+};
+
+window.renderFrame = function(fd, skipDraw){
+  const {frameIndex,totalFrames,rms,spectrum,isBeat,beatStrength,progress,
+         bass,mid,high,presence}=fd;
   const dt=1/FPS; T+=dt;
   const cx=W/2, cy=H/2;
 
   // ── Band separation ──────────────────────────────────────────
-  // spectrum: 0..N → bass(0-8%), low-mid(8-20%), mid(20-50%), high(50-85%), presence(85-100%)
-  if(spectrum&&spectrum.length){
-    BANDS.bass     = bandEnergy(spectrum, 0.00, 0.08);
-    BANDS.mid      = bandEnergy(spectrum, 0.08, 0.40);
-    BANDS.high     = bandEnergy(spectrum, 0.40, 0.80);
-    BANDS.presence = bandEnergy(spectrum, 0.80, 1.00);
+  // Bands are pre-computed in Python (light payload). Fallback: derive
+  // them from the raw spectrum if not provided.
+  if(bass!==undefined){
+    BANDS.bass=bass; BANDS.mid=mid; BANDS.high=high; BANDS.presence=presence;
+  } else if(spectrum&&spectrum.length){
+    BANDS.bass     = bandEnergy(spectrum, 0.00, 0.10);
+    BANDS.mid      = bandEnergy(spectrum, 0.10, 0.42);
+    BANDS.high     = bandEnergy(spectrum, 0.42, 0.78);
+    BANDS.presence = bandEnergy(spectrum, 0.78, 1.00);
   }
   BANDS.rms=rms; BANDS.beat=isBeat; BANDS.beatStr=beatStrength||0;
   // Smoothed values (each band independent decay rate)
@@ -797,16 +874,20 @@ window.renderFrame = function({frameIndex,totalFrames,rms,spectrum,isBeat,beatSt
   BANDS.presSmooth  +=(BANDS.presence  -BANDS.presSmooth  )*0.30;
   BANDS.rmsSmooth   +=(BANDS.rms       -BANDS.rmsSmooth   )*0.20;
 
+  // ── Module updates (circle first — others follow its center) ──
+  mCircle.update(dt);
+  const [ccx,ccy]=mCircle.center(cx,cy);   // dynamic floating center
   const circleR=(CFG.circle_radius||200)*mCircle.scale;
 
-  // ── Module updates ───────────────────────────────────────────
   mBG.update(dt);
   mHalo.update(dt);
   if(isBeat) mWaves.onBeat();
   mWaves.update(dt);
-  mCircle.update(dt);
-  mParticles.update(dt, cx, cy, circleR);
+  mParticles.update(dt, ccx, ccy, circleR);
   mLens.update(dt);
+
+  // Fast-forward mode: state advanced, nothing rendered
+  if(skipDraw) return;
 
   // ══ DRAW ORDER ════════════════════════════════════════════════
   gl.clearColor(0,0,0,1);
@@ -819,22 +900,22 @@ window.renderFrame = function({frameIndex,totalFrames,rms,spectrum,isBeat,beatSt
   mParticles.drawBack();
 
   // Layer 3 — Halo (diffuse light behind circle, additive)
-  mHalo.draw(cx,cy);
+  mHalo.draw(ccx,ccy);
 
   // Layer 4 — Wave rings (mid-driven, additive)
-  mWaves.draw(cx, cy, circleR);
+  mWaves.draw(ccx, ccy, circleR);
 
   // Layer 5 — Audio spectrum (radial bars, additive)
-  if(CFG.spectrum_enabled) mSpectrum.draw(cx, cy, circleR, spectrum);
+  if(CFG.spectrum_enabled) mSpectrum.draw(ccx, ccy, circleR, spectrum);
 
   // Layer 6 — Mid particles
   mParticles.drawMid();
 
-  // Layer 7 — Circle (glass + spring + glow)
-  mCircle.draw(cx,cy);
+  // Layer 7 — Circle (glass + spring + glow + shadow)
+  mCircle.draw(ccx,ccy);
 
   // Layer 8 — Lens flare (beat driven, additive)
-  if(CFG.lens_flare) mLens.draw(cx,cy);
+  if(CFG.lens_flare) mLens.draw(ccx,ccy);
 
   // Layer 9 — Front particles (near, large, additive)
   mParticles.drawFront();

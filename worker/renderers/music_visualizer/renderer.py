@@ -40,14 +40,20 @@ DEFAULTS: dict = {
     "circle_border_color": "#ffffff", "circle_bg_color": "#00000099",
     "circle_glow_color": "auto", "circle_glow_intensity": 1.2,
     "circle_border_width": 5,
+    # Movimento flutuante do círculo (fração do raio)
+    "circle_float_amount": 0.07,   # deriva contínua ~7% do raio
+    "circle_push_amount": 0.15,    # impulso na batida ~15% do raio
+    "circle_shadow": True,         # sombra projetada (descola do fundo)
     "logo_text": "♫", "logo_font_size": 80, "logo_font_color": "#ffffff",
     # Ondas
     "waves_enabled": True, "wave_rings": 4,
     "wave_color": "auto", "wave_opacity_max": 0.8,
-    # Espectro — 512 barras, raio maior, mais alto
+    # Espectro — 512 barras cobrindo 360°, com boost na batida
     "spectrum_enabled": True, "spectrum_bars": 512,
     "spectrum_color": "auto", "spectrum_opacity": 0.85,
-    "spectrum_radius_offset": 20, "spectrum_max_height": 200,
+    "spectrum_radius_offset": 20, "spectrum_max_height": 210,
+    "spectrum_fill": 0.82,         # 82% do slot angular (gap fino entre barras)
+    "spectrum_beat_boost": 0.55,   # quanto as barras sobem extra na batida
     # Fundo
     "bg_zoom_speed": 0.04, "bg_zoom_max": 1.12,
     "bg_beat_shake": True, "bg_beat_shake_px": 7,
@@ -178,19 +184,53 @@ class MusicVisualizerRenderer(BaseRenderer):
         # Espectro FFT por frame (512 bandas para spectrum visual)
         N_BANDS = int(cfg.get("spectrum_bars", 512))
         n_fft = 4096  # maior janela = melhor resolução de frequência
-        spectra = []
+        window = np.hanning(n_fft)
+
+        # Índices de banda em escala LOGARÍTMICA (percepção humana de frequência).
+        # Isso espalha os graves em mais barras e comprime os agudos, que é como
+        # os visualizers profissionais distribuem o espectro.
+        nyq_bins = n_fft // 2
+        f_min_bin = max(1, int(20 / (sr / n_fft)))      # ~20 Hz
+        f_max_bin = min(nyq_bins - 1, int(16000 / (sr / n_fft)))  # ~16 kHz
+        log_edges = np.logspace(
+            np.log10(f_min_bin), np.log10(f_max_bin), N_BANDS + 1
+        ).astype(int)
+
+        # ── Passo 1: calcular todos os espectros brutos (sem normalizar) ──
+        raw_spectra = np.zeros((total_frames, N_BANDS), dtype=float)
         for i in range(total_frames):
             chunk = y[i * hop: i * hop + n_fft]
             if len(chunk) < n_fft:
                 chunk = np.pad(chunk, (0, n_fft - len(chunk)))
-            window = np.hanning(n_fft)
-            fft_mag = np.abs(np.fft.rfft(chunk * window))[: n_fft // 2]
-            # Reduzir para N_BANDS com compressão log
-            bands = np.array_split(fft_mag[:min(len(fft_mag), N_BANDS * 4)], N_BANDS)
-            band_vals = np.array([np.mean(b) for b in bands], dtype=float)
-            band_max = band_vals.max() or 1.0
-            band_vals = np.clip(band_vals / band_max * sensitivity, 0, 1)
-            spectra.append(band_vals.tolist())
+            fft_mag = np.abs(np.fft.rfft(chunk * window))[:nyq_bins]
+            for b in range(N_BANDS):
+                lo, hi = log_edges[b], max(log_edges[b] + 1, log_edges[b + 1])
+                raw_spectra[i, b] = fft_mag[lo:hi].max() if hi <= nyq_bins else 0.0
+
+        # ── Passo 2: normalização GLOBAL (preserva a dinâmica entre frames) ──
+        # Usa percentil 99 em vez do máximo absoluto para não ser dominado por
+        # um único transiente extremo.
+        global_ref = np.percentile(raw_spectra, 99.0)
+        if global_ref <= 0:
+            global_ref = raw_spectra.max() or 1.0
+
+        # Compressão logarítmica (dB-like) — resposta visual natural
+        norm = raw_spectra / global_ref
+        norm = np.log1p(norm * 9.0) / np.log(10.0)   # log scale 0..~1
+        norm = np.clip(norm * sensitivity, 0.0, 1.0)
+
+        spectra = [row.tolist() for row in norm]
+
+        # ── Passo 3: energia por banda (calculado aqui para payload leve) ──
+        def band_avg(arr, lo_frac, hi_frac):
+            lo = int(lo_frac * N_BANDS)
+            hi = max(lo + 1, int(hi_frac * N_BANDS))
+            return arr[:, lo:hi].mean(axis=1)
+
+        bass = band_avg(norm, 0.00, 0.10)
+        mid = band_avg(norm, 0.10, 0.42)
+        high = band_avg(norm, 0.42, 0.78)
+        presence = band_avg(norm, 0.78, 1.00)
 
         # Beats: pico local acima do threshold
         beat_th = float(cfg["beat_threshold"]) * float(rms.mean()) * 4
@@ -212,6 +252,10 @@ class MusicVisualizerRenderer(BaseRenderer):
         return {
             "rms": rms.tolist(),
             "spectra": spectra,
+            "bass": bass.tolist(),
+            "mid": mid.tolist(),
+            "high": high.tolist(),
+            "presence": presence.tolist(),
             "beats": beats.tolist(),
             "beat_strength": beat_strength.tolist(),
             "duration": duration,
@@ -248,6 +292,25 @@ class MusicVisualizerRenderer(BaseRenderer):
     #  Renderização assíncrona via Playwright
     # ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _gpu_present() -> bool:
+        """Detecta acesso a GPU NVIDIA no container.
+
+        Cobre os dois cenários:
+        - Linux nativo: /dev/nvidiactl e /proc/driver/nvidia
+        - WSL2: a GPU é exposta via /dev/dxg (não existem /dev/nvidia*)
+        """
+        if Path("/dev/nvidiactl").exists() or Path("/proc/driver/nvidia/version").exists():
+            return True
+        if Path("/dev/dxg").exists():   # WSL2 GPU passthrough
+            return True
+        try:
+            r = subprocess.run(["nvidia-smi", "-L"],
+                               capture_output=True, text=True, timeout=15)
+            return r.returncode == 0 and "GPU" in r.stdout
+        except Exception:
+            return False
+
     async def _render_all_frames(
         self, bg_b64: str, logo_b64: Optional[str],
         audio_data: dict, frames_dir: Path,
@@ -260,6 +323,104 @@ class MusicVisualizerRenderer(BaseRenderer):
         total = audio_data["total_frames"]
         w, h = int(cfg["width"]), int(cfg["height"])
 
+        # ── Montar frame data (payload leve: bandas pré-calculadas) ──
+        rms = audio_data["rms"]
+        spectra = audio_data["spectra"]
+        beats = audio_data["beats"]
+        bstr = audio_data["beat_strength"]
+        bass = audio_data["bass"]
+        mid = audio_data["mid"]
+        high = audio_data["high"]
+        pres = audio_data["presence"]
+
+        # Payload SEM espectro — usado apenas para fast-forward de estado
+        light_frames = [
+            {
+                "frameIndex": i, "totalFrames": total,
+                "rms": float(rms[i]),
+                "bass": float(bass[i]), "mid": float(mid[i]),
+                "high": float(high[i]), "presence": float(pres[i]),
+                "isBeat": bool(beats[i]), "beatStrength": float(bstr[i]),
+                "progress": i / max(1, total - 1),
+            }
+            for i in range(total)
+        ]
+
+        # ── Definir paralelismo ──
+        n_workers = int(cfg.get("render_workers", 0)) or min(
+            6, max(1, (os.cpu_count() or 4) // 2)
+        )
+        n_workers = max(1, min(n_workers, 8))
+        chunk = math.ceil(total / n_workers)
+        ranges = [
+            (s, min(s + chunk, total))
+            for s in range(0, total, chunk)
+        ]
+        logger.info(
+            f"Render: {total} frames em {len(ranges)} páginas paralelas "
+            f"({chunk} frames/página)"
+        )
+
+        use_gpu = self._gpu_present()
+        gl_flag = "--use-gl=egl" if use_gpu else "--use-gl=swiftshader"
+        logger.info(f"WebGL backend: {'GPU (EGL)' if use_gpu else 'CPU (SwiftShader)'}")
+
+        done_counter = {"n": 0}
+
+        init_payload = {
+            "bgImage": bg_b64,
+            "logoImage": logo_b64,
+            "cfg": cfg,
+            "title": title,
+            "totalFrames": total,
+        }
+
+        async def render_chunk(ctx, start: int, end: int):
+            """Renderiza [start, end) numa página própria.
+
+            Faz fast-forward do estado de animação até `start` (1 round-trip),
+            depois desenha e captura cada frame do seu intervalo.
+            """
+            page = await ctx.new_page()
+            errors: list[str] = []
+            page.on("console",
+                    lambda m: errors.append(m.text) if m.type == "error" else None)
+            page.on("pageerror", lambda e: errors.append(str(e)))
+
+            await page.goto(f"file://{html_path}")
+            await page.wait_for_load_state("domcontentloaded")
+
+            if not await page.evaluate(
+                "!!document.getElementById('c').getContext('webgl2')"
+            ):
+                raise RuntimeError("WebGL2 indisponível no Chromium headless.")
+
+            await page.evaluate("(p) => window.initVisualizer(p)", init_payload)
+
+            # Fast-forward: avança o estado sem desenhar (barato)
+            if start > 0:
+                await page.evaluate(
+                    "([frames, target]) => window.fastForwardTo(frames, target)",
+                    [light_frames[:start], start],
+                )
+
+            for i in range(start, end):
+                fd = dict(light_frames[i])
+                fd["spectrum"] = spectra[i]   # espectro só no frame desenhado
+                await page.evaluate("(fd) => window.renderFrame(fd)", fd)
+                await page.screenshot(
+                    path=str(frames_dir / f"frame_{i:06d}.jpg"),
+                    type="jpeg", quality=88, animations="disabled",
+                )
+                done_counter["n"] += 1
+                n = done_counter["n"]
+                if n % 25 == 0:
+                    progress_fn(n / total, f"Frame {n}/{total}")
+                    if errors:
+                        logger.warning(f"JS errors: {errors[-2:]}")
+
+            await page.close()
+
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
@@ -268,9 +429,9 @@ class MusicVisualizerRenderer(BaseRenderer):
                     "--disable-dev-shm-usage",
                     "--enable-webgl", "--enable-webgl2",
                     "--ignore-gpu-blocklist",
-                    "--use-gl=swiftshader",   # Software WebGL2 — funciona sem GPU
+                    gl_flag,
                     "--enable-accelerated-2d-canvas",
-                    "--no-first-run", "--no-zygote",
+                    "--no-first-run",
                     "--disable-extensions", "--disable-background-networking",
                     "--allow-file-access-from-files",
                     "--disable-web-security",
@@ -280,79 +441,42 @@ class MusicVisualizerRenderer(BaseRenderer):
                 viewport={"width": w, "height": h},
                 device_scale_factor=1.0,
             )
-            page = await ctx.new_page()
-
-            # Capturar erros críticos do console
-            console_errors = []
-            page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
-            page.on("pageerror", lambda e: console_errors.append(str(e)))
-
-            await page.goto(f"file://{html_path}")
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(800)
-
-            # Verificar se WebGL2 foi inicializado
-            webgl_ok = await page.evaluate("!!document.getElementById('c').getContext('webgl2')")
-            if not webgl_ok:
-                raise RuntimeError("WebGL2 não disponível no Playwright headless. Verifique as flags do Chromium.")
-
-            # Inicializar o visualizer
-            init_payload = {
-                "bgImage": bg_b64,
-                "logoImage": logo_b64,
-                "cfg": cfg,
-                "title": title,
-                "totalFrames": total,
-            }
-            await page.evaluate(
-                "(payload) => window.initVisualizer(payload)",
-                init_payload,
-            )
-            # initVisualizer é async — page.evaluate aguarda a Promise automaticamente
-            # Aguardar um pouco extra para as texturas renderizarem
-            await page.wait_for_timeout(500)
-
-            # Renderizar frames
-            rms = audio_data["rms"]
-            spectra = audio_data["spectra"]
-            beats = audio_data["beats"]
-            beat_strength = audio_data["beat_strength"]
-
-            for i in range(total):
-                frame_data = {
-                    "frameIndex": i,
-                    "totalFrames": total,
-                    "rms": float(rms[i]),
-                    "spectrum": spectra[i],
-                    "isBeat": bool(beats[i]),
-                    "beatStrength": float(beat_strength[i]),
-                    "progress": i / max(1, total - 1),
-                }
-                await page.evaluate("(fd) => window.renderFrame(fd)", frame_data)
-                frame_path = str(frames_dir / f"frame_{i:06d}.jpg")
-                await page.screenshot(
-                    path=frame_path, type="jpeg", quality=88,
-                    animations="disabled",
-                )
-                if i % 30 == 0:
-                    progress_fn(i / total, f"Frame {i}/{total}")
-                    if console_errors:
-                        logger.warning(f"JS errors: {console_errors[-3:]}")
-
-            await browser.close()
+            try:
+                await asyncio.gather(*(render_chunk(ctx, s, e) for s, e in ranges))
+            finally:
+                await browser.close()
 
     # ──────────────────────────────────────────────────────
     #  Encode final
     # ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _nvenc_available() -> bool:
+        """Testa se o encoder NVENC realmente funciona (driver + GPU presentes).
+
+        Usa 320x240 porque o NVENC rejeita dimensões muito pequenas.
+        """
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error",
+                 "-f", "lavfi", "-i", "color=black:s=320x240:d=0.2",
+                 "-c:v", "h264_nvenc", "-f", "null", "-"],
+                capture_output=True, text=True, timeout=40,
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
+
     def _encode(self, frames_dir: Path, audio_path: Path,
                 output_path: Path, fps: int, duration: float):
-        cmd = [
+        """Encoda os frames + áudio. Usa NVENC (GPU) se disponível, senão libx264."""
+        base = [
             "ffmpeg", "-y",
             "-framerate", str(fps),
             "-i", str(frames_dir / "frame_%06d.jpg"),
             "-i", str(audio_path),
-            "-c:v", "libx264", "-preset", "fast", "-crf", "17",
+        ]
+        tail = [
             "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",
             "-t", str(duration),
@@ -360,6 +484,20 @@ class MusicVisualizerRenderer(BaseRenderer):
             str(output_path),
         ]
         timeout = max(1800, int(duration * 12))
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+        if self._nvenc_available():
+            logger.info("Encode: usando GPU (h264_nvenc)")
+            vcodec = ["-c:v", "h264_nvenc", "-preset", "p4",
+                      "-rc", "vbr", "-cq", "20", "-b:v", "0"]
+            r = subprocess.run(base + vcodec + tail,
+                               capture_output=True, text=True, timeout=timeout)
+            if r.returncode == 0:
+                return
+            logger.warning(f"NVENC falhou, caindo para CPU: {r.stderr[-300:]}")
+
+        logger.info("Encode: usando CPU (libx264)")
+        vcodec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]
+        r = subprocess.run(base + vcodec + tail,
+                           capture_output=True, text=True, timeout=timeout)
         if r.returncode != 0:
             raise RuntimeError(f"ffmpeg falhou: {r.stderr[-600:]}")
