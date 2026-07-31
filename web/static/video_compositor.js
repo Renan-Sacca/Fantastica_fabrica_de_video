@@ -3175,10 +3175,27 @@ function _renderElementContent(container, elementConfig) {
                         <option value="fade" ${props.transition === 'fade' ? 'selected' : ''}>Esmaecer (Fade)</option>
                     </select>
                 </div>
+                <div style="margin-top:8px;">
+                    <label style="font-size:.75rem;">🎥 Auto Animação (durante exibição)</label>
+                    <select class="scene-element-self-anim" style="width: 100%;">
+                        <option value="none" ${(!props.self_animation || props.self_animation === 'none') ? 'selected' : ''}>Nenhuma</option>
+                        <option value="zoom_in" ${props.self_animation === 'zoom_in' ? 'selected' : ''}>Zoom In</option>
+                        <option value="zoom_out" ${props.self_animation === 'zoom_out' ? 'selected' : ''}>Zoom Out</option>
+                        <option value="pan_left" ${props.self_animation === 'pan_left' ? 'selected' : ''}>Pan Esquerda</option>
+                        <option value="pan_right" ${props.self_animation === 'pan_right' ? 'selected' : ''}>Pan Direita</option>
+                        <option value="pan_up" ${props.self_animation === 'pan_up' ? 'selected' : ''}>Pan Cima</option>
+                        <option value="pan_down" ${props.self_animation === 'pan_down' ? 'selected' : ''}>Pan Baixo</option>
+                        <option value="ken_burns" ${props.self_animation === 'ken_burns' ? 'selected' : ''}>Ken Burns (Zoom + Pan)</option>
+                    </select>
+                </div>
             `);
             const transSelect = container.querySelector('.scene-element-transition');
             transSelect.addEventListener('change', () => {
                 props.transition = transSelect.value;
+            });
+            const selfAnimSelect = container.querySelector('.scene-element-self-anim');
+            selfAnimSelect.addEventListener('change', () => {
+                props.self_animation = selfAnimSelect.value;
             });
         }
 
@@ -3212,6 +3229,20 @@ function _renderElementContent(container, elementConfig) {
                             <option value="slide_right" ${props.transition === 'slide_right' ? 'selected' : ''}>Deslizar da Direita</option>
                             <option value="slide_up" ${props.transition === 'slide_up' ? 'selected' : ''}>Deslizar de Baixo</option>
                             <option value="slide_down" ${props.transition === 'slide_down' ? 'selected' : ''}>Deslizar de Cima</option>
+                        </select>
+                    </div>
+
+                    <div style="margin-top:8px;">
+                        <label style="font-size:.75rem;">🎥 Auto Animação (durante exibição)</label>
+                        <select class="scene-element-self-anim" style="width: 100%;">
+                            <option value="none" ${(!props.self_animation || props.self_animation === 'none') ? 'selected' : ''}>Nenhuma</option>
+                            <option value="zoom_in" ${props.self_animation === 'zoom_in' ? 'selected' : ''}>Zoom In</option>
+                            <option value="zoom_out" ${props.self_animation === 'zoom_out' ? 'selected' : ''}>Zoom Out</option>
+                            <option value="pan_left" ${props.self_animation === 'pan_left' ? 'selected' : ''}>Pan Esquerda</option>
+                            <option value="pan_right" ${props.self_animation === 'pan_right' ? 'selected' : ''}>Pan Direita</option>
+                            <option value="pan_up" ${props.self_animation === 'pan_up' ? 'selected' : ''}>Pan Cima</option>
+                            <option value="pan_down" ${props.self_animation === 'pan_down' ? 'selected' : ''}>Pan Baixo</option>
+                            <option value="ken_burns" ${props.self_animation === 'ken_burns' ? 'selected' : ''}>Ken Burns (Zoom + Pan)</option>
                         </select>
                     </div>
 
@@ -3285,6 +3316,12 @@ function _renderElementContent(container, elementConfig) {
             const transSelect = container.querySelector('.scene-element-transition');
             transSelect.addEventListener('change', () => {
                 props.transition = transSelect.value;
+            });
+
+            // Auto animação (self animation) listener
+            const selfAnimSelect = container.querySelector('.scene-element-self-anim');
+            selfAnimSelect.addEventListener('change', () => {
+                props.self_animation = selfAnimSelect.value;
             });
 
             // Controle fino listeners
@@ -4078,6 +4115,7 @@ function collectScenesForSubmit() {
                     element_id: el.id,
                     z_level: el.z_level || 0,
                     transition: el.properties?.transition || 'none',
+                    self_animation: el.properties?.self_animation || 'none',
                 });
             } else if (el.type === 'audio') {
                 audioItems.push({
@@ -4097,6 +4135,7 @@ function collectScenesForSubmit() {
                     element_id: el.id,
                     z_level: el.z_level || 0,
                     transition: props.transition || 'none',
+                    self_animation: props.self_animation || 'none',
                     px_width: props.px_width !== undefined ? props.px_width : null,
                     px_height: props.px_height !== undefined ? props.px_height : null,
                     px_x: props.px_x !== undefined ? props.px_x : null,
@@ -4114,6 +4153,7 @@ function collectScenesForSubmit() {
                     element_id: el.id,
                     z_level: el.z_level || 0,
                     transition: props.transition || 'none',
+                    self_animation: props.self_animation || 'none',
                     px_width: props.px_width !== undefined ? props.px_width : null,
                     px_height: props.px_height !== undefined ? props.px_height : null,
                     px_x: props.px_x !== undefined ? props.px_x : null,

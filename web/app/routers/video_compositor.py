@@ -412,6 +412,8 @@ async def render_compositor(request: Request):
                 "file_ext": bg_ext,
                 "start_sec": seg_meta.get("start_sec", 0),
                 "end_sec": seg_meta.get("end_sec"),  # None = até fim
+                "transition": seg_meta.get("transition", "none"),
+                "self_animation": seg_meta.get("self_animation", "none"),
             })
 
         # ── Upload das imagens sobrepostas ──
@@ -435,6 +437,7 @@ async def render_compositor(request: Request):
                 "position": seg_meta.get("position", "centro"),
                 "scale": seg_meta.get("scale", 50),
                 "transition": seg_meta.get("transition", "none"),
+                "self_animation": seg_meta.get("self_animation", "none"),
                 "z_level": seg_meta.get("z_level", 0),
                 # Campos de controle fino (opcionais)
                 "px_width":  seg_meta.get("px_width"),
@@ -465,6 +468,7 @@ async def render_compositor(request: Request):
                 "scale": anim_meta.get("scale", 30),
                 "loop": anim_meta.get("loop", True),
                 "transition": anim_meta.get("transition", "none"),
+                "self_animation": anim_meta.get("self_animation", "none"),
                 "z_level": anim_meta.get("z_level", 0),
             })
 

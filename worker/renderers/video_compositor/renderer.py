@@ -49,6 +49,97 @@ class VideoCompositorRenderer(BaseRenderer):
     def video_type(self) -> str:
         return "video_compositor"
 
+    # ══════════════════════════════════════════
+    # Auto-animações ("self animation" / Ken Burns)
+    # ══════════════════════════════════════════
+
+    def _bg_self_animation_filter(
+        self, self_animation: str, duration: float, fps: int, out_w: int, out_h: int,
+    ) -> str:
+        """Gera o fragmento de filtro (scale+crop, com expressões por tempo real "t")
+        para o efeito Ken Burns em imagens de fundo. Usamos scale com eval=frame
+        (interpolação subpixel contínua) seguido de crop com x/y avaliados por
+        frame — isso evita o "engasgo" (freeze-then-jump) que o filtro zoompan
+        produz quando a variação de zoom por frame é pequena (a janela de corte
+        de zoompan é recalculada em pixels inteiros e frequentemente repete o
+        mesmo tamanho por 1-2 frames antes de saltar). Retorna string vazia se
+        não houver auto-animação selecionada."""
+        if not self_animation or self_animation == "none":
+            return ""
+
+        dur = max(0.05, duration)
+        p = f"min(t/{dur:.3f},1)"
+        zoom_amount = 0.3   # zoom máximo adicional (1.0 -> 1.3)
+        pan_zoom = 1.15      # zoom fixo usado para dar "espaço" ao pan
+
+        if self_animation == "zoom_in":
+            scale_zoom = f"1+{zoom_amount}*{p}"
+            crop_x, crop_y = "(in_w-out_w)/2", "(in_h-out_h)/2"
+        elif self_animation == "zoom_out":
+            scale_zoom = f"(1+{zoom_amount})-{zoom_amount}*{p}"
+            crop_x, crop_y = "(in_w-out_w)/2", "(in_h-out_h)/2"
+        elif self_animation == "pan_left":
+            scale_zoom = f"{pan_zoom}"
+            crop_x, crop_y = f"(in_w-out_w)*(1-{p})", "(in_h-out_h)/2"
+        elif self_animation == "pan_right":
+            scale_zoom = f"{pan_zoom}"
+            crop_x, crop_y = f"(in_w-out_w)*{p}", "(in_h-out_h)/2"
+        elif self_animation == "pan_up":
+            scale_zoom = f"{pan_zoom}"
+            crop_x, crop_y = "(in_w-out_w)/2", f"(in_h-out_h)*(1-{p})"
+        elif self_animation == "pan_down":
+            scale_zoom = f"{pan_zoom}"
+            crop_x, crop_y = "(in_w-out_w)/2", f"(in_h-out_h)*{p}"
+        elif self_animation == "ken_burns":
+            # Zoom-in lento combinado com deslocamento horizontal (efeito clássico)
+            scale_zoom = f"1+{zoom_amount}*{p}"
+            crop_x, crop_y = f"(in_w-out_w)*{p}", "(in_h-out_h)/2"
+        else:
+            return ""
+
+        return (
+            f",scale=w='{out_w}*({scale_zoom})':h='{out_h}*({scale_zoom})':eval=frame:force_original_aspect_ratio=increase,"
+            f"crop=w={out_w}:h={out_h}:x='{crop_x}':y='{crop_y}'"
+        )
+
+    def _overlay_self_animation_exprs(
+        self, self_animation: str, start: float, end: float,
+        pos_x_expr: str, pos_y_expr: str, res_w: int, res_h: int,
+    ) -> tuple[str, str, str]:
+        """Gera (scale_zoom_expr, pos_x_expr, pos_y_expr) para auto-animação em
+        overlays/animações customizadas. O zoom cresce/diminui a partir da âncora
+        (canto superior esquerdo) da posição já calculada, e o pan é um
+        deslocamento contínuo somado à posição base. Retorna zoom_expr="1" (sem
+        efeito) quando self_animation for "none"."""
+        duration = max(0.05, end - start)
+        p = f"clip((t-{start:.3f})/{duration:.3f},0,1)"
+        zoom_amount = 0.3
+        drift_x = res_w * 0.12
+        drift_y = res_h * 0.12
+
+        if not self_animation or self_animation == "none":
+            return "1", pos_x_expr, pos_y_expr
+        elif self_animation == "zoom_in":
+            return f"(1+{zoom_amount}*{p})", pos_x_expr, pos_y_expr
+        elif self_animation == "zoom_out":
+            return f"((1+{zoom_amount})-{zoom_amount}*{p})", pos_x_expr, pos_y_expr
+        elif self_animation == "pan_left":
+            return "1", f"(({pos_x_expr})-{drift_x:.1f}*{p})", pos_y_expr
+        elif self_animation == "pan_right":
+            return "1", f"(({pos_x_expr})+{drift_x:.1f}*{p})", pos_y_expr
+        elif self_animation == "pan_up":
+            return "1", pos_x_expr, f"(({pos_y_expr})-{drift_y:.1f}*{p})"
+        elif self_animation == "pan_down":
+            return "1", pos_x_expr, f"(({pos_y_expr})+{drift_y:.1f}*{p})"
+        elif self_animation == "ken_burns":
+            return (
+                f"(1+{zoom_amount}*{p})",
+                f"(({pos_x_expr})+{drift_x:.1f}*{p})",
+                pos_y_expr,
+            )
+        else:
+            return "1", pos_x_expr, pos_y_expr
+
     def render(
         self,
         job_data: dict,
@@ -209,7 +300,8 @@ class VideoCompositorRenderer(BaseRenderer):
                 "path": path, 
                 "start": cursor, 
                 "end": end_sec,
-                "transition": seg.get("transition", "none")
+                "transition": seg.get("transition", "none"),
+                "self_animation": seg.get("self_animation", "none"),
             })
             cursor = end_sec
 
@@ -251,6 +343,7 @@ class VideoCompositorRenderer(BaseRenderer):
                 "px_y": seg.get("px_y"),
                 "transition": seg.get("transition", "none"),
                 "z_level": int(seg.get("z_level", 0) or 0),
+                "self_animation": seg.get("self_animation", "none"),
             })
         return clips
 
@@ -280,6 +373,7 @@ class VideoCompositorRenderer(BaseRenderer):
                 "loop": anim.get("loop", True),
                 "transition": anim.get("transition", "none"),
                 "z_level": int(anim.get("z_level", 0) or 0),
+                "self_animation": anim.get("self_animation", "none"),
             })
         return clips
 
@@ -372,10 +466,14 @@ class VideoCompositorRenderer(BaseRenderer):
             fade_filter = ""
             if clip.get("transition") == "fade":
                 fade_filter = ",fade=t=in:st=0:d=0.5"
-                
+
+            self_anim_filter = self._bg_self_animation_filter(
+                clip.get("self_animation", "none"), clip_duration, fps, res_w, res_h
+            )
+
             fc_parts.append(
                 f"[{input_idx}:v]scale={res_w}:{res_h}:force_original_aspect_ratio=increase,"
-                f"crop={res_w}:{res_h},setsar=1,format=yuv420p,fps={fps}{fade_filter}[{label}]"
+                f"crop={res_w}:{res_h},setsar=1,format=yuv420p,fps={fps}{fade_filter}{self_anim_filter}[{label}]"
             )
             bg_labels.append(label)
             input_idx += 1
@@ -445,16 +543,28 @@ class VideoCompositorRenderer(BaseRenderer):
                     px_w = clip.get("px_width")
                     px_h = clip.get("px_height")
                     if px_w or px_h:
-                        scale_expr = f"{int(px_w) if px_w else -1}:{int(px_h) if px_h else -1}"
+                        base_w_expr = str(int(px_w)) if px_w else "-1"
+                        base_h_expr = str(int(px_h)) if px_h else "-1"
                     else:
                         ov_w = max(1, int(res_w * clip["scale"] / 100))
-                        scale_expr = f"{ov_w}:-1"
+                        base_w_expr = str(ov_w)
+                        base_h_expr = "-1"
 
                     # Transição Fade no Canal Alfa
                     transition = clip.get("transition", "none")
                     fade_filter = ""
                     if transition == "fade":
                         fade_filter = f",fade=t=in:st={clip['start']}:d=0.5:alpha=1,fade=t=out:st={clip['end']-0.5}:d=0.5:alpha=1"
+
+                    self_anim = clip.get("self_animation", "none")
+                    zoom_expr, _, _ = self._overlay_self_animation_exprs(
+                        self_anim, clip['start'], clip['end'], "0", "0", res_w, res_h
+                    )
+                    if zoom_expr != "1" and base_h_expr != "-1":
+                        # Se altura for fixa em px, escala em ambas dimensões para manter proporção do zoom
+                        scale_expr = f"w='({base_w_expr})*({zoom_expr})':h='({base_h_expr})*({zoom_expr})':eval=frame"
+                    else:
+                        scale_expr = f"w='({base_w_expr})*({zoom_expr})':h=-1:eval=frame"
 
                     fc_parts.append(f"[{ov_in_idx}:v]scale={scale_expr},format=rgba{fade_filter}[{ov_label}]")
 
@@ -481,10 +591,14 @@ class VideoCompositorRenderer(BaseRenderer):
                     elif transition == "slide_down":
                         pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
 
+                    _, pos_x_expr, pos_y_expr = self._overlay_self_animation_exprs(
+                        self_anim, clip['start'], clip['end'], pos_x_expr, pos_y_expr, res_w, res_h
+                    )
+
                     out_label = f"vov{i}"
                     enable_expr = f"between(t,{clip['start']:.3f},{clip['end']:.3f})"
                     fc_parts.append(
-                        f"[{cur_video}][{ov_label}]overlay={pos_x_expr}:{pos_y_expr}:"
+                        f"[{cur_video}][{ov_label}]overlay=x='{pos_x_expr}':y='{pos_y_expr}':"
                         f"enable='{enable_expr}':format=auto[{out_label}]"
                     )
                     cur_video = out_label
@@ -505,8 +619,14 @@ class VideoCompositorRenderer(BaseRenderer):
                     if transition == "fade":
                         fade_filter = f",fade=t=in:st={clip['start']}:d=0.5:alpha=1,fade=t=out:st={clip['end']-0.5}:d=0.5:alpha=1"
 
+                    self_anim = clip.get("self_animation", "none")
+                    zoom_expr, _, _ = self._overlay_self_animation_exprs(
+                        self_anim, clip['start'], clip['end'], "0", "0", res_w, res_h
+                    )
+                    scale_expr = f"w='({ca_w})*({zoom_expr})':h=-1:eval=frame"
+
                     fc_parts.append(
-                        f"[{ca_in_idx}:v]scale={ca_w}:-1,format=rgba{fade_filter}[{ca_label}]"
+                        f"[{ca_in_idx}:v]scale={scale_expr},format=rgba{fade_filter}[{ca_label}]"
                     )
 
                     pos_expr = POSITION_MAP.get(clip["position"], POSITION_MAP["centro"])
@@ -525,10 +645,14 @@ class VideoCompositorRenderer(BaseRenderer):
                     elif transition == "slide_down":
                         pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
 
+                    _, pos_x_expr, pos_y_expr = self._overlay_self_animation_exprs(
+                        self_anim, clip['start'], clip['end'], pos_x_expr, pos_y_expr, res_w, res_h
+                    )
+
                     out_label = f"vca{i}"
                     enable_expr = f"between(t,{clip['start']:.3f},{clip['end']:.3f})"
                     fc_parts.append(
-                        f"[{cur_video}][{ca_label}]overlay={pos_x_expr}:{pos_y_expr}:"
+                        f"[{cur_video}][{ca_label}]overlay=x='{pos_x_expr}':y='{pos_y_expr}':"
                         f"enable='{enable_expr}':format=auto:shortest=1[{out_label}]"
                     )
                     cur_video = out_label
