@@ -38,36 +38,39 @@ DEFAULTS: dict = {
     # Círculo
     "circle_radius": 200, "circle_max_scale": 1.55,
     "circle_border_color": "#ffffff", "circle_bg_color": "#00000099",
-    "circle_glow_color": "#ffffff", "circle_glow_intensity": 1.0,
+    "circle_glow_color": "auto", "circle_glow_intensity": 1.2,
+    "circle_border_width": 5,
     "logo_text": "♫", "logo_font_size": 80, "logo_font_color": "#ffffff",
     # Ondas
     "waves_enabled": True, "wave_rings": 4,
-    "wave_color": "#ffffff", "wave_opacity_max": 0.7,
-    # Espectro
-    "spectrum_enabled": True, "spectrum_bars": 128,
-    "spectrum_color": "#ffffff", "spectrum_opacity": 0.75,
-    "spectrum_radius_offset": 30, "spectrum_max_height": 120,
+    "wave_color": "auto", "wave_opacity_max": 0.8,
+    # Espectro — 512 barras, raio maior, mais alto
+    "spectrum_enabled": True, "spectrum_bars": 512,
+    "spectrum_color": "auto", "spectrum_opacity": 0.85,
+    "spectrum_radius_offset": 20, "spectrum_max_height": 200,
     # Fundo
-    "bg_zoom_speed": 0.05, "bg_zoom_max": 1.15,
-    "bg_beat_shake": True, "bg_beat_shake_px": 8,
-    "bg_brightness_boost": 0.25, "bg_blur_ambient": 0.0,
-    "bg_parallax": True,
-    # Partículas
-    "particles_enabled": True, "particle_count": 80,
-    "particle_color": "#ffffff", "particle_opacity_max": 0.6,
-    "particle_size_min": 1.5, "particle_size_max": 4.5, "particle_speed": 1.0,
+    "bg_zoom_speed": 0.04, "bg_zoom_max": 1.12,
+    "bg_beat_shake": True, "bg_beat_shake_px": 7,
+    "bg_brightness_boost": 0.30, "bg_blur_ambient": 0.0,
+    "bg_parallax": True, "bg_rotation_speed": 0.3,
+    "film_grain": 0.5,
+    # Partículas — 4 camadas de profundidade
+    "particles_enabled": True, "particle_count": 100,
+    "particle_color": "auto", "particle_opacity_max": 0.65,
+    "particle_size_min": 1.5, "particle_size_max": 5.0, "particle_speed": 1.0,
     # Pós-processamento
-    "bloom_enabled": True, "bloom_strength": 1.0,
     "chromatic_aberration": 0.0008,
-    "vignette_enabled": True, "vignette_strength": 0.45,
+    "vignette_enabled": True, "vignette_strength": 0.42,
+    # Lens flare
+    "lens_flare": True,
     # Barra de progresso
-    "progress_bar_enabled": True, "progress_bar_color": "#ffffff",
+    "progress_bar_enabled": True, "progress_bar_color": "auto",
     "progress_bar_position": "bottom",
     # Título
-    "show_title": True, "title_color": "#ffffff",
+    "show_title": True, "title_color": "#ffffff", "title_font_size": 32,
     "title_opacity": 0.85, "title_position": "bottom-center", "title_margin": 56,
     # Áudio
-    "audio_sensitivity": 1.2, "beat_threshold": 0.55,
+    "audio_sensitivity": 1.3, "beat_threshold": 0.50,
 }
 
 
@@ -160,8 +163,7 @@ class MusicVisualizerRenderer(BaseRenderer):
         duration = len(y) / sr
         total_frames = int(duration * fps)
         hop = max(1, int(sr / fps))
-        n_fft = 2048
-        sensitivity = float(cfg.get("audio_sensitivity", 1.2))
+        sensitivity = float(cfg.get("audio_sensitivity", 1.3))
 
         # RMS por frame
         rms_arr = []
@@ -173,8 +175,9 @@ class MusicVisualizerRenderer(BaseRenderer):
         rms = np.clip(rms / rms_max * sensitivity, 0, 1)
         rms = self._smooth(rms, 3)
 
-        # Espectro FFT por frame (reduzido para N_BANDS)
-        N_BANDS = int(cfg.get("spectrum_bars", 128))
+        # Espectro FFT por frame (512 bandas para spectrum visual)
+        N_BANDS = int(cfg.get("spectrum_bars", 512))
+        n_fft = 4096  # maior janela = melhor resolução de frequência
         spectra = []
         for i in range(total_frames):
             chunk = y[i * hop: i * hop + n_fft]
@@ -182,7 +185,7 @@ class MusicVisualizerRenderer(BaseRenderer):
                 chunk = np.pad(chunk, (0, n_fft - len(chunk)))
             window = np.hanning(n_fft)
             fft_mag = np.abs(np.fft.rfft(chunk * window))[: n_fft // 2]
-            # Compressão log + redução para N_BANDS
+            # Reduzir para N_BANDS com compressão log
             bands = np.array_split(fft_mag[:min(len(fft_mag), N_BANDS * 4)], N_BANDS)
             band_vals = np.array([np.mean(b) for b in bands], dtype=float)
             band_max = band_vals.max() or 1.0
