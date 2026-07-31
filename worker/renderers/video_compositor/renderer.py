@@ -55,22 +55,25 @@ class VideoCompositorRenderer(BaseRenderer):
 
     def _bg_self_animation_filter(
         self, self_animation: str, duration: float, fps: int, out_w: int, out_h: int,
+        anim_duration: float = None, anim_speed: float = 1.0,
     ) -> str:
         """Gera o fragmento de filtro (scale+crop, com expressões por tempo real "t")
-        para o efeito Ken Burns em imagens de fundo. Usamos scale com eval=frame
-        (interpolação subpixel contínua) seguido de crop com x/y avaliados por
-        frame — isso evita o "engasgo" (freeze-then-jump) que o filtro zoompan
-        produz quando a variação de zoom por frame é pequena (a janela de corte
-        de zoompan é recalculada em pixels inteiros e frequentemente repete o
-        mesmo tamanho por 1-2 frames antes de saltar). Retorna string vazia se
-        não houver auto-animação selecionada."""
+        para o efeito Ken Burns em imagens de fundo.
+
+        anim_duration: se não-nulo, a animação completa em anim_duration segundos
+                       (independente do tamanho do clipe). Padrão = duração do clipe.
+        anim_speed:    multiplicador de intensidade/zoom/pan (1.0 = padrão, 2.0 = o dobro).
+        """
         if not self_animation or self_animation == "none":
             return ""
 
-        dur = max(0.05, duration)
+        # Duração da animação: customizada ou toda a duração do clipe
+        dur = max(0.05, anim_duration if anim_duration else duration)
+        speed = max(0.1, float(anim_speed or 1.0))
+
         p = f"min(t/{dur:.3f},1)"
-        zoom_amount = 0.3   # zoom máximo adicional (1.0 -> 1.3)
-        pan_zoom = 1.15      # zoom fixo usado para dar "espaço" ao pan
+        zoom_amount = 0.3 * speed   # zoom máximo adicional (escala com speed)
+        pan_zoom = 1.0 + 0.15 * speed  # zoom fixo para pan (escala com speed)
 
         if self_animation == "zoom_in":
             scale_zoom = f"1+{zoom_amount}*{p}"
@@ -105,17 +108,22 @@ class VideoCompositorRenderer(BaseRenderer):
     def _overlay_self_animation_exprs(
         self, self_animation: str, start: float, end: float,
         pos_x_expr: str, pos_y_expr: str, res_w: int, res_h: int,
+        anim_duration: float = None, anim_speed: float = 1.0,
     ) -> tuple[str, str, str]:
         """Gera (scale_zoom_expr, pos_x_expr, pos_y_expr) para auto-animação em
-        overlays/animações customizadas. O zoom cresce/diminui a partir da âncora
-        (canto superior esquerdo) da posição já calculada, e o pan é um
-        deslocamento contínuo somado à posição base. Retorna zoom_expr="1" (sem
-        efeito) quando self_animation for "none"."""
-        duration = max(0.05, end - start)
-        p = f"clip((t-{start:.3f})/{duration:.3f},0,1)"
-        zoom_amount = 0.3
-        drift_x = res_w * 0.12
-        drift_y = res_h * 0.12
+        overlays/animações customizadas.
+
+        anim_duration: se não-nulo, animação completa em anim_duration segundos.
+        anim_speed:    multiplicador de intensidade/zoom/pan.
+        """
+        clip_dur = max(0.05, end - start)
+        dur = max(0.05, anim_duration if anim_duration else clip_dur)
+        speed = max(0.1, float(anim_speed or 1.0))
+
+        p = f"clip((t-{start:.3f})/{dur:.3f},0,1)"
+        zoom_amount = 0.3 * speed
+        drift_x = res_w * 0.12 * speed
+        drift_y = res_h * 0.12 * speed
 
         if not self_animation or self_animation == "none":
             return "1", pos_x_expr, pos_y_expr
@@ -302,6 +310,8 @@ class VideoCompositorRenderer(BaseRenderer):
                 "end": end_sec,
                 "transition": seg.get("transition", "none"),
                 "self_animation": seg.get("self_animation", "none"),
+                "anim_duration": seg.get("anim_duration"),
+                "anim_speed": float(seg.get("anim_speed") or 1.0),
             })
             cursor = end_sec
 
@@ -344,6 +354,8 @@ class VideoCompositorRenderer(BaseRenderer):
                 "transition": seg.get("transition", "none"),
                 "z_level": int(seg.get("z_level", 0) or 0),
                 "self_animation": seg.get("self_animation", "none"),
+                "anim_duration": seg.get("anim_duration"),
+                "anim_speed": float(seg.get("anim_speed") or 1.0),
             })
         return clips
 
@@ -374,6 +386,8 @@ class VideoCompositorRenderer(BaseRenderer):
                 "transition": anim.get("transition", "none"),
                 "z_level": int(anim.get("z_level", 0) or 0),
                 "self_animation": anim.get("self_animation", "none"),
+                "anim_duration": anim.get("anim_duration"),
+                "anim_speed": float(anim.get("anim_speed") or 1.0),
             })
         return clips
 
@@ -468,7 +482,9 @@ class VideoCompositorRenderer(BaseRenderer):
                 fade_filter = ",fade=t=in:st=0:d=0.5"
 
             self_anim_filter = self._bg_self_animation_filter(
-                clip.get("self_animation", "none"), clip_duration, fps, res_w, res_h
+                clip.get("self_animation", "none"), clip_duration, fps, res_w, res_h,
+                anim_duration=clip.get("anim_duration"),
+                anim_speed=clip.get("anim_speed", 1.0),
             )
 
             fc_parts.append(
@@ -558,7 +574,9 @@ class VideoCompositorRenderer(BaseRenderer):
 
                     self_anim = clip.get("self_animation", "none")
                     zoom_expr, _, _ = self._overlay_self_animation_exprs(
-                        self_anim, clip['start'], clip['end'], "0", "0", res_w, res_h
+                        self_anim, clip['start'], clip['end'], "0", "0", res_w, res_h,
+                        anim_duration=clip.get("anim_duration"),
+                        anim_speed=clip.get("anim_speed", 1.0),
                     )
                     if zoom_expr != "1" and base_h_expr != "-1":
                         # Se altura for fixa em px, escala em ambas dimensões para manter proporção do zoom
@@ -592,7 +610,9 @@ class VideoCompositorRenderer(BaseRenderer):
                         pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
 
                     _, pos_x_expr, pos_y_expr = self._overlay_self_animation_exprs(
-                        self_anim, clip['start'], clip['end'], pos_x_expr, pos_y_expr, res_w, res_h
+                        self_anim, clip['start'], clip['end'], pos_x_expr, pos_y_expr, res_w, res_h,
+                        anim_duration=clip.get("anim_duration"),
+                        anim_speed=clip.get("anim_speed", 1.0),
                     )
 
                     out_label = f"vov{i}"
@@ -621,7 +641,9 @@ class VideoCompositorRenderer(BaseRenderer):
 
                     self_anim = clip.get("self_animation", "none")
                     zoom_expr, _, _ = self._overlay_self_animation_exprs(
-                        self_anim, clip['start'], clip['end'], "0", "0", res_w, res_h
+                        self_anim, clip['start'], clip['end'], "0", "0", res_w, res_h,
+                        anim_duration=clip.get("anim_duration"),
+                        anim_speed=clip.get("anim_speed", 1.0),
                     )
                     scale_expr = f"w='({ca_w})*({zoom_expr})':h=-1:eval=frame"
 
@@ -646,7 +668,9 @@ class VideoCompositorRenderer(BaseRenderer):
                         pos_y_expr = f"if(lt(t,{st+dur}),-h+({Y_final}+h)*(t-{st})/{dur},{Y_final})"
 
                     _, pos_x_expr, pos_y_expr = self._overlay_self_animation_exprs(
-                        self_anim, clip['start'], clip['end'], pos_x_expr, pos_y_expr, res_w, res_h
+                        self_anim, clip['start'], clip['end'], pos_x_expr, pos_y_expr, res_w, res_h,
+                        anim_duration=clip.get("anim_duration"),
+                        anim_speed=clip.get("anim_speed", 1.0),
                     )
 
                     out_label = f"vca{i}"

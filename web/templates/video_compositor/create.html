@@ -597,8 +597,8 @@
         <div class="mode-toggle-wrap">
             <span class="mode-toggle-label">Modo:</span>
             <div class="mode-toggle-chips">
-                <button type="button" class="mode-chip active" data-mode="classic" onclick="switchEditorMode(this, 'classic')">📋 Clássico</button>
-                <button type="button" class="mode-chip" data-mode="scenes" onclick="switchEditorMode(this, 'scenes')">🎬 Cenas (Eventos)</button>
+                <button type="button" class="mode-chip" data-mode="classic" onclick="switchEditorMode(this, 'classic')">📋 Clássico</button>
+                <button type="button" class="mode-chip active" data-mode="scenes" onclick="switchEditorMode(this, 'scenes')">🎬 Cenas (Eventos)</button>
             </div>
             <span class="muted" style="font-size:.72rem; margin-left:auto;">💡 Modo Cenas permite timeline dinâmica baseada em eventos</span>
         </div>
@@ -608,7 +608,7 @@
             <div class="vc-col-config">
 
                 <!-- ══════ MODO CENAS ══════ -->
-                <div class="mode-scenes-content" id="scenesMode">
+                <div class="mode-scenes-content active" id="scenesMode">
                     <!-- Preset Selector -->
                     <div class="vc-card">
                         <h2>🎬 Adicionar Cena</h2>
@@ -636,7 +636,7 @@
                 </div>
 
                 <!-- ══════ MODO CLÁSSICO ══════ -->
-                <div class="mode-classic-content active" id="classicMode">
+                <div class="mode-classic-content" id="classicMode">
 
                 <!-- 🎵 Áudio Principal (múltiplos) -->
                 <div class="vc-card">
@@ -785,12 +785,23 @@
         <div class="tpl-modal">
             <button type="button" class="tpl-modal-close" onclick="closeSaveTemplateModal()">✕</button>
             <h3>💾 Salvar Template</h3>
-            <p style="font-size:.82rem; opacity:.6; margin-bottom:12px;">Salve a estrutura atual (posições, textos, animações, resolução) para reutilizar em outros vídeos. Os arquivos (imagens/áudios) não são salvos.</p>
+            <p style="font-size:.82rem; opacity:.6; margin-bottom:12px;">Salve a estrutura atual (posições, textos, animações, resolução) para reutilizar em outros vídeos.</p>
             <label for="tplSaveName">Nome do Template *</label>
             <input type="text" id="tplSaveName" placeholder="Ex: Vídeo produto vertical com logo">
             <label for="tplSaveDesc">Descrição (opcional)</label>
             <textarea id="tplSaveDesc" placeholder="Descreva a estrutura para lembrar depois..."></textarea>
-            <div class="tpl-modal-actions">
+
+            <!-- Seleção de arquivos para salvar junto ao template -->
+            <div id="tplFilesSection" style="margin-top:14px; display:none;">
+                <div style="font-size:.85rem; font-weight:600; margin-bottom:8px;">📎 Arquivos carregados — selecione os que deseja salvar:</div>
+                <div id="tplFileCheckList" style="display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; padding:4px 0;"></div>
+                <p style="font-size:.7rem; opacity:.5; margin-top:6px;">Os arquivos selecionados serão enviados ao Google Drive e restaurados automaticamente ao carregar o template.</p>
+            </div>
+            <div id="tplNoFilesMsg" style="margin-top:12px; font-size:.8rem; opacity:.5; display:none;">
+                (Nenhum arquivo carregado ainda para incluir)
+            </div>
+
+            <div class="tpl-modal-actions" style="margin-top:16px;">
                 <button type="button" class="vc-btn vc-btn-ghost" onclick="closeSaveTemplateModal()">Cancelar</button>
                 <button type="button" class="vc-btn vc-btn-primary" id="tplSaveBtn" onclick="confirmSaveTemplate()">💾 Salvar</button>
             </div>

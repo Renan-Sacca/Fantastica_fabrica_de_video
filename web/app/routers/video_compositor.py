@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.auth import get_current_user
@@ -209,6 +209,134 @@ async def delete_template(request: Request, template_id: str):
     if not ok:
         return JSONResponse({"error": "Falha ao deletar"}, status_code=500)
     return JSONResponse({"ok": True})
+
+
+@router.post("/api/templates/with-files")
+async def create_template_with_files(request: Request):
+    """Cria um template com arquivos opcionais armazenados no Drive.
+
+    Aceita multipart/form-data com:
+    - template_data: JSON string com a estrutura do template
+    - name: nome do template
+    - description: (opcional)
+    - file_<key>: arquivo a ser salvo (ex: file_bg_0, file_overlay_0, file_audio_0)
+      onde <key> é o identificador do slot no template
+    """
+    import json as _json
+
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
+    try:
+        form = await request.form()
+        name = (form.get("name") or "").strip()
+        if not name:
+            return JSONResponse({"error": "Informe o nome do template."}, status_code=400)
+        description = (form.get("description") or "").strip()
+        template_data_raw = form.get("template_data", "{}")
+        try:
+            template_data = _json.loads(template_data_raw)
+        except Exception:
+            return JSONResponse({"error": "template_data inválido."}, status_code=400)
+
+        # Coletar arquivos enviados
+        file_items: dict[str, UploadFile] = {}
+        for key in form.keys():
+            if key.startswith("file_"):
+                slot_key = key[5:]  # remove "file_" prefix
+                file_items[slot_key] = form[key]
+
+        # Se há arquivos, fazer upload para pasta dedicada do template no Drive
+        if file_items:
+            drive = get_drive(TOKEN_FILE)
+            root = await asyncio.get_event_loop().run_in_executor(
+                None, drive.get_or_create_folder, "FantasticaFabricaDeVideo"
+            )
+            tpl_root = await asyncio.get_event_loop().run_in_executor(
+                None, drive.get_or_create_folder, "Templates", root
+            )
+            user_tpl_folder = await asyncio.get_event_loop().run_in_executor(
+                None, drive.get_or_create_folder, f"user_{user['id']}", tpl_root
+            )
+            # Pasta nomeada com o template
+            safe_name = name[:40].replace("/", "_").replace("\\", "_")
+            tpl_folder_id = await asyncio.get_event_loop().run_in_executor(
+                None, drive.get_or_create_folder, safe_name, user_tpl_folder
+            )
+
+            template_files: dict[str, dict] = {}
+            for slot_key, upload in file_items.items():
+                if not upload or not getattr(upload, "filename", None):
+                    continue
+                content = await upload.read()
+                if not content:
+                    continue
+                ext = Path(upload.filename).suffix or ""
+                fname = f"{slot_key}{ext}"
+                mime = upload.content_type or "application/octet-stream"
+                file_id = await asyncio.get_event_loop().run_in_executor(
+                    None, drive.upload_bytes, content, fname, tpl_folder_id, mime
+                )
+                template_files[slot_key] = {
+                    "file_id": file_id,
+                    "filename": upload.filename,
+                    "ext": ext,
+                    "mime": mime,
+                }
+
+            template_data["template_files"] = template_files
+            template_data["template_folder_id"] = tpl_folder_id
+
+        tpl = templates_repo.create_template(
+            user_id=user["id"],
+            name=name,
+            description=description,
+            template_data=template_data,
+        )
+        return JSONResponse({"template": tpl}, status_code=201)
+
+    except Exception as e:
+        logger.exception("Erro ao salvar template com arquivos")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/templates/{template_id}/file/{file_key}")
+async def get_template_file(request: Request, template_id: str, file_key: str):
+    """Baixa um arquivo salvo em um template e retorna como resposta binária."""
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse({"error": "Não autenticado"}, status_code=401)
+
+    template = templates_repo.get_template(template_id)
+    if not template:
+        return JSONResponse({"error": "Template não encontrado"}, status_code=404)
+    if template["user_id"] != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
+
+    td = template.get("template_data", {})
+    template_files = td.get("template_files", {})
+    file_info = template_files.get(file_key)
+    if not file_info:
+        return JSONResponse({"error": "Arquivo não encontrado no template"}, status_code=404)
+
+    file_id = file_info.get("file_id")
+    if not file_id:
+        return JSONResponse({"error": "file_id inválido"}, status_code=404)
+
+    try:
+        drive = get_drive(TOKEN_FILE)
+        content = await asyncio.get_event_loop().run_in_executor(None, drive.read_bytes, file_id)
+        mime = file_info.get("mime", "application/octet-stream")
+        filename = file_info.get("filename", f"{file_key}{file_info.get('ext','')}")
+        return Response(
+            content=content,
+            media_type=mime,
+            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        )
+    except Exception as e:
+        logger.exception(f"Erro ao baixar arquivo do template {template_id}/{file_key}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ── Submit ──
@@ -414,6 +542,8 @@ async def render_compositor(request: Request):
                 "end_sec": seg_meta.get("end_sec"),  # None = até fim
                 "transition": seg_meta.get("transition", "none"),
                 "self_animation": seg_meta.get("self_animation", "none"),
+                "anim_duration": seg_meta.get("anim_duration"),
+                "anim_speed": seg_meta.get("anim_speed", 1.0),
             })
 
         # ── Upload das imagens sobrepostas ──
@@ -438,6 +568,8 @@ async def render_compositor(request: Request):
                 "scale": seg_meta.get("scale", 50),
                 "transition": seg_meta.get("transition", "none"),
                 "self_animation": seg_meta.get("self_animation", "none"),
+                "anim_duration": seg_meta.get("anim_duration"),
+                "anim_speed": seg_meta.get("anim_speed", 1.0),
                 "z_level": seg_meta.get("z_level", 0),
                 # Campos de controle fino (opcionais)
                 "px_width":  seg_meta.get("px_width"),
@@ -469,6 +601,8 @@ async def render_compositor(request: Request):
                 "loop": anim_meta.get("loop", True),
                 "transition": anim_meta.get("transition", "none"),
                 "self_animation": anim_meta.get("self_animation", "none"),
+                "anim_duration": anim_meta.get("anim_duration"),
+                "anim_speed": anim_meta.get("anim_speed", 1.0),
                 "z_level": anim_meta.get("z_level", 0),
             })
 

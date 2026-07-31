@@ -26,7 +26,7 @@ const state = {
     totalDuration: 0,
     // Scene mode
     scenes: [],
-    useEventTimeline: false,
+    useEventTimeline: true,
     sceneResourceDurations: {},
     resolvedTimeline: null,
     totalDurationScenes: 0,
@@ -2197,6 +2197,86 @@ function openSaveTemplateModal() {
     document.getElementById('tplSaveName').value = '';
     document.getElementById('tplSaveDesc').value = '';
     document.getElementById('tplSaveName').focus();
+
+    // Build checklist of available files
+    const fileSlots = _collectCurrentFileSlots();
+    const listEl = document.getElementById('tplFileCheckList');
+    const section = document.getElementById('tplFilesSection');
+    const noFiles = document.getElementById('tplNoFilesMsg');
+    listEl.innerHTML = '';
+
+    if (fileSlots.length === 0) {
+        section.style.display = 'none';
+        noFiles.style.display = 'block';
+    } else {
+        noFiles.style.display = 'none';
+        section.style.display = 'block';
+        fileSlots.forEach(slot => {
+            const row = document.createElement('label');
+            row.style.cssText = 'display:flex; align-items:center; gap:8px; font-size:.82rem; cursor:pointer; padding:5px 8px; border-radius:8px; background:rgba(255,255,255,.03);';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.style.cssText = 'width:auto; accent-color:#e040fb; flex-shrink:0;';
+            cb.dataset.slotKey = slot.key;
+            cb.dataset.slotIdx = slot.idx || '';
+            cb.checked = true;
+            const icon = document.createTextNode(slot.icon + ' ' + slot.label);
+            row.appendChild(cb);
+            row.appendChild(icon);
+            listEl.appendChild(row);
+        });
+    }
+}
+
+/**
+ * Coleta todos os slots de arquivo carregados atualmente, com referência ao input.
+ * Retorna array de { key, label, icon, input }.
+ * key: identificador único usado como prefixo no FormData (ex: "bg_0", "overlay_0")
+ */
+function _collectCurrentFileSlots() {
+    const slots = [];
+
+    if (state.useEventTimeline) {
+        // Scene mode: scan scene elements
+        document.querySelectorAll('#scenesList .scene-element').forEach(el => {
+            const elId = el.dataset.elementId;
+            if (!elId) return;
+            const fileInput = el.querySelector('.scene-element-file');
+            if (fileInput && fileInput.files && fileInput.files[0]) {
+                const sceneCard = el.closest('.scene-card');
+                const typeBadge = el.querySelector('.scene-element-type');
+                const typeStr = typeBadge ? typeBadge.textContent.trim() : '';
+                const label = (el.querySelector('.scene-element-label')?.textContent || elId) + (typeStr ? ` (${typeStr})` : '');
+                const type = fileInput.accept.includes('video') ? 'custom_anim' : 'image';
+                const icon = type === 'custom_anim' ? '🎞️' : (typeStr.includes('Fundo') ? '🖼️' : '📸');
+                slots.push({ key: `scene_${elId}`, label: label + ': ' + fileInput.files[0].name, icon, input: fileInput });
+            }
+            const audioInput = el.querySelector('.scene-element-audio-file');
+            if (audioInput && audioInput.files && audioInput.files[0]) {
+                const label = (el.querySelector('.scene-element-label')?.textContent || elId);
+                slots.push({ key: `scene_audio_${elId}`, label: label + ': ' + audioInput.files[0].name, icon: '🎵', input: audioInput });
+            }
+        });
+    }
+
+    // Classic mode file inputs
+    document.querySelectorAll('#bgSegmentsList .bg-img-input').forEach((inp, i) => {
+        if (inp.files && inp.files[0]) slots.push({ key: `classic_bg_${i}`, label: `Fundo ${i + 1}: ${inp.files[0].name}`, icon: '🖼️', input: inp });
+    });
+    document.querySelectorAll('#overlaySegmentsList .overlay-img-input').forEach((inp, i) => {
+        if (inp.files && inp.files[0]) slots.push({ key: `classic_ov_${i}`, label: `Overlay ${i + 1}: ${inp.files[0].name}`, icon: '📸', input: inp });
+    });
+    document.querySelectorAll('#customAnimsList .custom-anim-input').forEach((inp, i) => {
+        if (inp.files && inp.files[0]) slots.push({ key: `classic_ca_${i}`, label: `GIF/Vídeo ${i + 1}: ${inp.files[0].name}`, icon: '🎞️', input: inp });
+    });
+    document.querySelectorAll('#audioItemsList input[type=file]').forEach((inp, i) => {
+        if (inp.files && inp.files[0]) slots.push({ key: `classic_audio_${i}`, label: `Áudio ${i + 1}: ${inp.files[0].name}`, icon: '🎵', input: inp });
+    });
+    document.querySelectorAll('#secAudioList .sec-audio-input').forEach((inp, i) => {
+        if (inp.files && inp.files[0]) slots.push({ key: `classic_sa_${i}`, label: `Áudio sec. ${i + 1}: ${inp.files[0].name}`, icon: '🎶', input: inp });
+    });
+
+    return slots;
 }
 
 function closeSaveTemplateModal() {
@@ -2211,17 +2291,56 @@ async function confirmSaveTemplate() {
 
     const btn = document.getElementById('tplSaveBtn');
     btn.disabled = true;
-    btn.textContent = '⏳ Salvando...';
+
+    // Gather selected file checkboxes
+    const checkedSlots = [];
+    document.querySelectorAll('#tplFileCheckList input[type=checkbox]:checked').forEach(cb => {
+        checkedSlots.push(cb.dataset.slotKey);
+    });
+
+    // If any files are selected, use multipart/form-data endpoint
+    const allSlots = _collectCurrentFileSlots();
+    const slotsToUpload = allSlots.filter(s => checkedSlots.includes(s.key));
 
     try {
-        const resp = await fetch('/video-compositor/api/templates', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description, template_data: templateData }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
-        showToast(`Template "${name}" salvo com sucesso!`, 'success');
+        let tplId = null;
+
+        if (slotsToUpload.length > 0) {
+            btn.textContent = `⏳ Enviando ${slotsToUpload.length} arquivo(s)...`;
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('description', description);
+            formData.append('template_data', JSON.stringify(templateData));
+
+            // Store mapping of slot_key → element_id for restore on load
+            const fileSlotMap = {};
+            slotsToUpload.forEach(slot => {
+                const file = slot.input.files[0];
+                formData.append(`file_${slot.key}`, file, file.name);
+                // Store the element/slot type info for restore
+                fileSlotMap[slot.key] = { filename: file.name };
+            });
+
+            const resp = await fetch('/video-compositor/api/templates/with-files', {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
+            tplId = data.template?.template_id;
+            showToast(`Template "${name}" salvo com ${slotsToUpload.length} arquivo(s)!`, 'success');
+        } else {
+            btn.textContent = '⏳ Salvando...';
+            const resp = await fetch('/video-compositor/api/templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, description, template_data: templateData }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || 'Erro ao salvar');
+            showToast(`Template "${name}" salvo com sucesso!`, 'success');
+        }
+
         closeSaveTemplateModal();
     } catch (e) {
         showToast(e.message, 'error');
@@ -2305,7 +2424,7 @@ async function loadTemplate(templateId) {
         const td = data.template?.template_data;
         if (!td) throw new Error('Template sem dados');
 
-        applyTemplateDataWithScenes(td);
+        applyTemplateDataWithScenes(td, templateId);
         closeLoadTemplateModal();
         showToast(`Template "${data.template.name}" carregado!`, 'success');
     } catch (e) {
@@ -3187,6 +3306,21 @@ function _renderElementContent(container, elementConfig) {
                         <option value="pan_down" ${props.self_animation === 'pan_down' ? 'selected' : ''}>Pan Baixo</option>
                         <option value="ken_burns" ${props.self_animation === 'ken_burns' ? 'selected' : ''}>Ken Burns (Zoom + Pan)</option>
                     </select>
+                    <div class="self-anim-extras" style="display:${(props.self_animation && props.self_animation !== 'none') ? 'grid' : 'none'}; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                        <div>
+                            <label style="font-size:.7rem;">⏱ Duração (s)</label>
+                            <input type="number" class="self-anim-duration" min="0.1" max="300" step="0.5" placeholder="(tempo do clipe)"
+                                value="${props.anim_duration != null ? props.anim_duration : ''}"
+                                style="padding:4px; font-size:.78rem; width:100%;" title="Deixe vazio para usar a duração total do clipe">
+                        </div>
+                        <div>
+                            <label style="font-size:.7rem;">⚡ Intensidade</label>
+                            <input type="range" class="self-anim-speed" min="0.1" max="3" step="0.1"
+                                value="${props.anim_speed != null ? props.anim_speed : 1.0}"
+                                style="width:100%; accent-color:#e040fb;">
+                            <span class="self-anim-speed-val" style="font-size:.7rem; opacity:.7;">${props.anim_speed != null ? props.anim_speed : 1.0}x</span>
+                        </div>
+                    </div>
                 </div>
             `);
             const transSelect = container.querySelector('.scene-element-transition');
@@ -3194,8 +3328,21 @@ function _renderElementContent(container, elementConfig) {
                 props.transition = transSelect.value;
             });
             const selfAnimSelect = container.querySelector('.scene-element-self-anim');
+            const selfAnimExtras = container.querySelector('.self-anim-extras');
+            const selfAnimDur = container.querySelector('.self-anim-duration');
+            const selfAnimSpeed = container.querySelector('.self-anim-speed');
+            const selfAnimSpeedVal = container.querySelector('.self-anim-speed-val');
             selfAnimSelect.addEventListener('change', () => {
                 props.self_animation = selfAnimSelect.value;
+                selfAnimExtras.style.display = (selfAnimSelect.value !== 'none') ? 'grid' : 'none';
+            });
+            selfAnimDur.addEventListener('change', () => {
+                const v = selfAnimDur.value.trim();
+                props.anim_duration = v !== '' ? parseFloat(v) : null;
+            });
+            selfAnimSpeed.addEventListener('input', () => {
+                props.anim_speed = parseFloat(selfAnimSpeed.value);
+                selfAnimSpeedVal.textContent = selfAnimSpeed.value + 'x';
             });
         }
 
@@ -3244,6 +3391,21 @@ function _renderElementContent(container, elementConfig) {
                             <option value="pan_down" ${props.self_animation === 'pan_down' ? 'selected' : ''}>Pan Baixo</option>
                             <option value="ken_burns" ${props.self_animation === 'ken_burns' ? 'selected' : ''}>Ken Burns (Zoom + Pan)</option>
                         </select>
+                        <div class="self-anim-extras" style="display:${(props.self_animation && props.self_animation !== 'none') ? 'grid' : 'none'}; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div>
+                                <label style="font-size:.7rem;">⏱ Duração (s)</label>
+                                <input type="number" class="self-anim-duration" min="0.1" max="300" step="0.5" placeholder="(tempo do clipe)"
+                                    value="${props.anim_duration != null ? props.anim_duration : ''}"
+                                    style="padding:4px; font-size:.78rem; width:100%;" title="Deixe vazio para usar a duração total do clipe">
+                            </div>
+                            <div>
+                                <label style="font-size:.7rem;">⚡ Intensidade</label>
+                                <input type="range" class="self-anim-speed" min="0.1" max="3" step="0.1"
+                                    value="${props.anim_speed != null ? props.anim_speed : 1.0}"
+                                    style="width:100%; accent-color:#e040fb;">
+                                <span class="self-anim-speed-val" style="font-size:.7rem; opacity:.7;">${props.anim_speed != null ? props.anim_speed : 1.0}x</span>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Controle fino: tamanho em px e posição X, Y -->
@@ -3320,8 +3482,21 @@ function _renderElementContent(container, elementConfig) {
 
             // Auto animação (self animation) listener
             const selfAnimSelect = container.querySelector('.scene-element-self-anim');
+            const selfAnimExtras = container.querySelector('.self-anim-extras');
+            const selfAnimDur = container.querySelector('.self-anim-duration');
+            const selfAnimSpeed = container.querySelector('.self-anim-speed');
+            const selfAnimSpeedVal = container.querySelector('.self-anim-speed-val');
             selfAnimSelect.addEventListener('change', () => {
                 props.self_animation = selfAnimSelect.value;
+                selfAnimExtras.style.display = (selfAnimSelect.value !== 'none') ? 'grid' : 'none';
+            });
+            selfAnimDur.addEventListener('change', () => {
+                const v = selfAnimDur.value.trim();
+                props.anim_duration = v !== '' ? parseFloat(v) : null;
+            });
+            selfAnimSpeed.addEventListener('input', () => {
+                props.anim_speed = parseFloat(selfAnimSpeed.value);
+                selfAnimSpeedVal.textContent = selfAnimSpeed.value + 'x';
             });
 
             // Controle fino listeners
@@ -4116,6 +4291,8 @@ function collectScenesForSubmit() {
                     z_level: el.z_level || 0,
                     transition: el.properties?.transition || 'none',
                     self_animation: el.properties?.self_animation || 'none',
+                    anim_duration: el.properties?.anim_duration ?? null,
+                    anim_speed: el.properties?.anim_speed ?? 1.0,
                 });
             } else if (el.type === 'audio') {
                 audioItems.push({
@@ -4136,6 +4313,8 @@ function collectScenesForSubmit() {
                     z_level: el.z_level || 0,
                     transition: props.transition || 'none',
                     self_animation: props.self_animation || 'none',
+                    anim_duration: props.anim_duration ?? null,
+                    anim_speed: props.anim_speed ?? 1.0,
                     px_width: props.px_width !== undefined ? props.px_width : null,
                     px_height: props.px_height !== undefined ? props.px_height : null,
                     px_x: props.px_x !== undefined ? props.px_x : null,
@@ -4154,6 +4333,8 @@ function collectScenesForSubmit() {
                     z_level: el.z_level || 0,
                     transition: props.transition || 'none',
                     self_animation: props.self_animation || 'none',
+                    anim_duration: props.anim_duration ?? null,
+                    anim_speed: props.anim_speed ?? 1.0,
                     px_width: props.px_width !== undefined ? props.px_width : null,
                     px_height: props.px_height !== undefined ? props.px_height : null,
                     px_x: props.px_x !== undefined ? props.px_x : null,
@@ -4235,7 +4416,7 @@ function collectTemplateDataWithScenes() {
  */
 const _originalApplyTemplateData = typeof applyTemplateData === 'function' ? applyTemplateData : null;
 
-function applyTemplateDataWithScenes(td) {
+function applyTemplateDataWithScenes(td, templateId) {
     if (td.mode === 'scenes' && td.scenes) {
         // Mudar para modo cenas
         const scenesChip = document.querySelector('.mode-chip[data-mode="scenes"]');
@@ -4265,6 +4446,15 @@ function applyTemplateDataWithScenes(td) {
         }
 
         resolveAndRefreshTimeline();
+
+        // Auto-restore files if template has them stored on Drive
+        if (td.template_files && Object.keys(td.template_files).length > 0) {
+            _restoreTemplateFiles(templateId, td.template_files);
+        } else if (td.file_names_hint && td.file_names_hint.length > 0) {
+            // Legacy hint (old format)
+            showToast(`📎 Este template foi salvo com: ${td.file_names_hint.join(', ')}`, 'info');
+        }
+
         return;
     }
 
@@ -4275,9 +4465,94 @@ function applyTemplateDataWithScenes(td) {
 }
 
 // ══════════════════════════════════════════
-// Init
+// Template file restore
 // ══════════════════════════════════════════
 
+/**
+ * Baixa os arquivos salvos no template e os injeta nos inputs corretos.
+ * Funciona para Scene Mode (chaves "scene_{elementId}") e Classic Mode
+ * (chaves "classic_bg_N", "classic_ov_N", "classic_ca_N", "classic_audio_N", "classic_sa_N").
+ */
+async function _restoreTemplateFiles(templateId, templateFiles) {
+    const keys = Object.keys(templateFiles);
+    if (keys.length === 0) return;
+
+    showToast(`⏳ Restaurando ${keys.length} arquivo(s)...`, 'info');
+    let restored = 0;
+    const errors = [];
+
+    for (const key of keys) {
+        const info = templateFiles[key];
+        try {
+            const resp = await fetch(`/video-compositor/api/templates/${templateId}/file/${encodeURIComponent(key)}`);
+            if (!resp.ok) { errors.push(info.filename || key); continue; }
+            const blob = await resp.blob();
+            const file = new File([blob], info.filename || key, { type: blob.type || info.mime || 'application/octet-stream' });
+
+            const input = _findInputForSlotKey(key);
+            if (!input) { errors.push(`${info.filename} (slot não encontrado)`); continue; }
+
+            // Inject file into the input using DataTransfer API
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            restored++;
+        } catch (e) {
+            errors.push(info.filename || key);
+        }
+    }
+
+    if (restored > 0) {
+        showToast(`✅ ${restored} arquivo(s) restaurado(s) do template.`, 'success');
+    }
+    if (errors.length > 0) {
+        showToast(`⚠️ Não foi possível restaurar: ${errors.join(', ')}`, 'error');
+    }
+}
+
+/**
+ * Encontra o input de arquivo correto para uma chave de slot de template.
+ */
+function _findInputForSlotKey(key) {
+    // Scene mode: "scene_{elementId}" or "scene_audio_{elementId}"
+    if (key.startsWith('scene_audio_')) {
+        const elId = key.slice('scene_audio_'.length);
+        const el = document.querySelector(`#scenesList .scene-element[data-element-id="${elId}"]`);
+        if (el) return el.querySelector('.scene-element-audio-file') || el.querySelector('input[type=file]');
+    }
+    if (key.startsWith('scene_')) {
+        const elId = key.slice('scene_'.length);
+        const el = document.querySelector(`#scenesList .scene-element[data-element-id="${elId}"]`);
+        if (el) return el.querySelector('.scene-element-file') || el.querySelector('input[type=file]');
+    }
+    // Classic mode by index
+    if (key.startsWith('classic_bg_')) {
+        const i = parseInt(key.split('_').pop(), 10);
+        return document.querySelectorAll('#bgSegmentsList .bg-img-input')[i] || null;
+    }
+    if (key.startsWith('classic_ov_')) {
+        const i = parseInt(key.split('_').pop(), 10);
+        return document.querySelectorAll('#overlaySegmentsList .overlay-img-input')[i] || null;
+    }
+    if (key.startsWith('classic_ca_')) {
+        const i = parseInt(key.split('_').pop(), 10);
+        return document.querySelectorAll('#customAnimsList .custom-anim-input')[i] || null;
+    }
+    if (key.startsWith('classic_audio_')) {
+        const i = parseInt(key.split('_').pop(), 10);
+        return document.querySelectorAll('#audioItemsList input[type=file]')[i] || null;
+    }
+    if (key.startsWith('classic_sa_')) {
+        const i = parseInt(key.split('_').pop(), 10);
+        return document.querySelectorAll('#secAudioList .sec-audio-input')[i] || null;
+    }
+    return null;
+}
+
+// ══════════════════════════════════════════
+// Init
+// ══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
     const secInput = document.getElementById('secondary_audio_file');
     if (secInput) {
