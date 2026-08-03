@@ -18,6 +18,7 @@ from app.config import BASE_DIR, TEMPLATES_DIR
 from app.drive import get_drive
 from app.publisher import publish_job
 from app.repositories import jobs as jobs_repo
+from app.repositories import music_visualizer_templates as templates_repo
 from app.video_types import get_video_type
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,133 @@ async def mv_detail(request: Request, job_id: str):
             "user": user,
         },
     )
+
+
+# ── Templates de configurações ────────────────────────────────────────────────
+
+def _template_api_user(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return None, JSONResponse({"error": "Não autenticado"}, status_code=401)
+    if PERM not in user.get("permissions", []):
+        return None, JSONResponse({"error": "Sem permissão"}, status_code=403)
+    return user, None
+
+
+def _validate_template_payload(body: dict, require_name: bool = True):
+    if not isinstance(body, dict):
+        return None, JSONResponse({"error": "JSON inválido."}, status_code=400)
+    name = body.get("name")
+    if name is not None and not isinstance(name, str):
+        return None, JSONResponse({"error": "O nome do template deve ser texto."}, status_code=400)
+    if require_name:
+        name = (name or "").strip()
+        if not name:
+            return None, JSONResponse({"error": "Informe o nome do template."}, status_code=400)
+        if len(name) > 255:
+            return None, JSONResponse({"error": "O nome deve ter no máximo 255 caracteres."}, status_code=400)
+    elif name is not None:
+        name = name.strip()
+        if not name or len(name) > 255:
+            return None, JSONResponse({"error": "Nome de template inválido."}, status_code=400)
+
+    template_data = body.get("template_data")
+    if template_data is not None and not isinstance(template_data, dict):
+        return None, JSONResponse({"error": "template_data deve ser um objeto JSON."}, status_code=400)
+    description = body.get("description")
+    if description is not None:
+        description = str(description).strip()
+        if len(description) > 2000:
+            return None, JSONResponse({"error": "A descrição deve ter no máximo 2000 caracteres."}, status_code=400)
+    return {"name": name, "description": description, "template_data": template_data}, None
+
+
+@router.get("/api/templates")
+async def list_templates(request: Request):
+    user, error = _template_api_user(request)
+    if error:
+        return error
+    return JSONResponse({"templates": templates_repo.get_user_templates(user["id"])})
+
+
+@router.get("/api/templates/{template_id}")
+async def get_template(request: Request, template_id: str):
+    user, error = _template_api_user(request)
+    if error:
+        return error
+    template = templates_repo.get_template(template_id)
+    if not template:
+        return JSONResponse({"error": "Template não encontrado"}, status_code=404)
+    if template["user_id"] != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
+    return JSONResponse({"template": template})
+
+
+@router.post("/api/templates")
+async def create_template(request: Request):
+    user, error = _template_api_user(request)
+    if error:
+        return error
+    try:
+        payload, error = _validate_template_payload(await request.json())
+        if error:
+            return error
+        template = templates_repo.create_template(
+            user_id=user["id"], name=payload["name"],
+            description=payload["description"] or "",
+            template_data=payload["template_data"] or {},
+        )
+        return JSONResponse({"template": template}, status_code=201)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception:
+        logger.exception("Erro ao criar template do Music Visualizer")
+        return JSONResponse({"error": "Não foi possível salvar o template."}, status_code=500)
+
+
+@router.put("/api/templates/{template_id}")
+async def update_template(request: Request, template_id: str):
+    user, error = _template_api_user(request)
+    if error:
+        return error
+    existing = templates_repo.get_template(template_id)
+    if not existing:
+        return JSONResponse({"error": "Template não encontrado"}, status_code=404)
+    if existing["user_id"] != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
+    try:
+        payload, error = _validate_template_payload(await request.json(), require_name=False)
+        if error:
+            return error
+        if payload["name"] is None and payload["description"] is None and payload["template_data"] is None:
+            return JSONResponse({"error": "Nenhuma alteração informada."}, status_code=400)
+        ok = templates_repo.update_template(
+            template_id, name=payload["name"], description=payload["description"],
+            template_data=payload["template_data"],
+        )
+        if not ok:
+            return JSONResponse({"error": "Falha ao atualizar"}, status_code=500)
+        return JSONResponse({"ok": True})
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception:
+        logger.exception("Erro ao atualizar template do Music Visualizer")
+        return JSONResponse({"error": "Não foi possível atualizar o template."}, status_code=500)
+
+
+@router.delete("/api/templates/{template_id}")
+async def delete_template(request: Request, template_id: str):
+    user, error = _template_api_user(request)
+    if error:
+        return error
+    existing = templates_repo.get_template(template_id)
+    if not existing:
+        return JSONResponse({"error": "Template não encontrado"}, status_code=404)
+    if existing["user_id"] != user["id"]:
+        return JSONResponse({"error": "Acesso negado"}, status_code=403)
+    if not templates_repo.soft_delete_template(template_id):
+        return JSONResponse({"error": "Falha ao excluir"}, status_code=500)
+    return JSONResponse({"ok": True})
 
 
 # ── Submit ────────────────────────────────────────────────────────────────────

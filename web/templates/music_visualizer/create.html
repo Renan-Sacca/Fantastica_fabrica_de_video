@@ -112,6 +112,22 @@
     <section class="mv-card">
       <h2>🎛️ Configuração do Vídeo</h2>
 
+      <div style="padding:12px;margin-bottom:16px;background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.25);border-radius:10px;">
+        <div style="font-size:.82rem;font-weight:700;margin-bottom:8px;">📚 Templates salvos</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <select id="mv-template-select" style="flex:1;min-width:180px;">
+            <option value="">Selecione um template...</option>
+          </select>
+          <button type="button" class="mv-btn mv-btn-ghost" id="mv-template-load" style="padding:8px 12px;">Carregar</button>
+          <button type="button" class="mv-btn mv-btn-ghost" id="mv-template-delete" style="padding:8px 12px;color:#f87171;">Excluir</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <input type="text" id="mv-template-name" placeholder="Nome do novo template" maxlength="255" style="flex:1;">
+          <button type="button" class="mv-btn mv-btn-primary" id="mv-template-save" style="padding:8px 12px;white-space:nowrap;">Salvar atual</button>
+        </div>
+        <div class="hint" id="mv-template-status">Os templates guardam as configurações, não os arquivos de mídia.</div>
+      </div>
+
       <label>Título do projeto</label>
       <input type="text" id="mv-title" placeholder="Ex: Lofi Beats — Relaxing Study Music">
 
@@ -395,6 +411,143 @@
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function q(id){ return document.getElementById(id); }
 function bool(el){ return el && el.checked; }
+
+// ── Templates de configurações ───────────────────────────────────────────────
+const templateSelect = q('mv-template-select');
+const templateName = q('mv-template-name');
+const templateStatus = q('mv-template-status');
+let savedTemplates = [];
+
+function visualizerSettings(){
+  return {
+    schema_version: 1,
+    settings: {
+      width: Number(q('mv-width').value), height: Number(q('mv-height').value), fps: Number(q('mv-fps').value),
+      circle_radius: Number(q('mv-circle-radius').value), circle_max_scale: Number(q('mv-circle-scale').value),
+      circle_border_color: q('mv-circle-border-color').value, circle_bg_color: '#000000cc',
+      circle_glow_color: q('mv-circle-glow-color').value, circle_glow_intensity: Number(q('mv-glow-intensity').value),
+      logo_text: q('mv-logo-text').value || '♫', logo_font_size: 72, logo_font_color: '#ffffff',
+      waves_enabled: bool(q('mv-waves-enabled')), wave_rings: Number(q('mv-wave-rings').value),
+      wave_color: '#ffffff', wave_opacity_max: Number(q('mv-wave-opacity').value),
+      bg_zoom_speed: Number(q('mv-zoom-speed').value), bg_beat_shake: bool(q('mv-beat-shake')),
+      bg_beat_shake_px: Number(q('mv-shake-px').value), bg_brightness_boost: Number(q('mv-brightness').value),
+      bg_blur_ambient: Number(q('mv-blur').value), particles_enabled: bool(q('mv-particles-enabled')),
+      particle_count: Number(q('mv-particle-count').value), particle_color: q('mv-particle-color').value,
+      particle_opacity_max: Number(q('mv-particle-opacity').value), particle_speed: Number(q('mv-particle-speed').value),
+      progress_bar_enabled: bool(q('mv-progress-bar')), progress_bar_color: q('mv-circle-border-color').value,
+      progress_bar_position: q('mv-progress-position').value, show_title: bool(q('mv-show-title')),
+      title_color: '#ffffff', title_opacity: 0.85, title_position: q('mv-title-position').value,
+      audio_sensitivity: Number(q('mv-sensitivity').value), beat_threshold: Number(q('mv-beat-threshold').value)
+    }
+  };
+}
+
+function applyVisualizerSettings(templateData){
+  const settings = templateData && templateData.settings ? templateData.settings : (templateData || {});
+  const setValue = (id, value) => { if(value !== undefined && q(id)) q(id).value = value; };
+  const setChecked = (id, value) => { if(value !== undefined && q(id)) q(id).checked = Boolean(value); };
+
+  if(settings.width !== undefined && settings.height !== undefined){
+    setValue('mv-resolution', `${settings.width}x${settings.height}`);
+    setValue('mv-width', settings.width); setValue('mv-height', settings.height);
+    q('mv-resolution').dispatchEvent(new Event('change'));
+  }
+  ['fps','circle-radius','circle-scale','glow-intensity','wave-rings','wave-opacity','zoom-speed',
+   'shake-px','brightness','blur','particle-count','particle-speed','particle-opacity',
+   'sensitivity','beat-threshold'].forEach(id => {
+    const key = {
+      'circle-radius':'circle_radius','circle-scale':'circle_max_scale','glow-intensity':'circle_glow_intensity',
+      'wave-rings':'wave_rings','wave-opacity':'wave_opacity_max','zoom-speed':'bg_zoom_speed',
+      'shake-px':'bg_beat_shake_px','brightness':'bg_brightness_boost','blur':'bg_blur_ambient',
+      'particle-count':'particle_count','particle-speed':'particle_speed','particle-opacity':'particle_opacity_max',
+      'sensitivity':'audio_sensitivity','beat-threshold':'beat_threshold'
+    }[id] || id;
+    setValue(`mv-${id}`, settings[key]);
+    if(q(`mv-${id}`)) q(`mv-${id}`).dispatchEvent(new Event('input'));
+  });
+  setValue('mv-logo-text', settings.logo_text);
+  setValue('mv-progress-position', settings.progress_bar_position);
+  setValue('mv-title-position', settings.title_position);
+  setChecked('mv-waves-enabled', settings.waves_enabled);
+  setChecked('mv-beat-shake', settings.bg_beat_shake);
+  setChecked('mv-particles-enabled', settings.particles_enabled);
+  setChecked('mv-progress-bar', settings.progress_bar_enabled);
+  setChecked('mv-show-title', settings.show_title);
+  setColor('border-colors', 'mv-circle-border-color', 'mv-border-color-picker', settings.circle_border_color);
+  setColor('glow-colors', 'mv-circle-glow-color', 'mv-glow-color-picker', settings.circle_glow_color);
+  setColor('particle-colors', 'mv-particle-color', 'mv-particle-color-picker', settings.particle_color);
+  q('sec-waves-opts').style.display = q('mv-waves-enabled').checked ? 'block' : 'none';
+  q('sec-particles-opts').style.display = q('mv-particles-enabled').checked ? 'block' : 'none';
+}
+
+function setColor(groupId, hiddenId, pickerId, value){
+  if(!value) return;
+  const hidden = q(hiddenId); const picker = q(pickerId);
+  if(hidden) hidden.value = value;
+  if(picker && /^#[0-9a-f]{6}$/i.test(value)) picker.value = value;
+  document.querySelectorAll(`#${groupId} .color-dot`).forEach(dot => {
+    dot.classList.toggle('selected', dot.dataset.color.toLowerCase() === String(value).toLowerCase());
+  });
+}
+
+function renderTemplateOptions(){
+  const selected = templateSelect.value;
+  templateSelect.innerHTML = '<option value="">Selecione um template...</option>';
+  savedTemplates.forEach(t => {
+    const option = document.createElement('option'); option.value = t.template_id; option.textContent = t.name;
+    templateSelect.appendChild(option);
+  });
+  if(savedTemplates.some(t => t.template_id === selected)) templateSelect.value = selected;
+  const disabled = !savedTemplates.length;
+  q('mv-template-load').disabled = disabled; q('mv-template-delete').disabled = disabled;
+}
+
+async function loadTemplates(){
+  try {
+    const res = await fetch('/music-visualizer/api/templates');
+    if(!res.ok) throw new Error('Não foi possível carregar os templates.');
+    savedTemplates = (await res.json()).templates || [];
+    renderTemplateOptions();
+  } catch(error){ templateStatus.textContent = error.message; }
+}
+
+q('mv-template-save').addEventListener('click', async () => {
+  const name = templateName.value.trim();
+  if(!name){ showToast('Informe um nome para o template.', 'error'); templateName.focus(); return; }
+  try {
+    const res = await fetch('/music-visualizer/api/templates', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, template_data: visualizerSettings()})
+    });
+    const data = await res.json();
+    if(!res.ok || data.error) throw new Error(data.error || 'Erro ao salvar template.');
+    templateName.value = ''; templateStatus.textContent = 'Template salvo com sucesso.';
+    await loadTemplates(); templateSelect.value = data.template.template_id;
+    showToast('Template salvo com sucesso!', 'success');
+  } catch(error){ showToast(error.message, 'error'); }
+});
+
+q('mv-template-load').addEventListener('click', () => {
+  const template = savedTemplates.find(t => t.template_id === templateSelect.value);
+  if(!template) return;
+  applyVisualizerSettings(template.template_data);
+  templateStatus.textContent = `Template carregado: ${template.name}`;
+  showToast('Configurações carregadas!', 'success');
+});
+
+q('mv-template-delete').addEventListener('click', async () => {
+  const template = savedTemplates.find(t => t.template_id === templateSelect.value);
+  if(!template || !confirm(`Excluir o template "${template.name}"?`)) return;
+  try {
+    const res = await fetch(`/music-visualizer/api/templates/${template.template_id}`, {method:'DELETE'});
+    const data = await res.json();
+    if(!res.ok || data.error) throw new Error(data.error || 'Erro ao excluir template.');
+    templateStatus.textContent = 'Template excluído.'; await loadTemplates();
+    showToast('Template excluído.', 'success');
+  } catch(error){ showToast(error.message, 'error'); }
+});
+
+loadTemplates();
 
 // ── Sliders com label ────────────────────────────────────────────────────────
 const sliders = [

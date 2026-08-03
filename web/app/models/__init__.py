@@ -13,6 +13,7 @@ from .voice_plan import VoicePlan
 from .user_voice import UserVoice
 from .audio_preset import AudioPreset
 from .compositor_template import CompositorTemplate
+from .music_visualizer_template import MusicVisualizerTemplate
 
 __all__ = [
     "Job",
@@ -29,4 +30,5 @@ __all__ = [
     "UserVoice",
     "AudioPreset",
     "CompositorTemplate",
+    "MusicVisualizerTemplate",
 ]
