@@ -6,46 +6,60 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 1: GL Helpers + Matrix Math + Utilities
+     ═══════════════════════════════════════════════════════════════════ -->
 <script>
 'use strict';
-// ═══════════════════════════════════════════════════════════════════
-//  Music Visualizer — Modular WebGL2 Engine v3
-//  Separação de bandas: Bass / Mid / High / Beat
-//  Movimento orgânico contínuo em todos os módulos
-// ═══════════════════════════════════════════════════════════════════
-
 const canvas = document.getElementById('c');
 let gl = canvas.getContext('webgl2',{alpha:false,antialias:true,preserveDrawingBuffer:true,premultipliedAlpha:false});
 if(!gl) gl=canvas.getContext('webgl',{preserveDrawingBuffer:true,antialias:true});
 
-// ── State ─────────────────────────────────────────────────────────
+// ── Global state ──
 let W=1920,H=1080,FPS=30,CFG={};
-let PROJ;
-let DOM_COLOR=[0.3,0.5,1.0]; // dominant color
-let T=0; // global time accumulator
+let BASE_PROJ, PROJ;
+let DOM_COLOR=[0.3,0.5,1.0];
+let T=0;
+// Isolamento de efeitos p/ testes: se SOLO for um array, só os módulos
+// listados são desenhados (ex.: ['spectrum'], ['particles']). null = tudo.
+let SOLO=null;
+const _solo=(name)=> !SOLO || SOLO.indexOf(name)>=0;
 
-// ── Audio bands (per-frame, updated in renderFrame) ───────────────
+// Info do backend GL (GPU real vs SwiftShader) — exposto p/ o Python.
+window.getGLInfo = function(){
+  try{
+    const dbg=gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = dbg? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
+                        : gl.getParameter(gl.RENDERER);
+    const vendor = dbg? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)
+                      : gl.getParameter(gl.VENDOR);
+    return {renderer, vendor, version: gl.getParameter(gl.VERSION),
+            webgl2: !!(gl instanceof WebGL2RenderingContext),
+            quality: (typeof detectQuality==='function')? detectQuality() : '?'};
+  }catch(e){ return {renderer:'?',vendor:'?',error:String(e)}; }
+};
+
 const BANDS={bass:0,mid:0,high:0,presence:0,rms:0,beat:false,beatStr:0,
              bassSmooth:0,midSmooth:0,highSmooth:0,presSmooth:0,rmsSmooth:0};
 
-// ── Module instances ──────────────────────────────────────────────
+// Module instances
+let eventBus, configMgr, sceneDir, idleMotion, camera, layerSys, postfx, beatVar;
 let mBG, mHalo, mWaves, mSpectrum, mParticles, mCircle, mLens, mHUD;
 
-// ─────────────────────────────────────────────────────────────────
-//  GL helpers
-// ─────────────────────────────────────────────────────────────────
+// ── GL helpers ──
 function mkProg(vs,fs){
   const p=gl.createProgram();
   [vs,fs].forEach((src,i)=>{
     const s=gl.createShader(i?gl.FRAGMENT_SHADER:gl.VERTEX_SHADER);
     gl.shaderSource(s,src);gl.compileShader(s);
     if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))
-      console.error('Shader error:',gl.getShaderInfoLog(s));
+      console.error('Shader:',gl.getShaderInfoLog(s));
     gl.attachShader(p,s);
   });
   gl.linkProgram(p);
   if(!gl.getProgramParameter(p,gl.LINK_STATUS))
-    console.error('Link error:',gl.getProgramInfoLog(p));
+    console.error('Link:',gl.getProgramInfoLog(p));
   return p;
 }
 function ortho(w,h){return[2/w,0,0,0,-2/h,0,-1,1,1];}
@@ -72,7 +86,6 @@ function loadTex(src){
     i.src=src;
   });
 }
-// Create a Float32Array from positions+uvs for a screen quad
 function quadVerts(x,y,w,h){
   return new Float32Array([x,y,0,0, x+w,y,1,0, x,y+h,0,1, x+w,y+h,1,1]);
 }
@@ -123,8 +136,6 @@ function initialsTex(text,sz,color){
   ct.fillStyle=color||'#fff';ct.fillText(text,s/2,s/2);
   return{tex:makeTex2D(cv),w:s,h:s};
 }
-
-// circle fan buffer
 function fanBuf(n=256){
   const v=[0,0];
   for(let i=0;i<=n;i++){const a=i/n*Math.PI*2;v.push(Math.cos(a),Math.sin(a));}
@@ -135,12 +146,6 @@ function ringBuf(n=512){
   for(let i=0;i<=n;i++){const a=i/n*Math.PI*2;v.push(Math.cos(a),Math.sin(a));}
   const b=gl.createBuffer();up(b,new Float32Array(v),35044);return{buf:b,n:v.length/2};
 }
-
-// Perlin-like smooth noise
-function noise(t){return Math.sin(t*1.3)*Math.cos(t*0.7)*Math.sin(t*2.1+0.4)*0.5+0.5;}
-function snoise(t){return Math.sin(t*1.1)*0.5+Math.cos(t*2.3)*0.3+Math.sin(t*0.4)*0.2;}
-
-// Dominant color extractor
 function extractDomColor(src){
   return new Promise(r=>{
     const i=new Image();
@@ -157,7 +162,6 @@ function extractDomColor(src){
       const rv=rr/cnt/255,gv=gg/cnt/255,bv=bb/cnt/255;
       const mx=Math.max(rv,gv,bv),mn=Math.min(rv,gv,bv);
       if(mx-mn<0.12){r([0.3,0.5,1.0]);return;}
-      // Boost saturation
       const boost=(c,m)=>Math.min(1,m+(c-m)*1.8);
       r([boost(rv,(rv+gv+bv)/3),boost(gv,(rv+gv+bv)/3),boost(bv,(rv+gv+bv)/3)]);
     };
@@ -165,28 +169,427 @@ function extractDomColor(src){
     i.src=src;
   });
 }
-
-// Split spectrum into bands (indices into spectrum array of length N)
 function bandEnergy(spectrum,loFrac,hiFrac){
-  const N=spectrum.length;
-  const lo=Math.floor(loFrac*N),hi=Math.ceil(hiFrac*N);
-  let s=0;const cnt=hi-lo;
-  for(let i=lo;i<hi;i++)s+=spectrum[i]||0;
+  const N=spectrum.length;const lo=Math.floor(loFrac*N),hi=Math.ceil(hiFrac*N);
+  let s=0;const cnt=hi-lo;for(let i=lo;i<hi;i++)s+=spectrum[i]||0;
   return cnt>0?s/cnt:0;
+}
+
+// ── Mat3 math (column-major) ──
+function m3mul(A,B){
+  const r=new Array(9);
+  for(let j=0;j<3;j++)for(let i=0;i<3;i++)
+    r[j*3+i]=A[i]*B[j*3]+A[3+i]*B[j*3+1]+A[6+i]*B[j*3+2];
+  return r;
+}
+function m3trans(tx,ty){return[1,0,0, 0,1,0, tx,ty,1];}
+function m3scale(sx,sy){return[sx,0,0, 0,sy,0, 0,0,1];}
+function m3rot(a){const c=Math.cos(a),s=Math.sin(a);return[c,s,0,-s,c,0,0,0,1];}
+
+// ── FBO helper ──
+function createFBO(w,h){
+  const fb=gl.createFramebuffer(), tex=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,tex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,tex,0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  return{fb,tex,w,h};
+}
+
+// Fullscreen quad for PostFX
+let _fsqBuf=null;
+function drawFSQ(prog){
+  if(!_fsqBuf){_fsqBuf=gl.createBuffer();up(_fsqBuf,new Float32Array([-1,-1,0,0,1,-1,1,0,-1,1,0,1,1,1,1,1]),35044);}
+  gl.bindBuffer(gl.ARRAY_BUFFER,_fsqBuf);
+  att(prog,'a_p',2,16,0);att(prog,'a_uv',2,16,8);
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
 }
 </script>
 
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 2: Core Engine — EventBus, Easing, AnimCurve, OscillatorBank, BeatVariation
+     ═══════════════════════════════════════════════════════════════════ -->
 <script>
-// ═══════════════════════════════════════════════════════════════════
-//  BackgroundModule — always alive, never static
-//  bass → brightness pulse  |  mid → parallax  |  high → grain
-//  continuous: zoom, rotation, horizontal drift
-// ═══════════════════════════════════════════════════════════════════
-class BackgroundModule {
+class EventBus {
+  constructor(){this._l={};}
+  on(e,fn){(this._l[e]=this._l[e]||[]).push(fn);}
+  off(e,fn){const a=this._l[e];if(a){const i=a.indexOf(fn);if(i>=0)a.splice(i,1);}}
+  emit(e,d){const a=this._l[e];if(a)for(const fn of a)fn(d);}
+}
+
+const Easing = {
+  sine:    t => Math.sin(t*Math.PI*2),
+  spring:  t => { const d=1-t; return d>0 ? Math.sin(t*Math.PI*4)*Math.exp(-t*3) : 0; },
+  elastic: t => t===0?0:t===1?1:-Math.pow(2,10*t-10)*Math.sin((t*10-10.75)*(2*Math.PI)/3),
+  easeInOut: t => t<0.5? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2,
+  easeOut: t => 1-Math.pow(1-t,3),
+  bounce:  t => {
+    const n1=7.5625,d1=2.75;
+    if(t<1/d1)return n1*t*t;
+    if(t<2/d1)return n1*(t-=1.5/d1)*t+.75;
+    if(t<2.5/d1)return n1*(t-=2.25/d1)*t+.9375;
+    return n1*(t-=2.625/d1)*t+.984375;
+  },
+  exponential: t => t===0?0:Math.pow(2,10*(t-1)),
+};
+
+class AnimCurve {
+  constructor({period=4,amplitude=1,phase=0,easing='sine',offset=0}={}){
+    this.period=period;this.amplitude=amplitude;this.phase=phase;
+    this.easing=easing;this.offset=offset;
+  }
+  sample(t){
+    const norm=((t+this.phase)%this.period)/this.period;
+    const fn=Easing[this.easing]||Easing.sine;
+    return fn(norm<0?norm+1:norm)*this.amplitude+this.offset;
+  }
+}
+
+class OscillatorBank {
+  constructor(count,{periods,amplitudes,phases}={}){
+    this.oscs=[];
+    const defP=[3.1,4.7,7.3,11.1,13.7,17.3,23.1,29.3];
+    for(let i=0;i<count;i++){
+      this.oscs.push({
+        p:(periods&&periods[i])||defP[i%defP.length],
+        a:(amplitudes&&amplitudes[i])||(1/count),
+        ph:(phases&&phases[i])||(i*1.618),
+      });
+    }
+  }
+  sample(t){let s=0;for(const o of this.oscs)s+=Math.sin((t+o.ph)*Math.PI*2/o.p)*o.a;return s;}
+  sampleB(t){let s=0;for(const o of this.oscs)s+=Math.cos((t+o.ph*1.3)*Math.PI*2/o.p)*o.a;return s;}
+}
+
+class BeatVariation {
+  constructor(cfg){
+    this.cfg=cfg||{intensity_range:[0.8,1.2],duration_range:[0.85,1.15],
+                   types:['punch','flash','swell','shimmer','sparkle']};
+    this._lastType='';this._consec=0;
+  }
+  trigger(energy,bands){
+    const {bass,mid,high}=bands;
+    const dom=bass>mid&&bass>high?'bass':mid>high?'mid':'high';
+    const r=Math.random();
+    let type;
+    if(dom==='bass') type=r<0.5?'punch':r<0.8?'swell':'flash';
+    else if(dom==='mid') type=r<0.4?'shimmer':r<0.7?'swell':'flash';
+    else type=r<0.5?'flash':r<0.8?'sparkle':'shimmer';
+    if(type===this._lastType){this._consec++;
+      if(this._consec>=2){const t=this.cfg.types.filter(x=>x!==type);type=t[Math.floor(Math.random()*t.length)];this._consec=0;}
+    }else this._consec=0;
+    this._lastType=type;
+    const[iL,iH]=this.cfg.intensity_range,[dL,dH]=this.cfg.duration_range;
+    return{type,intensity:energy*(iL+Math.random()*(iH-iL)),
+           duration:dL+Math.random()*(dH-dL),bass,mid,high,energy};
+  }
+}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 3: ConfigManager + StylePresets
+     ═══════════════════════════════════════════════════════════════════ -->
+<script>
+function deepMerge(target,source){
+  const out={...target};
+  for(const k of Object.keys(source)){
+    if(source[k]&&typeof source[k]==='object'&&!Array.isArray(source[k])&&target[k]&&typeof target[k]==='object')
+      out[k]=deepMerge(target[k],source[k]);
+    else out[k]=source[k];
+  }
+  return out;
+}
+
+const STYLE_PRESETS = {
+  default: {},
+  minimal: {
+    particles:{count:40,opacity_max:0.3,speed:0.6},
+    glow:{intensity:0.6,layers:2},
+    postfx:{bloom:{intensity:0.12},grain:{intensity:0.2}},
+    camera:{float_amount:6,punch_strength:0.01,shake_amount:1},
+    background:{brightness_bass:0.15},
+  },
+  dark: {
+    background:{brightness_bass:0.15,brightness_mid:0.08},
+    glow:{intensity:0.8},
+    postfx:{vignette:{strength:0.65},color_grading:{gamma:0.9},grain:{intensity:0.45}},
+    camera:{float_amount:8},
+  },
+  neon: {
+    glow:{intensity:2.0,color_shift:0.15},
+    postfx:{bloom:{intensity:0.55,threshold:0.4},chromatic_aberration:0.002,
+            color_grading:{saturation:1.3}},
+    particles:{opacity_max:0.8,count:120},
+    camera:{punch_strength:0.03},
+  },
+  epic: {
+    camera:{punch_strength:0.04,shake_amount:4,float_amount:15},
+    particles:{count:200,speed:1.5},
+    postfx:{bloom:{intensity:0.45},grain:{intensity:0.55}},
+    glow:{intensity:1.8},
+  },
+  lofi: {
+    postfx:{grain:{intensity:0.75},bloom:{intensity:0.1},
+            color_grading:{temperature:0.15,saturation:0.85,gamma:0.95}},
+    camera:{float_amount:4,punch_strength:0.008,shake_amount:0.5},
+    particles:{count:30,speed:0.5},
+  },
+  synthwave: {
+    glow:{intensity:1.5,color_shift:0.12},
+    postfx:{bloom:{intensity:0.4,threshold:0.45},chromatic_aberration:0.0015,
+            color_grading:{temperature:-0.1,saturation:1.2}},
+    camera:{tilt_amount:0.5,float_amount:10},
+  },
+  trap: {
+    camera:{punch_strength:0.05,shake_amount:5,shake_freq:12},
+    circle:{max_scale:1.8,push_amount:0.25},
+    particles:{count:150,speed:2.0},
+    postfx:{bloom:{intensity:0.4}},
+    background:{brightness_bass:0.45},
+  },
+};
+
+const ENGINE_DEFAULTS = {
+  camera:{enabled:true,float_speed:0.08,float_amount:12,
+          punch_strength:0.025,punch_spring_k:200,punch_damping:15,
+          shake_amount:2.5,shake_freq:8,
+          tilt_speed:0.05,tilt_amount:0.3},
+  background:{zoom_bass_amount:0.14,brightness_bass:0.60,brightness_mid:0.30,
+              parallax_amount:0.024,rotation_speed:0.3,beat_punch:0.05,
+              grain_base:0.35,grain_high_boost:0.4,color_shift_amount:0.12,
+              light_leak:{enabled:true,opacity:0.09,speed:0.15}},
+  circle:{radius:170,max_scale:1.55,border_color:'#ffffff',bg_color:'#00000099',
+          border_width:5,float_amount:0.07,push_amount:0.20,
+          breathe_speed:1.6,breathe_amount:0.013,shadow:true,
+          spring:{k:300,d:20}},
+  glow:{color:'auto',intensity:1.2,layers:4,
+        breathe_periods:[3.1,4.7,7.3,11.1],radius_variation:0.15,color_shift:0.05,
+        bass_response:0.35,mid_response:0.45},
+  halo:{base_radius_mult:2.8,bass_expansion:2.4,layers:4,breathe_speed:1.2,breathe_amount:0.08,
+        base_glow:0.20,rms_response:0.25},
+  spectrum:{enabled:true,bars:512,color:'auto',opacity:0.85,
+            radius_offset:20,max_height:270,fill:0.82,beat_boost:0.85,idle_height:2.0,
+            rotation_speed:0.05,attack:0.6,release:0.10,idle_wave:5.0},
+  waves:{enabled:true,rings:4,color:'auto',opacity_max:0.9,speed:0.7,expansion:3.2,
+         thickness:0.11,auto_pulse:0.7},
+  particles:{enabled:true,count:100,color:'auto',opacity_max:0.65,
+             size_min:1.5,size_max:5.0,speed:1.0,idle_speed:0.3,layers:3,dust_motes:true,
+             sway_amount:1.0,sway_speed:1.0},
+  lens:{flare:true,flare_intensity:0.55},
+  postfx:{quality:'auto',
+          bloom:{enabled:true,threshold:0.6,intensity:0.3,radius:4},
+          grain:{intensity:0.5,speed:10},
+          vignette:{enabled:true,strength:0.42,pulse:0.18},
+          chromatic_aberration:0.0008,
+          color_grading:{temperature:0.0,tint:0.0,saturation:1.0,gamma:1.0},
+          light_leak:{enabled:true,opacity:0.06}},
+  scene_director:{enabled:true,intro_duration:0.08,outro_duration:0.10,transition_frames:90},
+  idle_motion:{bg_zoom_speed:0.003,bg_rotation_speed:0.02,
+               circle_breathe:true,circle_float:true,
+               glow_breathe:true,halo_breathe:true,
+               spectrum_idle:true,particles_flow:true},
+  beat_variation:{intensity_range:[0.8,1.2],duration_range:[0.85,1.15],
+                  types:['punch','flash','swell','shimmer','sparkle']},
+  hud:{progress_bar:{enabled:true,color:'auto',style:'ring',
+                     radius_offset:16,thickness:5,glow:true},
+       title:{show:true,color:'#ffffff',font_size:32,opacity:0.85,
+              position:'bottom-center',margin:56}},
+};
+
+function resolveConfig(userCfg){
+  let cfg = JSON.parse(JSON.stringify(ENGINE_DEFAULTS));
+  const preset = userCfg.style_preset || 'default';
+  if(STYLE_PRESETS[preset]) cfg = deepMerge(cfg, STYLE_PRESETS[preset]);
+  const flatMap = {
+    circle_radius:'circle.radius', circle_max_scale:'circle.max_scale',
+    circle_border_color:'circle.border_color', circle_bg_color:'circle.bg_color',
+    circle_glow_color:'glow.color', circle_glow_intensity:'glow.intensity',
+    circle_border_width:'circle.border_width', circle_float_amount:'circle.float_amount',
+    circle_push_amount:'circle.push_amount', circle_shadow:'circle.shadow',
+    spectrum_enabled:'spectrum.enabled', spectrum_bars:'spectrum.bars',
+    spectrum_color:'spectrum.color', spectrum_opacity:'spectrum.opacity',
+    spectrum_radius_offset:'spectrum.radius_offset', spectrum_max_height:'spectrum.max_height',
+    spectrum_fill:'spectrum.fill', spectrum_beat_boost:'spectrum.beat_boost',
+    waves_enabled:'waves.enabled', wave_rings:'waves.rings',
+    wave_color:'waves.color', wave_opacity_max:'waves.opacity_max',
+    particles_enabled:'particles.enabled', particle_count:'particles.count',
+    particle_color:'particles.color', particle_opacity_max:'particles.opacity_max',
+    particle_size_min:'particles.size_min', particle_size_max:'particles.size_max',
+    particle_speed:'particles.speed',
+    bg_brightness_boost:'background.brightness_bass',
+    bg_beat_shake_px:'camera.shake_amount', bg_rotation_speed:'background.rotation_speed',
+    film_grain:'postfx.grain.intensity', chromatic_aberration:'postfx.chromatic_aberration',
+    vignette_strength:'postfx.vignette.strength', vignette_enabled:'postfx.vignette.enabled',
+    lens_flare:'lens.flare',
+    progress_bar_enabled:'hud.progress_bar.enabled', progress_bar_color:'hud.progress_bar.color',
+    progress_bar_position:'hud.progress_bar.position',
+    show_title:'hud.title.show', title_color:'hud.title.color',
+    title_opacity:'hud.title.opacity', title_position:'hud.title.position',
+    title_font_size:'hud.title.font_size', title_margin:'hud.title.margin',
+    camera_enabled:'camera.enabled', scene_director_enabled:'scene_director.enabled',
+    idle_motion_enabled:'idle_motion.enabled', postfx_quality:'postfx.quality',
+  };
+  for(const [fk,path] of Object.entries(flatMap)){
+    if(userCfg[fk]!==undefined){
+      const parts=path.split('.');let o=cfg;
+      for(let i=0;i<parts.length-1;i++){if(!o[parts[i]])o[parts[i]]={};o=o[parts[i]];}
+      o[parts[parts.length-1]]=userCfg[fk];
+    }
+  }
+  for(const k of Object.keys(userCfg)){
+    if(typeof userCfg[k]==='object'&&!Array.isArray(userCfg[k])&&ENGINE_DEFAULTS[k])
+      cfg[k]=deepMerge(cfg[k]||{},userCfg[k]);
+  }
+  return cfg;
+}
+
+function detectQuality(){
+  const r=(gl.getParameter(gl.RENDERER)||'').toLowerCase();
+  if(r.includes('swiftshader')||r.includes('llvmpipe'))return 'medium';
+  if(r.includes('nvidia')||r.includes('amd')||r.includes('radeon')||r.includes('direct3d'))return 'ultra';
+  if(r.includes('intel'))return 'high';
+  return 'high';
+}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 4: SceneDirector + IdleMotion
+     ═══════════════════════════════════════════════════════════════════ -->
+<script>
+const SCENE_PROFILES = {
+  intro:   {intensity:0.8,camera:0.7,particles:0.6,glow:0.7,bloom:0.7,zoom:0.7,waves:0.6},
+  verse:   {intensity:0.85,camera:0.8,particles:0.8,glow:0.8,bloom:0.8,zoom:0.8,waves:0.8},
+  buildup: {intensity:0.95,camera:0.9,particles:0.9,glow:0.9,bloom:0.9,zoom:0.9,waves:0.9},
+  drop:    {intensity:1.0,camera:1.0,particles:1.0,glow:1.0,bloom:1.0,zoom:1.0,waves:1.0},
+  chorus:  {intensity:0.95,camera:0.95,particles:0.95,glow:0.95,bloom:0.95,zoom:0.95,waves:0.95},
+  bridge:  {intensity:0.75,camera:0.7,particles:0.6,glow:0.7,bloom:0.7,zoom:0.7,waves:0.6},
+  outro:   {intensity:0.7,camera:0.6,particles:0.5,glow:0.6,bloom:0.6,zoom:0.6,waves:0.5},
+};
+
+class SceneDirector {
+  constructor(sceneMap,totalFrames,cfg){
+    this.scenes=sceneMap&&sceneMap.length>=2?sceneMap:this._fallback(totalFrames,cfg);
+    this.totalFrames=totalFrames;
+    this.transFr=cfg.transition_frames||90;
+    this.intensity=0.8;this.cameraInt=0.8;this.particleRate=0.8;
+    this.glowMult=0.8;this.bloomMult=0.8;this.zoomMult=0.8;this.waveRate=0.8;
+    this.currentScene='intro';
+  }
+  _fallback(T,cfg){
+    const intro=cfg.intro_duration||0.08,outro=cfg.outro_duration||0.10;
+    return[
+      {start:0,end:Math.floor(T*intro),type:'intro',intensity:0.8},
+      {start:Math.floor(T*intro),end:Math.floor(T*0.30),type:'verse',intensity:0.85},
+      {start:Math.floor(T*0.30),end:Math.floor(T*0.45),type:'buildup',intensity:0.95},
+      {start:Math.floor(T*0.45),end:Math.floor(T*0.65),type:'drop',intensity:1.0},
+      {start:Math.floor(T*0.65),end:Math.floor(T*(1-outro)),type:'chorus',intensity:0.95},
+      {start:Math.floor(T*(1-outro)),end:T,type:'outro',intensity:0.7},
+    ];
+  }
+  update(frameIdx){
+    let cur=this.scenes[0],next=null;
+    for(let i=0;i<this.scenes.length;i++){
+      if(frameIdx>=this.scenes[i].start&&frameIdx<this.scenes[i].end){
+        cur=this.scenes[i];next=this.scenes[i+1]||null;break;
+      }
+    }
+    this.currentScene=cur.type;
+    const prof=SCENE_PROFILES[cur.type]||SCENE_PROFILES.verse;
+    let target={...prof};
+    if(next){
+      const dist=cur.end-frameIdx;
+      if(dist<this.transFr){
+        const np=SCENE_PROFILES[next.type]||SCENE_PROFILES.verse;
+        const t=1-dist/this.transFr, e=t*t*(3-2*t);
+        for(const k of Object.keys(target))target[k]=prof[k]+(np[k]-prof[k])*e;
+      }
+    }
+    const lr=0.04;
+    this.intensity   +=(target.intensity-this.intensity)*lr;
+    this.cameraInt   +=(target.camera-this.cameraInt)*lr;
+    this.particleRate+=(target.particles-this.particleRate)*lr;
+    this.glowMult    +=(target.glow-this.glowMult)*lr;
+    this.bloomMult   +=(target.bloom-this.bloomMult)*lr;
+    this.zoomMult    +=(target.zoom-this.zoomMult)*lr;
+    this.waveRate    +=(target.waves-this.waveRate)*lr;
+  }
+}
+
+class IdleMotion {
   constructor(){
-    this.tex=null;
-    this.bright=0; this.vig=0.42;
-    this.shX=0; this.shY=0;
+    this.bgZoom    =new AnimCurve({period:45,amplitude:0.003,easing:'sine'});
+    this.bgRot     =new AnimCurve({period:60,amplitude:0.02,easing:'sine',phase:3.1});
+    this.bgPara    =new AnimCurve({period:30,amplitude:0.005,easing:'sine',phase:7.2});
+    this.circBreath=new AnimCurve({period:4.5,amplitude:0.013,easing:'sine'});
+    this.circFloat =new OscillatorBank(3,{periods:[5.3,8.7,13.1]});
+    this.glowBreath=new OscillatorBank(4,{periods:[3.1,4.7,7.3,11.1]});
+    this.haloBreath=new AnimCurve({period:5.9,amplitude:0.08,easing:'sine',phase:1.7});
+    this.specIdle  =new AnimCurve({period:3.0,amplitude:1.5,easing:'sine',phase:4.2});
+    this.partFlow  =new OscillatorBank(2,{periods:[7.0,11.0]});
+  }
+}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 5: CameraSystem
+     ═══════════════════════════════════════════════════════════════════ -->
+<script>
+class CameraSystem {
+  constructor(cfg,eb){
+    this.cfg=cfg;
+    this.floatOsc=new OscillatorBank(3,{periods:[7.1,13.3,23.7]});
+    this.tiltOsc =new OscillatorBank(2,{periods:[19.1,31.7]});
+    this.x=0;this.y=0;this.zoom=1.0;this.zoomVel=0;
+    this.shakeX=0;this.shakeY=0;this.rotation=0;
+    this._rngSeed=Math.random()*100;
+    eb.on('beat',d=>{
+      if(d.type==='punch'||d.type==='swell'){
+        this.zoomVel+=cfg.punch_strength*d.intensity*3;
+      }
+    });
+  }
+  update(dt,bands,sceneInt){
+    const c=this.cfg;
+    if(!c.enabled)return;
+    const fa=c.float_amount*sceneInt;
+    this.x=this.floatOsc.sample(T)*fa;
+    this.y=this.floatOsc.sampleB(T)*fa*0.7;
+    const K=c.punch_spring_k||200, D=c.punch_damping||15;
+    this.zoomVel+=(1.0-this.zoom)*K*dt-this.zoomVel*D*dt;
+    this.zoom+=this.zoomVel*dt;
+    this.zoom=Math.max(0.95,Math.min(1.08,this.zoom));
+    const sa=c.shake_amount*bands.highSmooth*sceneInt;
+    this._rngSeed+=dt*(c.shake_freq||8);
+    this.shakeX=Math.sin(this._rngSeed*13.7)*sa;
+    this.shakeY=Math.cos(this._rngSeed*17.3)*sa;
+    this.rotation=this.tiltOsc.sample(T)*c.tilt_amount*(Math.PI/180)*sceneInt;
+  }
+  getProj(){
+    if(!this.cfg.enabled)return BASE_PROJ;
+    const cx=W/2,cy=H/2;
+    const T1=m3trans(-cx,-cy);
+    const S=m3scale(this.zoom,this.zoom);
+    const R=m3rot(this.rotation);
+    const T2=m3trans(cx+this.x+this.shakeX,cy+this.y+this.shakeY);
+    return m3mul(BASE_PROJ,m3mul(T2,m3mul(R,m3mul(S,T1))));
+  }
+}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 6: BackgroundModule
+     ═══════════════════════════════════════════════════════════════════ -->
+<script>
+class BackgroundModule {
+  constructor(eb){
+    this.tex=null;this.bright=0;this.vig=0.42;this.shX=0;this.shY=0;
+    this.zoomLevel=1.0;this.colorShift=0;
+    this.lightLeakPhase=Math.random()*100;
     this._p=mkProg(
       `#version 300 es
        in vec2 a_p,a_uv; uniform mat3 u_m; out vec2 v_uv;
@@ -194,176 +597,241 @@ class BackgroundModule {
       `#version 300 es
        precision highp float;
        in vec2 v_uv; uniform sampler2D u_t;
-       uniform float u_br,u_vig,u_ca,u_grain,u_time;
+       uniform float u_br,u_vig,u_grain,u_time,u_colorShift;
        out vec4 o;
        float rnd(vec2 co){return fract(sin(dot(co,vec2(12.9898,78.233)))*43758.5453);}
        void main(){
          vec2 uv=v_uv;
-         float r=texture(u_t,uv+vec2(u_ca,0.)).r;
-         float g=texture(u_t,uv).g;
-         float b=texture(u_t,uv-vec2(u_ca,0.)).b;
-         vec4 c=vec4(r,g,b,1.);
-         // brightness + contrast boost
+         vec4 c=texture(u_t,uv);
+         float cs=u_colorShift;
+         if(abs(cs)>0.001){
+           float s=sin(cs*3.14159),co2=cos(cs*3.14159);
+           mat3 hue=mat3(.299+.701*co2+.168*s, .587-.587*co2+.330*s, .114-.114*co2-.497*s,
+                         .299-.299*co2-.328*s, .587+.413*co2+.035*s, .114-.114*co2+.292*s,
+                         .299-.300*co2+1.25*s,  .587-.588*co2-1.05*s, .114+.886*co2-.203*s);
+           c.rgb=hue*c.rgb;
+         }
          c.rgb=((c.rgb-0.5)*(1.0+u_br*0.5)+0.5)+u_br*0.15;
          c.rgb=clamp(c.rgb,0.,1.);
-         // vignette
          vec2 vc=(v_uv-0.5)*2.;
          float vg=clamp(pow(1.-dot(vc*.65,vc*.65),1.5),0.,1.);
          c.rgb*=mix(1.-u_vig,1.,vg);
-         // film grain
-         c.rgb+=rnd(uv*3.+u_time)*(u_grain*0.05)-u_grain*0.025;
+         float g1=rnd(uv*3.+u_time);
+         float g2=rnd(uv*7.+u_time*1.3+0.5);
+         float grain=(g1*0.6+g2*0.4)*u_grain*0.05-u_grain*0.025;
+         c.rgb+=grain;
          o=c;
        }`);
     this._buf=gl.createBuffer();
+    this._pLeak=mkProg(
+      `#version 300 es
+       in vec2 a_p;uniform mat3 u_m;out vec2 v_uv;
+       void main(){v_uv=a_p/vec2(${W}.0,${H}.0);gl_Position=vec4((u_m*vec3(a_p,1.)).xy,0.,1.);}`,
+      `#version 300 es
+       precision highp float;in vec2 v_uv;uniform vec4 u_col;uniform float u_dir;out vec4 o;
+       void main(){
+         float edge=u_dir>0.5?v_uv.x:1.-v_uv.x;
+         float a=pow(max(0.,1.-edge*3.),2.5)*u_col.a;
+         a*=smoothstep(0.,0.3,v_uv.y)*smoothstep(1.,0.7,v_uv.y);
+         o=vec4(u_col.rgb,a);
+       }`);
+    this._leakBuf=gl.createBuffer();
   }
   async init(src){const r=await loadTex(src);this.tex=r&&r.tex;}
-  update(dt){
-    const cfg=CFG, b=BANDS;
-    // shake on beat (bass driven)
-    if(b.beat){
-      const sp=(cfg.bg_beat_shake_px||7)*b.bassSmooth;
-      this.shX=(Math.random()-.5)*sp*2.2;
-      this.shY=(Math.random()-.5)*sp*1.5;
-    } else {this.shX*=0.50;this.shY*=0.50;}
-    // brightness: bass controls main pulse, always some ambient
-    const tBr=b.bassSmooth*(cfg.bg_brightness_boost||0.30)*1.5+b.rmsSmooth*0.04;
-    this.bright+=(tBr-this.bright)*0.14;
-    // vignette: opens on beat
-    const tVig=(cfg.vignette_strength||0.42)-b.bassSmooth*0.18;
-    this.vig+=(tVig-this.vig)*0.08;
+  update(dt,bands,scene,idle){
+    const bg=CFG.background;
+    const zoomTarget=1.0+bands.bassSmooth*bg.zoom_bass_amount*scene.zoomMult
+                     +idle.bgZoom.sample(T);
+    this.zoomLevel+=(zoomTarget-this.zoomLevel)*0.10;
+    if(bands.beat){
+      // Punch de zoom + shake mais forte na batida (fundo "respira" o beat)
+      this.zoomLevel+=(bg.beat_punch||0)*(0.4+bands.bassSmooth);
+      const sp=(CFG.camera.shake_amount||3)*(0.6+bands.bassSmooth);
+      this.shX=(Math.random()-.5)*sp*2.4;this.shY=(Math.random()-.5)*sp*1.7;
+    }else{this.shX*=0.45;this.shY*=0.45;}
+    const tBr=bands.bassSmooth*bg.brightness_bass*scene.intensity*1.3
+             +bands.midSmooth*bg.brightness_mid*scene.intensity
+             +bands.rmsSmooth*0.03;
+    this.bright+=(tBr-this.bright)*0.12;
+    const tVig=(CFG.postfx.vignette.strength||0.42)-bands.bassSmooth*0.18*scene.intensity;
+    this.vig+=(tVig-this.vig)*0.07;
+    const tCS=bands.midSmooth*bg.color_shift_amount*0.3*scene.intensity;
+    this.colorShift+=(tCS-this.colorShift)*0.05;
+    this.lightLeakPhase+=dt*0.15;
   }
   draw(){
     if(!this.tex)return;
-    const cfg=CFG;
-    // Ken Burns: continuous slow zoom (0→8% over full duration)
-    const zoom=1.0+Math.min(T/300,1)*0.08+0.02;
+    const bg=CFG.background;
+    const zoom=this.zoomLevel+Math.min(T/300,1)*0.08;
     const margin=(zoom-1)/2+0.02;
-    // Horizontal drift (mid band) + camera shake
     const drift=Math.sin(T*0.07)*0.008+this.shX/W*0.5;
     const vdrift=Math.sin(T*0.05)*0.004+this.shY/H*0.5;
-    // Parallax offset from mid frequencies
-    const px=BANDS.midSmooth*0.012*Math.sin(T*0.11);
-    const py=BANDS.midSmooth*0.008*Math.cos(T*0.09);
+    const px=BANDS.midSmooth*bg.parallax_amount*Math.sin(T*0.11);
+    const py=BANDS.midSmooth*bg.parallax_amount*0.67*Math.cos(T*0.09);
     const verts=new Float32Array([
-      0,0, margin+drift+px,    margin+vdrift+py,
-      W,0, 1-margin+drift+px,  margin+vdrift+py,
-      0,H, margin+drift+px,    1-margin+vdrift+py,
-      W,H, 1-margin+drift+px,  1-margin+vdrift+py,
+      0,0, margin+drift+px,margin+vdrift+py,
+      W,0, 1-margin+drift+px,margin+vdrift+py,
+      0,H, margin+drift+px,1-margin+vdrift+py,
+      W,H, 1-margin+drift+px,1-margin+vdrift+py,
     ]);
     gl.useProgram(this._p);
-    up(this._buf,verts);
-    att(this._p,'a_p',2,16,0);att(this._p,'a_uv',2,16,8);
+    up(this._buf,verts);att(this._p,'a_p',2,16,0);att(this._p,'a_uv',2,16,8);
     uM(this._p,'u_m',PROJ);u1i(this._p,'u_t',0);
     gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.tex);
     u1f(this._p,'u_br',this.bright);
     u1f(this._p,'u_vig',Math.max(0,this.vig));
-    u1f(this._p,'u_ca',(cfg.chromatic_aberration||0.0008)*(1+this.bright*2.5));
-    u1f(this._p,'u_grain',cfg.film_grain||0.5);
+    const grainI=CFG.postfx.grain.intensity+(BANDS.highSmooth*bg.grain_high_boost*sceneDir.intensity);
+    u1f(this._p,'u_grain',grainI);
     u1f(this._p,'u_time',T*10);
+    u1f(this._p,'u_colorShift',this.colorShift);
     bNorm();gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+    if(bg.light_leak.enabled&&bg.light_leak.opacity>0.01){
+      const ll=bg.light_leak;
+      const phase=this.lightLeakPhase;
+      const vis=Math.max(0,Math.sin(phase)*0.5+0.3)*ll.opacity*sceneDir.intensity;
+      if(vis>0.005){
+        const dc=DOM_COLOR;
+        gl.useProgram(this._pLeak);
+        up(this._leakBuf,new Float32Array([0,0,W,0,0,H,W,H]));
+        att(this._pLeak,'a_p',2,8,0);
+        uM(this._pLeak,'u_m',PROJ);
+        u4f(this._pLeak,'u_col',dc[0]*0.8+0.2,dc[1]*0.8+0.2,dc[2]*0.8+0.2,vis);
+        u1f(this._pLeak,'u_dir',Math.sin(phase*0.37)>0?1:0);
+        bAdd();gl.drawArrays(gl.TRIANGLE_STRIP,0,4);bNorm();
+      }
+    }
   }
 }
 </script>
 
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 7: HaloModule + WaveRings + AudioSpectrum
+     ═══════════════════════════════════════════════════════════════════ -->
 <script>
-// ═══════════════════════════════════════════════════════════════════
-//  HaloModule — diffuse light BEHIND the circle
-//  bass → size  |  mid → intensity  |  continuously breathing
-// ═══════════════════════════════════════════════════════════════════
 class HaloModule {
   constructor(){
-    this.r=0; this.glow=0;
+    this.r=0;this.glow=0;
+    this.layerOscs=[];
     const {buf,n}=fanBuf(128);this._fb=buf;this._fn=n;
     this._p=mkProg(
       `#version 300 es
-       in vec2 a_p;uniform vec2 u_cen;uniform float u_r;uniform mat3 u_m;
-       out vec2 v_l;
+       in vec2 a_p;uniform vec2 u_cen;uniform float u_r;uniform mat3 u_m;out vec2 v_l;
        void main(){v_l=a_p;gl_Position=vec4((u_m*vec3(u_cen+a_p*u_r,1.)).xy,0.,1.);}`,
       `#version 300 es
-       precision highp float;
-       in vec2 v_l;uniform vec4 u_col;out vec4 o;
-       void main(){
-         float d=length(v_l);if(d>1.)discard;
-         float g=pow(1.-d,2.5);
-         o=vec4(u_col.rgb,g*u_col.a);
-       }`);
+       precision highp float;in vec2 v_l;uniform vec4 u_col;out vec4 o;
+       void main(){float d=length(v_l);if(d>1.)discard;float g=pow(1.-d,2.5);o=vec4(u_col.rgb,g*u_col.a);}`);
   }
-  update(dt){
-    const b=BANDS;
-    // Bass drives radius, mid drives intensity — they're independent
-    const baseR=(CFG.circle_radius||200);
-    const tR=baseR*(2.8+b.bassSmooth*1.8);
-    this.r+=(tR-this.r)*0.08;
-    const tG=0.12+b.midSmooth*0.35+b.bassSmooth*0.25
-             +0.06*Math.sin(T*1.2)*Math.cos(T*0.7); // organic breathing
-    this.glow+=(tG-this.glow)*0.10;
+  init(cfg){
+    const periods=cfg.breathe_periods||[3.1,4.7,7.3,11.1];
+    this.layerOscs=periods.map((p,i)=>({
+      radius:new AnimCurve({period:p,amplitude:cfg.radius_variation||0.15,phase:i*2.1}),
+      intens:new AnimCurve({period:p*1.3,amplitude:0.12,phase:i*3.7}),
+      hue:new AnimCurve({period:p*2.1,amplitude:cfg.color_shift||0.05,phase:i*1.3}),
+    }));
+  }
+  update(dt,bands,scene,idle){
+    const h=CFG.halo;
+    const baseR=(CFG.circle.radius||200);
+    const tR=baseR*(h.base_radius_mult+bands.bassSmooth*h.bass_expansion*scene.glowMult);
+    this.r+=(tR-this.r)*0.07;
+    const g=CFG.glow;
+    const tG=(h.base_glow||0.10)
+            +bands.midSmooth*g.mid_response*scene.glowMult
+            +bands.bassSmooth*g.bass_response*scene.glowMult
+            +bands.rmsSmooth*(h.rms_response||0)
+            +idle.haloBreath.sample(T)*0.10;
+    this.glow+=(tG-this.glow)*0.09;
   }
   draw(cx,cy){
-    if(this.glow<0.01)return;
+    if(this.glow<0.008)return;
     gl.useProgram(this._p);
-    gl.bindBuffer(gl.ARRAY_BUFFER,this._fb);
-    att(this._p,'a_p',2,8,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this._fb);att(this._p,'a_p',2,8,0);
     uM(this._p,'u_m',PROJ);u2f(this._p,'u_cen',cx,cy);
     const dc=DOM_COLOR;
+    const nLayers=this.layerOscs.length||4;
     bAdd();
-    for(let l=0;l<4;l++){
-      const lr=this.r*(1+l*0.3);
-      const la=this.glow*(0.22-l*0.05);
+    for(let l=0;l<nLayers;l++){
+      const osc=this.layerOscs[l];
+      const rMod=osc?1+osc.radius.sample(T):1;
+      const iMod=osc?1+osc.intens.sample(T):1;
+      const lr=this.r*(1+l*0.3)*rMod;
+      const la=this.glow*(0.34-l*0.055)*iMod;
       gl.uniform1f(gl.getUniformLocation(this._p,'u_r'),lr);
-      u4f(this._p,'u_col',dc[0],dc[1],dc[2],la);
+      const hShift=osc?osc.hue.sample(T):0;
+      u4f(this._p,'u_col',
+        Math.min(1,dc[0]+hShift),Math.min(1,dc[1]-hShift*0.5),Math.min(1,dc[2]+hShift*0.3),la);
       gl.drawArrays(gl.TRIANGLE_FAN,0,this._fn);
     }
     bNorm();
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  WaveRings — mid/vocal frequencies, organic expansion
-// ═══════════════════════════════════════════════════════════════════
 class WaveRings {
   constructor(){
-    this.waves=[];
-    const {buf,n}=ringBuf(512);this._rb=buf;this._rn=n;
+    this.waves=[];this._pulseT=0;
+    // Geometria de anel (banda): a_v = (cos, sin, edge∈[-1,1])
+    const segs=120,v=[];
+    for(let i=0;i<=segs;i++){
+      const a=i/segs*Math.PI*2,c=Math.cos(a),s=Math.sin(a);
+      v.push(c,s,-1, c,s,1);
+    }
+    this._ab=gl.createBuffer();up(this._ab,new Float32Array(v),35044);
+    this._an=v.length/3;
     this._p=mkProg(
       `#version 300 es
-       in vec2 a_p;uniform vec2 u_cen;uniform float u_r;uniform mat3 u_m;
-       void main(){gl_Position=vec4((u_m*vec3(u_cen+a_p*u_r,1.)).xy,0.,1.);}`,
+       in vec3 a_v;uniform vec2 u_cen;uniform float u_ri,u_ro;uniform mat3 u_m;out float v_e;
+       void main(){
+         v_e=a_v.z;
+         float rad=mix(u_ri,u_ro,a_v.z*0.5+0.5);
+         vec2 p=u_cen+a_v.xy*rad;
+         gl_Position=vec4((u_m*vec3(p,1.)).xy,0.,1.);
+       }`,
       `#version 300 es
-       precision highp float;uniform vec4 u_col;out vec4 o;void main(){o=u_col;}`);
+       precision highp float;in float v_e;uniform vec4 u_col;out vec4 o;
+       void main(){float a=pow(1.-abs(v_e),2.0)*u_col.a;o=vec4(u_col.rgb,a);}`);
   }
-  onBeat(){
-    // mid-band controls intensity of waves
-    this.waves.push({str:Math.min(1,BANDS.midSmooth*1.4+BANDS.bassSmooth*0.6+0.25),age:0});
+  onBeat(beatInfo,scene){
+    const str=Math.min(1.0, BANDS.bassSmooth*1.2 + beatInfo.intensity*0.8 + 0.4);
+    this.waves.push({str,age:0,speed:0.55+beatInfo.duration*0.3});
+    if(this.waves.length>14) this.waves.shift();
   }
-  update(dt){this.waves=this.waves.filter(w=>{w.age+=dt*0.75;return w.age<1;});}
+  update(dt,bands){
+    this.waves=this.waves.filter(w=>{w.age+=dt*w.speed;return w.age<1;});
+    // Pulso automático: mantém ondas vivas mesmo com poucas batidas
+    const interval=CFG.waves.auto_pulse||0;
+    if(interval>0){
+      this._pulseT+=dt;
+      if(this._pulseT>=interval){
+        this._pulseT=0;
+        const e=bands?bands.rmsSmooth:0;
+        if(e>0.04) this.waves.push({str:Math.min(1,0.45+e*0.8),age:0,speed:0.6});
+      }
+    }
+  }
   draw(cx,cy,baseR){
-    if(!CFG.waves_enabled||!this.waves.length)return;
+    if(!CFG.waves.enabled||!this.waves.length)return;
     gl.useProgram(this._p);
-    gl.bindBuffer(gl.ARRAY_BUFFER,this._rb);att(this._p,'a_p',2,8,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this._ab);att(this._p,'a_v',3,12,0);
     uM(this._p,'u_m',PROJ);u2f(this._p,'u_cen',cx,cy);
     const dc=DOM_COLOR;
-    const wc=CFG.wave_color==='auto'?dc:hexRGB(CFG.wave_color||'#fff');
-    const mo=CFG.wave_opacity_max||0.8;
+    const wc=CFG.waves.color==='auto'?dc:hexRGB(CFG.waves.color||'#fff');
+    const mo=CFG.waves.opacity_max||0.9;
+    const exp=CFG.waves.expansion||3.2;
+    const th=CFG.waves.thickness||0.11;
     bAdd();
     for(const w of this.waves){
-      const r=baseR*(1+w.age*3.0);
-      const a=(1-w.age)*mo*w.str;
-      for(let t=0;t<3;t++){
-        gl.uniform1f(gl.getUniformLocation(this._p,'u_r'),r+t*2.5);
-        u4f(this._p,'u_col',wc[0],wc[1],wc[2],a*(1-t*0.35));
-        gl.drawArrays(gl.LINE_STRIP,0,this._rn);
-      }
+      const rMid=baseR*(1+w.age*exp);
+      const band=baseR*th*(0.7+w.age*1.6);   // engrossa ao expandir
+      const a=(1-w.age)*(1-w.age)*mo*w.str;   // fade quadrático (suave)
+      u1f(this._p,'u_ri',Math.max(1,rMid-band));
+      u1f(this._p,'u_ro',rMid+band);
+      u4f(this._p,'u_col',wc[0],wc[1],wc[2],Math.max(0,a));
+      gl.drawArrays(gl.TRIANGLE_STRIP,0,this._an);
     }
     bNorm();
   }
 }
-</script>
 
-<script>
-// ═══════════════════════════════════════════════════════════════════
-//  AudioSpectrum — 512 bars, variable thickness, glowing tips
-//  high freq → more color  |  interpolated per frame
-// ═══════════════════════════════════════════════════════════════════
 class AudioSpectrum {
   constructor(){
     this._prev=null;
@@ -372,46 +840,57 @@ class AudioSpectrum {
        in vec2 a_p;in float a_br;uniform mat3 u_m;out float v_br;
        void main(){gl_Position=vec4((u_m*vec3(a_p,1.)).xy,0.,1.);v_br=a_br;}`,
       `#version 300 es
-       precision highp float;
-       in float v_br;uniform vec4 u_col,u_tip;out vec4 o;
+       precision highp float;in float v_br;uniform vec4 u_col,u_tip;out vec4 o;
        void main(){
          vec4 c=mix(u_col,u_tip,smoothstep(0.5,1.0,v_br));
-         c.a*=v_br*0.85+0.15;
-         o=c;
+         c.a*=v_br*0.85+0.15;o=c;
        }`);
     this._vb=gl.createBuffer();this._bb=gl.createBuffer();
   }
-  draw(cx,cy,circleR,spectrum){
-    if(!spectrum||!spectrum.length)return;
-    const cfg=CFG;
-    const N=spectrum.length;
-    if(!this._prev||this._prev.length!==N)this._prev=new Float32Array(N);
-    const alpha=0.28;
-    const vals=new Float32Array(N);
-    for(let i=0;i<N;i++){
-      this._prev[i]+=(( spectrum[i]||0)-this._prev[i])*alpha;
-      vals[i]=this._prev[i];
+  draw(cx,cy,circleR,spectrum,scene,idle){
+    const sp=CFG.spectrum;
+    if(!sp.enabled)return;
+    const N=spectrum?spectrum.length:0;
+    let vals;
+    if(N>0){
+      if(!this._prev||this._prev.length!==N)this._prev=new Float32Array(N);
+      // Ataque rápido (sobe na hora) + queda lenta (bounce) = mais vivo
+      const atk=sp.attack||0.6, rel=sp.release||0.10;
+      vals=new Float32Array(N);
+      for(let i=0;i<N;i++){
+        const t=spectrum[i]||0;
+        this._prev[i]+=(t-this._prev[i])*(t>this._prev[i]?atk:rel);
+        vals[i]=this._prev[i];
+      }
+    } else {
+      const fakeN=sp.bars||512;
+      if(!this._prev||this._prev.length!==fakeN)this._prev=new Float32Array(fakeN);
+      vals=this._prev;
+      for(let i=0;i<fakeN;i++){
+        const target=Math.max(0,(idle.specIdle.sample(T+i*0.02))*0.02);
+        vals[i]+=(target-vals[i])*0.1;
+      }
     }
-    const rOff=CFG.spectrum_radius_offset||22;
+    const barCount=vals.length;if(!barCount)return;
+    const rOff=sp.radius_offset;
     const innerR=circleR+rOff;
-    // Beat boost — bars jump higher on strong hits
-    const boost=1.0+BANDS.bassSmooth*(CFG.spectrum_beat_boost||0.55)
+    const boost=1.0+BANDS.bassSmooth*(sp.beat_boost)*scene.intensity
                    +BANDS.rmsSmooth*0.18;
-    const maxH=(CFG.spectrum_max_height||220)*boost;
-    // Angular slot per bar — must cover the FULL circle (2π/N)
-    const slot=(Math.PI*2)/N;
-    const fill=CFG.spectrum_fill||0.82; // 82% of slot = thin gap between bars
-    const verts=new Float32Array(N*12);
-    const brights=new Float32Array(N*6);
+    const maxH=(sp.max_height)*boost;
+    const slot=(Math.PI*2)/barCount;
+    const fill=sp.fill;
+    const verts=new Float32Array(barCount*12);
+    const brights=new Float32Array(barCount*6);
     let vi=0,bi=0;
-    for(let i=0;i<N;i++){
-      const ang=(i/N*Math.PI*2)-Math.PI/2;
+    const rot=T*(sp.rotation_speed||0);
+    for(let i=0;i<barCount;i++){
+      const ang=(i/barCount*Math.PI*2)-Math.PI/2+rot;
       const v=Math.pow(Math.max(vals[i],0),0.52);
-      const bh=Math.max(2.0, v*maxH); // minimum visible height
-      // Bass bars slightly wider than treble, but always filling the slot
-      const barW=slot*fill*(1.0+0.25*(1-i/N));
+      const idleFloor=(sp.idle_height||2)+Math.abs(Math.sin(T*1.6+i*0.22))*(sp.idle_wave||0);
+      const bh=Math.max(idleFloor, v*maxH);
+      const barW=slot*fill*(1+0.25*(1-i/barCount));
       const a0=ang-barW/2,a1=ang+barW/2;
-      const ir=innerR, or_=innerR+bh;
+      const ir=innerR,or_=innerR+bh;
       const ix0=cx+Math.cos(a0)*ir,iy0=cy+Math.sin(a0)*ir;
       const ix1=cx+Math.cos(a1)*ir,iy1=cy+Math.sin(a1)*ir;
       const ox0=cx+Math.cos(a0)*or_,oy0=cy+Math.sin(a0)*or_;
@@ -429,155 +908,155 @@ class AudioSpectrum {
     up(this._bb,brights);att(this._p,'a_br',1,4,0);
     uM(this._p,'u_m',PROJ);
     const dc=DOM_COLOR;
-    const sc=cfg.spectrum_color==='auto'?dc:hexRGB(cfg.spectrum_color||'#fff');
-    u4f(this._p,'u_col',sc[0],sc[1],sc[2],cfg.spectrum_opacity||0.85);
-    // Tips: complement/lighten
+    const sc=sp.color==='auto'?dc:hexRGB(sp.color);
+    u4f(this._p,'u_col',sc[0],sc[1],sc[2],sp.opacity);
     u4f(this._p,'u_tip',
-      Math.min(1,dc[0]*0.5+0.6),Math.min(1,dc[1]*0.5+0.6),Math.min(1,dc[2]*0.3+0.85),1.0);
-    bAdd();gl.drawArrays(gl.TRIANGLES,0,N*6);bNorm();
+      Math.min(1,dc[0]*0.5+0.6),Math.min(1,dc[1]*0.5+0.6),Math.min(1,dc[2]*0.3+0.85),1);
+    bAdd();gl.drawArrays(gl.TRIANGLES,0,barCount*6);bNorm();
   }
 }
+</script>
 
-// ═══════════════════════════════════════════════════════════════════
-//  CircleModule — spring anim + glass + inner shadow + aura + reflect
-//  bass → scale  |  mid → glow  |  high → border shimmer
-// ═══════════════════════════════════════════════════════════════════
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 8: CircleModule — varied beat response, glass, floating
+     ═══════════════════════════════════════════════════════════════════ -->
+<script>
 class CircleModule {
-  constructor(){
+  constructor(eb){
     this.scale=1;this.vel=0;this.breatheT=0;this.glowS=0;this.borderShimmer=0;
-    this.logoTex=null;this.titleTex=null;
-    // ── Floating motion state ──
-    this.offX=0; this.offY=0;          // current displacement
-    this.pushX=0; this.pushY=0;        // beat impulse (decays)
-    this.pushVX=0; this.pushVY=0;      // impulse velocity (spring)
-    this.floatT=Math.random()*100;     // desync phase
+    this.glowFlash=0;this.logoTex=null;this.titleTex=null;
+    this.offX=0;this.offY=0;this.pushX=0;this.pushY=0;
+    this.pushVX=0;this.pushVY=0;this.shakeX=0;this.shakeY=0;
+    this.floatT=Math.random()*100;
     const {buf:fb,n:fn}=fanBuf(256);this._fb=fb;this._fn=fn;
     const {buf:rb,n:rn}=ringBuf(512);this._rb=rb;this._rn=rn;
     this._logoBuf=gl.createBuffer();this._titleBuf=gl.createBuffer();
-    // Glow / halo shader
     this._pGlow=mkProg(
       `#version 300 es
-       in vec2 a_p;uniform vec2 u_cen;uniform float u_r;uniform mat3 u_m;
-       out vec2 v_l;
+       in vec2 a_p;uniform vec2 u_cen;uniform float u_r;uniform mat3 u_m;out vec2 v_l;
        void main(){v_l=a_p;gl_Position=vec4((u_m*vec3(u_cen+a_p*u_r,1.)).xy,0.,1.);}`,
       `#version 300 es
        precision highp float;in vec2 v_l;uniform vec4 u_col;out vec4 o;
        void main(){float d=length(v_l);if(d>1.)discard;float g=pow(1.-d,3.)*u_col.a;o=vec4(u_col.rgb,g);}`);
-    // Circle fill + glass shader
     this._pCircle=mkProg(
       `#version 300 es
-       in vec2 a_p;uniform vec2 u_cen;uniform float u_r;uniform mat3 u_m;
-       out vec2 v_l;
+       in vec2 a_p;uniform vec2 u_cen;uniform float u_r;uniform mat3 u_m;out vec2 v_l;
        void main(){v_l=a_p;gl_Position=vec4((u_m*vec3(u_cen+a_p*u_r,1.)).xy,0.,1.);}`,
       `#version 300 es
        precision highp float;in vec2 v_l;
-       uniform vec4 u_fill,u_border;uniform float u_bfrac,u_glass,u_shimmer;
-       out vec4 o;
+       uniform vec4 u_fill,u_border;uniform float u_bfrac,u_glass,u_shimmer;out vec4 o;
        void main(){
          float d=length(v_l);if(d>1.)discard;
-         // Inner shadow (dark at bottom, light at top)
          vec2 ln=normalize(v_l);
-         float inner_sh=dot(ln,vec2(0.,-1.))*0.25*d; // shadow from bottom
-         // Glass rim highlight
+         float inner_sh=dot(ln,vec2(0.,-1.))*0.25*d;
          float rim=pow(d,5.)*u_glass;
-         // Border
          float bd=smoothstep(1.-u_bfrac-.015,1.-u_bfrac+.015,d);
          vec4 base=mix(vec4(u_fill.rgb*(1.+inner_sh*.3),u_fill.a),u_border,bd);
-         // Top highlight (reflection)
          float hi=pow(max(0.,dot(ln,vec2(0.35,-0.93))),8.)*0.4*(1.-bd);
          base.rgb+=hi+rim*0.5+u_shimmer*0.3*bd;
-         base.a=max(base.a,bd);
-         o=base;
+         base.a=max(base.a,bd);o=base;
        }`);
-    // Logo shader
     this._pLogo=mkProg(
       `#version 300 es
        in vec2 a_p,a_uv;uniform mat3 u_m;out vec2 v_uv;
        void main(){gl_Position=vec4((u_m*vec3(a_p,1.)).xy,0.,1.);v_uv=a_uv;}`,
       `#version 300 es
-       precision highp float;in vec2 v_uv;uniform sampler2D u_t;uniform float u_al;
-       out vec4 o;
+       precision highp float;in vec2 v_uv;uniform sampler2D u_t;uniform float u_al;out vec4 o;
        void main(){
          vec4 c=texture(u_t,v_uv);
          vec2 uv=v_uv-.5;float d=length(uv)*2.;
          c.a*=smoothstep(1.,.82,d)*u_al;o=c;
        }`);
+
+    eb.on('beat',d=>{
+      const ci=CFG.circle;
+      const R=ci.radius||200;
+      const pushAmp=(ci.push_amount||0.25)*R;
+      // Kick seco e imediato na escala do círculo
+      const beatKick = (ci.max_scale - 1.0) * 0.65 * d.intensity;
+      this.scale = Math.min(ci.max_scale * 1.35, this.scale + beatKick);
+      this.vel += d.intensity * 5.5;
+      
+      // EMPURRÃO LATERAL NA BOLA A CADA BEAT
+      const ang = Math.random() * Math.PI * 2;
+      const mag = pushAmp * d.intensity * 1.8;
+      this.pushVX += Math.cos(ang) * mag * 18;
+      this.pushVY += Math.sin(ang) * mag * 18;
+      
+      switch(d.type){
+        case 'flash':
+          this.glowFlash=Math.max(this.glowFlash,d.intensity*3.5);
+          break;
+        case 'shimmer':
+          this.borderShimmer=Math.max(this.borderShimmer,d.intensity*2.5);
+          break;
+        case 'sparkle':
+          this.glowFlash=Math.max(this.glowFlash,d.intensity*2.0);
+          this.borderShimmer=Math.max(this.borderShimmer,d.intensity*2.0);
+          break;
+      }
+    });
   }
   async init(logoSrc,logoText,title,titleColor,titleFontSize){
     if(logoSrc){const r=await loadTex(logoSrc);if(r)this.logoTex=r;}
     if(!this.logoTex){
-      const t=initialsTex(logoText||'♫',CFG.logo_font_size||80,CFG.logo_font_color||'#fff');
+      const t=initialsTex(logoText||'♫',CFG.circle.logo_font_size||CFG.logo_font_size||80,
+                          CFG.circle.logo_font_color||CFG.logo_font_color||'#fff');
       this.logoTex={tex:t.tex,w:t.w,h:t.h};
     }
-    if(title&&CFG.show_title){
+    if(title&&CFG.hud.title.show){
       this.titleTex=textTex(title,titleFontSize||32,titleColor||'#fff','rgba(0,0,0,0.8)');
     }
   }
-  update(dt){
-    this.breatheT+=dt*1.6;
+  update(dt,bands,scene,idle){
+    const ci=CFG.circle;
+    this.breatheT+=dt*ci.breathe_speed;
     this.floatT+=dt;
-    // Bass drives circle scale (spring)
-    const breathe=1+Math.sin(this.breatheT)*0.013;
-    const target=breathe*(1+BANDS.bassSmooth*(CFG.circle_max_scale-1));
-    const K=300,D=20;
+    const breathe=1+idle.circBreath.sample(T)*ci.breathe_amount/0.013;
+    const target=breathe*(1+bands.bassSmooth*(ci.max_scale-1));
+    const K=ci.spring.k,D=ci.spring.d;
     this.vel+=(target-this.scale)*K*dt-this.vel*D*dt;
     this.scale+=this.vel*dt;
-    this.scale=Math.max(0.5,Math.min(this.scale,CFG.circle_max_scale*1.1));
-    // Mid drives glow
-    const tG=(CFG.circle_glow_intensity||1.2)*(0.3+BANDS.midSmooth*0.7);
-    this.glowS+=(tG-this.glowS)*0.12;
-    // High drives border shimmer
-    this.borderShimmer+=(BANDS.highSmooth-this.borderShimmer)*0.20;
+    this.scale=Math.max(0.7,Math.min(this.scale,ci.max_scale*1.35));
 
-    // ── FLOATING MOTION ──────────────────────────────────────
-    const R=(CFG.circle_radius||200);
-    const floatAmp=(CFG.circle_float_amount||0.07)*R;   // continuous drift
-    const pushAmp =(CFG.circle_push_amount ||0.15)*R;   // beat kick
+    const g=CFG.glow;
+    const tG=(g.intensity)*(0.3+bands.midSmooth*0.7)*scene.glowMult+this.glowFlash;
+    this.glowS+=(tG-this.glowS)*0.15;
+    this.glowFlash*=0.82;
+    this.borderShimmer*=0.85;
+    
+    // TREMOR / SHAKE DO CÍRCULO CENTRAL COM O GRAVE DA MÚSICA
+    const shakeSp = (CFG.camera.shake_amount||5.0) * bands.bassSmooth * 4.5;
+    this.shakeX = (Math.random() - 0.5) * shakeSp;
+    this.shakeY = (Math.random() - 0.5) * shakeSp;
 
-    // Organic continuous float — 3 sines with different periods (Lissajous)
-    const fx=Math.sin(this.floatT*0.53)*0.6+Math.sin(this.floatT*0.21)*0.4;
-    const fy=Math.cos(this.floatT*0.41)*0.6+Math.cos(this.floatT*0.17)*0.4;
-    const baseX=fx*floatAmp;
-    const baseY=fy*floatAmp*0.75;
-
-    // Beat impulse — random direction, weighted by bass energy
-    if(BANDS.beat && BANDS.bassSmooth>0.15){
-      const ang=Math.random()*Math.PI*2;
-      const mag=pushAmp*Math.min(1,BANDS.bassSmooth*1.3);
-      this.pushVX+=Math.cos(ang)*mag*11;
-      this.pushVY+=Math.sin(ang)*mag*11;
-    }
-    // Spring back to center for the impulse component
-    const PK=95,PD=9.5;
+    const R=ci.radius||200;
+    const floatAmp=ci.float_amount*R;
+    const fx=idle.circFloat.sample(this.floatT);
+    const fy=idle.circFloat.sampleB(this.floatT);
+    const baseX=fx*floatAmp;const baseY=fy*floatAmp*0.75;
+    
+    const PK=90,PD=8.5;
     this.pushVX+=(-this.pushX)*PK*dt-this.pushVX*PD*dt;
     this.pushVY+=(-this.pushY)*PK*dt-this.pushVY*PD*dt;
-    this.pushX+=this.pushVX*dt;
-    this.pushY+=this.pushVY*dt;
-    // Clamp impulse so it never flies off
-    const maxOff=pushAmp*1.5;
+    this.pushX+=this.pushVX*dt;this.pushY+=this.pushVY*dt;
+    const maxOff=ci.push_amount*R*2.5;
     const pm=Math.hypot(this.pushX,this.pushY);
     if(pm>maxOff){this.pushX*=maxOff/pm;this.pushY*=maxOff/pm;}
-
-    // Final smoothed position
-    this.offX+=((baseX+this.pushX)-this.offX)*0.14;
-    this.offY+=((baseY+this.pushY)-this.offY)*0.14;
+    this.offX+=((baseX+this.pushX)-this.offX)*0.16;
+    this.offY+=((baseY+this.pushY)-this.offY)*0.16;
   }
-  // Real center used by every module that orbits the circle
-  center(cx,cy){return[cx+this.offX, cy+this.offY];}
+  center(cx,cy){return[cx+this.offX+this.shakeX, cy+this.offY+this.shakeY];}
   draw(cx,cy){
-    const r=(CFG.circle_radius||200)*this.scale;
+    const ci=CFG.circle;
+    const r=(ci.radius||200)*this.scale;
     const dc=DOM_COLOR;
-    const gc=CFG.circle_glow_color==='auto'?dc:hexRGB(CFG.circle_glow_color||'#fff');
-
-    // ── DROP SHADOW (detaches the circle from the background) ──
-    // Offset opposite to the float direction → parallax illusion of depth
-    if(CFG.circle_shadow!==false){
-      const shOffX = -this.offX*0.35 + r*0.05;
-      const shOffY = -this.offY*0.35 + r*0.11;
+    const gc=CFG.glow.color==='auto'?dc:hexRGB(CFG.glow.color);
+    if(ci.shadow!==false){
+      const shOffX=-this.offX*0.35+r*0.05,shOffY=-this.offY*0.35+r*0.11;
       gl.useProgram(this._pGlow);
       gl.bindBuffer(gl.ARRAY_BUFFER,this._fb);att(this._pGlow,'a_p',2,8,0);
-      uM(this._pGlow,'u_m',PROJ);
-      bNorm();
+      uM(this._pGlow,'u_m',PROJ);bNorm();
       for(let l=0;l<4;l++){
         u2f(this._pGlow,'u_cen',cx+shOffX,cy+shOffY);
         gl.uniform1f(gl.getUniformLocation(this._pGlow,'u_r'),r*(1.02+l*0.09));
@@ -585,8 +1064,6 @@ class CircleModule {
         gl.drawArrays(gl.TRIANGLE_FAN,0,this._fn);
       }
     }
-
-    // ── Close glow (2 layers, additive) ──
     gl.useProgram(this._pGlow);
     gl.bindBuffer(gl.ARRAY_BUFFER,this._fb);att(this._pGlow,'a_p',2,8,0);
     uM(this._pGlow,'u_m',PROJ);u2f(this._pGlow,'u_cen',cx,cy);
@@ -596,53 +1073,46 @@ class CircleModule {
       u4f(this._pGlow,'u_col',gc[0],gc[1],gc[2],this.glowS*(0.25-l*0.07));
       gl.drawArrays(gl.TRIANGLE_FAN,0,this._fn);
     }
-
-    // ── Circle fill (glass) ──
     gl.useProgram(this._pCircle);
     gl.bindBuffer(gl.ARRAY_BUFFER,this._fb);att(this._pCircle,'a_p',2,8,0);
     uM(this._pCircle,'u_m',PROJ);u2f(this._pCircle,'u_cen',cx,cy);
     gl.uniform1f(gl.getUniformLocation(this._pCircle,'u_r'),r);
-    const bg=hexRGBA(CFG.circle_bg_color||'#00000099');
-    const bc=hexRGB(CFG.circle_border_color||'#fff');
+    const bg=hexRGBA(ci.bg_color||'#00000099');
+    const bc=hexRGB(ci.border_color||'#fff');
     u4f(this._pCircle,'u_fill',bg[0],bg[1],bg[2],bg[3]);
     u4f(this._pCircle,'u_border',bc[0],bc[1],bc[2],1);
-    gl.uniform1f(gl.getUniformLocation(this._pCircle,'u_bfrac'),(CFG.circle_border_width||5)/r);
+    gl.uniform1f(gl.getUniformLocation(this._pCircle,'u_bfrac'),(ci.border_width||5)/r);
     gl.uniform1f(gl.getUniformLocation(this._pCircle,'u_glass'),0.8+BANDS.rmsSmooth*0.4);
     gl.uniform1f(gl.getUniformLocation(this._pCircle,'u_shimmer'),this.borderShimmer);
     bNorm();gl.drawArrays(gl.TRIANGLE_FAN,0,this._fn);
-
-    // ── Reflection arc (top ~55%, additive) ──
-    gl.useProgram(this._pGlow); // reuse — simpler
+    gl.useProgram(this._pGlow);
     gl.bindBuffer(gl.ARRAY_BUFFER,this._rb);att(this._pGlow,'a_p',2,8,0);
     uM(this._pGlow,'u_m',PROJ);u2f(this._pGlow,'u_cen',cx,cy);
     gl.uniform1f(gl.getUniformLocation(this._pGlow,'u_r'),r+1.5);
     u4f(this._pGlow,'u_col',1,1,1,0.10+this.glowS*0.12);
     bAdd();gl.drawArrays(gl.LINE_STRIP,0,Math.floor(this._rn*0.55));
-
-    // ── Logo / initials ──
     if(this.logoTex){
       gl.useProgram(this._pLogo);
       const lw=this.logoTex.w,lh=this.logoTex.h;
       const sc=Math.min(r*1.35/lw,r*1.35/lh);
       const dw=lw*sc,dh=lh*sc,dx=cx-dw/2,dy=cy-dh/2;
-      const v=quadVerts(dx,dy,dw,dh);
-      up(this._logoBuf,v);att(this._pLogo,'a_p',2,16,0);att(this._pLogo,'a_uv',2,16,8);
+      up(this._logoBuf,quadVerts(dx,dy,dw,dh));
+      att(this._pLogo,'a_p',2,16,0);att(this._pLogo,'a_uv',2,16,8);
       uM(this._pLogo,'u_m',PROJ);u1i(this._pLogo,'u_t',0);
       gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.logoTex.tex);
       gl.uniform1f(gl.getUniformLocation(this._pLogo,'u_al'),1.0);
       bNorm();gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
     }
-    // ── Title ──
     if(this.titleTex){
       gl.useProgram(this._pLogo);
-      const tt=this.titleTex,m=CFG.title_margin||56;
+      const tt=this.titleTex,m=CFG.hud.title.margin||56;
       const tx=(W-tt.w)/2;
-      const ty=CFG.title_position==='top-center'?m:H-m-tt.h;
-      const v=quadVerts(tx,ty,tt.w,tt.h);
-      up(this._titleBuf,v);att(this._pLogo,'a_p',2,16,0);att(this._pLogo,'a_uv',2,16,8);
+      const ty=CFG.hud.title.position==='top-center'?m:H-m-tt.h;
+      up(this._titleBuf,quadVerts(tx,ty,tt.w,tt.h));
+      att(this._pLogo,'a_p',2,16,0);att(this._pLogo,'a_uv',2,16,8);
       uM(this._pLogo,'u_m',PROJ);u1i(this._pLogo,'u_t',0);
       gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tt.tex);
-      gl.uniform1f(gl.getUniformLocation(this._pLogo,'u_al'),CFG.title_opacity||0.85);
+      gl.uniform1f(gl.getUniformLocation(this._pLogo,'u_al'),CFG.hud.title.opacity||0.85);
       bNorm();gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
     }
     bNorm();
@@ -650,74 +1120,98 @@ class CircleModule {
 }
 </script>
 
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 9: ParticleSystem + LensFlare + HUD
+     ═══════════════════════════════════════════════════════════════════ -->
 <script>
-// ═══════════════════════════════════════════════════════════════════
-//  ParticleSystem — 3 depth layers, born behind circle, frequency-driven
-//  high → speed  |  bass → burst  |  presence → emission rate
-// ═══════════════════════════════════════════════════════════════════
 class ParticleSystem {
-  constructor(){
+  constructor(eb){
     this._p=[];
     this._prog=mkProg(
       `#version 300 es
        in vec2 a_p;in float a_sz,a_al;uniform mat3 u_m;out float v_al;
-       void main(){
-         v_al=a_al;
-         gl_Position=vec4((u_m*vec3(a_p,1.)).xy,0.,1.);
-         gl_PointSize=a_sz;
-       }`,
+       void main(){v_al=a_al;gl_Position=vec4((u_m*vec3(a_p,1.)).xy,0.,1.);gl_PointSize=a_sz;}`,
       `#version 300 es
-       precision highp float;
-       in float v_al;uniform vec4 u_col;out vec4 o;
-       void main(){
-         vec2 uv=gl_PointCoord-.5;float d=length(uv);if(d>.5)discard;
-         float s=1.-smoothstep(.1,.5,d);
-         o=vec4(u_col.rgb,s*v_al);
-       }`);
+       precision highp float;in float v_al;uniform vec4 u_col;out vec4 o;
+       void main(){vec2 uv=gl_PointCoord-.5;float d=length(uv);if(d>.5)discard;
+         float s=1.-smoothstep(.1,.5,d);o=vec4(u_col.rgb,s*v_al);}`);
     this._pb=gl.createBuffer();this._sb=gl.createBuffer();this._ab=gl.createBuffer();
-    this._init();
+    eb.on('beat',d=>{
+      if(d.type==='punch'||d.type==='sparkle')this._burstPending=Math.min(1,d.intensity);
+    });
+    this._burstPending=0;
   }
   _spawn(cx,cy,r,fromCircle){
-    const cfg=CFG,depth=Math.random();
-    const speed=(cfg.particle_speed||1)*(0.5+Math.random()*2.0)*(1.1-depth*.6);
+    const p=CFG.particles;
+    const depth=Math.random();
+    const speed=(p.speed)*(0.5+Math.random()*2.0)*(1.1-depth*.6);
     let x,y,vx,vy;
     if(fromCircle&&Math.random()<0.35){
-      // Born from circle edge, ejected outward
       const ang=Math.random()*Math.PI*2;
       const br=r*(0.85+Math.random()*0.3);
-      x=cx+Math.cos(ang)*br; y=cy+Math.sin(ang)*br;
-      vx=Math.cos(ang)*speed*0.8; vy=Math.sin(ang)*speed*0.8-1.2*speed;
-    } else {
-      x=Math.random()*W; y=H*0.6+Math.random()*H*0.5;
-      vx=(Math.random()-.5)*speed*1.5;
-      vy=-(Math.random()*speed*1.2+0.4);
+      x=cx+Math.cos(ang)*br;y=cy+Math.sin(ang)*br;
+      vx=Math.cos(ang)*speed*0.8;vy=Math.sin(ang)*speed*0.8-1.2*speed;
+    }else{
+      x=Math.random()*W;y=H*0.6+Math.random()*H*0.5;
+      vx=(Math.random()-.5)*speed*1.5;vy=-(Math.random()*speed*1.2+0.4);
     }
+    const sizeVar=0.7+Math.random()*0.6;
+    const lifeVar=0.6+Math.random()*0.8;
     return{x,y,vx,vy,
-      sz:((cfg.particle_size_min||1.5)+Math.random()*(( cfg.particle_size_max||5)-(cfg.particle_size_min||1.5)))*(1.8-depth),
-      life:0.3+Math.random()*0.7,decay:0.003+Math.random()*0.008,depth};
+      sz:((p.size_min)+Math.random()*((p.size_max)-(p.size_min)))*(1.8-depth)*sizeVar,
+      life:(0.3+Math.random()*0.7)*lifeVar,
+      decay:0.003+Math.random()*0.008,depth,
+      swayPhase:Math.random()*Math.PI*2,
+      swayAmp:(0.6+Math.random()*1.4)*(1.5-depth),
+      swayFreq:0.5+Math.random()*1.4,
+      isDust:false};
   }
-  _init(){
-    const n=(CFG.particle_count||100)*4;
+  _spawnDust(){
+    return{x:Math.random()*W,y:Math.random()*H,
+      vx:(Math.random()-.5)*0.15,vy:-Math.random()*0.12-0.03,
+      sz:0.5+Math.random()*1.2,life:0.5+Math.random()*0.5,
+      decay:0.001+Math.random()*0.003,depth:Math.random(),
+      swayPhase:Math.random()*Math.PI*2,swayAmp:0.4+Math.random()*0.8,
+      swayFreq:0.3+Math.random()*0.7,isDust:true};
+  }
+  init(cx,cy){
+    const n=(CFG.particles.count||100)*4;
     for(let i=0;i<n;i++)this._p.push(this._spawn(W/2,H/2,200,false));
-    // randomize initial life
     this._p.forEach(p=>{p.life=Math.random();});
+    if(CFG.particles.dust_motes){
+      for(let i=0;i<30;i++)this._p.push(this._spawnDust());
+    }
   }
-  update(dt,cx,cy,r){
-    if(!CFG.particles_enabled)return;
+  update(dt,cx,cy,r,scene,idle){
+    if(!CFG.particles.enabled)return;
     const b=BANDS;
-    // High freq drives particle speed, bass drives burst on beat
-    const boost=b.beat?1+b.bassSmooth*4.5:1+b.highSmooth*1.2;
+    const speedMult=1+b.highSmooth*1.2*scene.particleRate;
+    const burstMult=this._burstPending>0?1+this._burstPending*4:1;
+    this._burstPending*=0.7;
+    const swayGlobal=(CFG.particles.sway_amount||0)*(0.6+b.midSmooth*1.4);
+    const swaySpeed=CFG.particles.sway_speed||1.0;
     for(let i=0;i<this._p.length;i++){
       const p=this._p[i];
-      p.x+=p.vx*boost; p.y+=p.vy*boost;
-      p.vy-=0.014;   // subtle buoyancy
-      p.life-=p.decay*(1+b.presSmooth*0.5);
-      if(p.life<=0||p.y<-40||p.x<-40||p.x>W+40)
-        this._p[i]=this._spawn(cx,cy,r,true);
+      // Balanço lateral (senoidal) — dá vida horizontal em vez de só subir
+      const sway=Math.sin(T*p.swayFreq*swaySpeed+p.swayPhase)*p.swayAmp*swayGlobal;
+      if(p.isDust){
+        p.x+=p.vx+sway*0.4;p.y+=p.vy;
+        p.vy-=0.002;
+        p.life-=p.decay;
+        if(p.life<=0||p.y<-20||p.x<-20||p.x>W+20)
+          this._p[i]=this._spawnDust();
+      }else{
+        const boost=speedMult*burstMult;
+        p.x+=p.vx*boost+sway;p.y+=p.vy*boost;
+        p.vy-=0.014;
+        p.life-=p.decay*(1+b.presSmooth*0.5);
+        if(p.life<=0||p.y<-40||p.x<-40||p.x>W+40)
+          this._p[i]=this._spawn(cx,cy,r,true);
+      }
     }
   }
   _layer(depthLo,depthHi,additive){
-    if(!CFG.particles_enabled)return;
+    if(!CFG.particles.enabled)return;
     const pts=this._p.filter(p=>p.depth>=depthLo&&p.depth<depthHi);
     if(!pts.length)return;
     const pa=new Float32Array(pts.length*2);
@@ -725,9 +1219,9 @@ class ParticleSystem {
     const aa=new Float32Array(pts.length);
     for(let i=0;i<pts.length;i++){
       const p=pts[i];
-      pa[i*2]=p.x;pa[i*2+1]=p.y;
-      sa[i]=p.sz;
-      aa[i]=Math.min(p.life,(CFG.particle_opacity_max||0.65))*(0.25+(1-p.depth)*0.75);
+      pa[i*2]=p.x;pa[i*2+1]=p.y;sa[i]=p.sz;
+      const alphaBase=p.isDust?0.15:Math.min(p.life,(CFG.particles.opacity_max))*(0.25+(1-p.depth)*0.75);
+      aa[i]=alphaBase;
     }
     gl.useProgram(this._prog);
     up(this._pb,pa);att(this._prog,'a_p',2,8,0);
@@ -735,56 +1229,73 @@ class ParticleSystem {
     up(this._ab,aa);att(this._prog,'a_al',1,4,0);
     uM(this._prog,'u_m',PROJ);
     const dc=DOM_COLOR;
-    const pc=CFG.particle_color==='auto'?dc:hexRGB(CFG.particle_color||'#fff');
+    const pc=CFG.particles.color==='auto'?dc:hexRGB(CFG.particles.color);
     u4f(this._prog,'u_col',pc[0],pc[1],pc[2],1);
     if(additive)bAdd();else bNorm();
-    gl.drawArrays(gl.POINTS,0,pts.length);
-    bNorm();
+    gl.drawArrays(gl.POINTS,0,pts.length);bNorm();
   }
   drawBack(){this._layer(0.67,1.0,false);}
   drawMid(){this._layer(0.33,0.67,false);}
   drawFront(){this._layer(0.0,0.33,true);}
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  LensFlare — bass beat driven, subtle starburst
-// ═══════════════════════════════════════════════════════════════════
 class LensFlare {
-  constructor(){
+  constructor(eb){
     this.inten=0;
+    const {buf,n}=fanBuf(64);this._fb=buf;this._fn=n;
+    // Núcleo com falloff radial (glow)
+    this._pGlow=mkProg(
+      `#version 300 es
+       in vec2 a_p;uniform vec2 u_cen;uniform float u_r;uniform mat3 u_m;out vec2 v_l;
+       void main(){v_l=a_p;gl_Position=vec4((u_m*vec3(u_cen+a_p*u_r,1.)).xy,0.,1.);}`,
+      `#version 300 es
+       precision highp float;in vec2 v_l;uniform vec4 u_col;out vec4 o;
+       void main(){float d=length(v_l);if(d>1.)discard;float g=pow(1.-d,2.2)*u_col.a;o=vec4(u_col.rgb,g);}`);
+    // Raios (linhas)
     this._p=mkProg(
       `#version 300 es
        in vec2 a_p;uniform mat3 u_m;void main(){gl_Position=vec4((u_m*vec3(a_p,1.)).xy,0.,1.);}`,
       `#version 300 es
        precision highp float;uniform vec4 u_col;out vec4 o;void main(){o=u_col;}`);
     this._buf=gl.createBuffer();
+    // Dispara em qualquer batida (não só flash/sparkle)
+    eb.on('beat',d=>{ this.inten=Math.max(this.inten,Math.min(1,0.4+d.intensity*0.9)); });
   }
   update(dt){
-    if(BANDS.beat&&BANDS.bassSmooth>0.5)
-      this.inten=Math.min(1,BANDS.bassSmooth*1.2);
-    else this.inten*=0.78;
+    // Também acompanha continuamente a energia (beatStr + grave) → sempre visível
+    const target=Math.min(1, BANDS.beatStr*0.9 + BANDS.bassSmooth*0.45);
+    this.inten=Math.max(this.inten*0.86, target);
   }
   draw(cx,cy){
-    if(!CFG.lens_flare||this.inten<0.015)return;
-    const dc=DOM_COLOR,n=10,r=150*this.inten;
-    const v=[];
+    if(!CFG.lens.flare||this.inten<0.02)return;
+    const dc=DOM_COLOR;
+    const fi=CFG.lens.flare_intensity||0.55;
+    const inten=this.inten*sceneDir.intensity;
+    const R=Math.min(W,H)*0.22*inten;
+    bAdd();
+    // Núcleo brilhante
+    gl.useProgram(this._pGlow);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this._fb);att(this._pGlow,'a_p',2,8,0);
+    uM(this._pGlow,'u_m',PROJ);u2f(this._pGlow,'u_cen',cx,cy);
+    gl.uniform1f(gl.getUniformLocation(this._pGlow,'u_r'),Math.max(2,R*0.9));
+    u4f(this._pGlow,'u_col',Math.min(1,dc[0]+.5),Math.min(1,dc[1]+.5),Math.min(1,dc[2]+.5),inten*fi*1.4);
+    gl.drawArrays(gl.TRIANGLE_FAN,0,this._fn);
+    // Raios de estrela (alternando longos/curtos), girando devagar
+    const n=14,v=[];
     for(let i=0;i<n;i++){
-      const a=i/n*Math.PI*2;
-      v.push(cx,cy,cx+Math.cos(a)*r*0.12,cy+Math.sin(a)*r*0.12);
-      v.push(cx+Math.cos(a)*r*0.12,cy+Math.sin(a)*r*0.12,
-             cx+Math.cos(a)*r,cy+Math.sin(a)*r);
+      const a=i/n*Math.PI*2+T*0.15;
+      const len=R*((i%2)?1.9:1.1);
+      v.push(cx,cy, cx+Math.cos(a)*len, cy+Math.sin(a)*len);
     }
     gl.useProgram(this._p);
     up(this._buf,new Float32Array(v));att(this._p,'a_p',2,8,0);
     uM(this._p,'u_m',PROJ);
-    u4f(this._p,'u_col',dc[0]+.3,dc[1]+.3,dc[2]+.3,this.inten*0.25);
-    bAdd();gl.drawArrays(gl.LINES,0,v.length/2);bNorm();
+    u4f(this._p,'u_col',Math.min(1,dc[0]+.4),Math.min(1,dc[1]+.4),Math.min(1,dc[2]+.4),inten*fi);
+    gl.drawArrays(gl.LINES,0,v.length/2);
+    bNorm();
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  HUD (progress bar)
-// ═══════════════════════════════════════════════════════════════════
 class HUD {
   constructor(){
     this._p=mkProg(
@@ -799,50 +1310,215 @@ class HUD {
     att(this._p,'a_p',2,8,0);u4f(this._p,'u_col',...col);
     gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
   }
-  draw(progress){
-    if(!CFG.progress_bar_enabled)return;
-    const bh=CFG.progress_bar_height||4;
-    const y=CFG.progress_bar_position==='top'?0:H-bh;
-    const bw=W*Math.max(0,Math.min(1,progress));
+  // Arco (banda anelar) de a0 a a1 como triangle strip
+  _arc(cx,cy,ri,ro,a0,a1,col){
+    const span=a1-a0;
+    const segs=Math.max(2,Math.ceil(Math.abs(span)/(Math.PI/120)));
+    const v=[];
+    for(let i=0;i<=segs;i++){
+      const a=a0+span*(i/segs),c=Math.cos(a),s=Math.sin(a);
+      v.push(cx+c*ri,cy+s*ri, cx+c*ro,cy+s*ro);
+    }
+    up(this._buf,new Float32Array(v));att(this._p,'a_p',2,8,0);
+    u4f(this._p,'u_col',...col);
+    gl.drawArrays(gl.TRIANGLE_STRIP,0,v.length/2);
+  }
+  draw(progress,cx,cy,circleR){
+    const pb=CFG.hud.progress_bar;
+    if(!pb.enabled)return;
     const dc=DOM_COLOR;
+
+    // Modo barra inferior (compat) — só se explicitamente pedido
+    if(pb.style==='bottom'){
+      const bh=pb.height||6, y=H-bh, bw=W*Math.max(0,Math.min(1,progress));
+      gl.useProgram(this._p);uM(this._p,'u_m',BASE_PROJ);bNorm();
+      this._rect(0,y,W,bh,[0,0,0,0.5]);
+      if(bw>0){bAdd();this._rect(0,y,bw,bh,[dc[0],dc[1],dc[2],0.95]);}
+      bNorm();return;
+    }
+
+    // Anel de progresso em volta do círculo central
+    const col=pb.color==='auto'?dc:hexRGB(pb.color||'#fff');
+    const off=pb.radius_offset||10, th=pb.thickness||6;
+    const ri=circleR+off, ro=ri+th;
+    const p=Math.max(0,Math.min(1,progress));
+    const a0=-Math.PI/2, a1=a0+p*Math.PI*2;
     gl.useProgram(this._p);uM(this._p,'u_m',PROJ);
-    bNorm();this._rect(0,y,W,bh,[0,0,0,0.4]);
-    if(bw>0){bAdd();this._rect(0,y,bw,bh,[dc[0],dc[1],dc[2],0.9]);}
+    // Trilho completo (discreto)
+    bNorm();
+    this._arc(cx,cy,ri,ro,-Math.PI/2,-Math.PI/2+Math.PI*2,[dc[0],dc[1],dc[2],0.14]);
+    if(p>0.001){
+      bAdd();
+      if(pb.glow) this._arc(cx,cy,ri-th*0.9,ro+th*0.9,a0,a1,[col[0],col[1],col[2],0.30]);
+      this._arc(cx,cy,ri,ro,a0,a1,[col[0],col[1],col[2],0.95]);
+      // Ponta brilhante que corre pela borda
+      const dot=Math.min(0.10,0.06+0.04*p);
+      this._arc(cx,cy,ri-th*0.7,ro+th*0.7,a1-dot,a1,[1,1,1,0.95]);
+    }
     bNorm();
   }
 }
 </script>
 
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 10: PostFX Pipeline — bloom, grain, vignette, color grading
+     ═══════════════════════════════════════════════════════════════════ -->
 <script>
-// ═══════════════════════════════════════════════════════════════════
-//  MAIN — initVisualizer + renderFrame
-// ═══════════════════════════════════════════════════════════════════
-window.initVisualizer = async function({bgImage,logoImage,cfg,title,totalFrames}){
-  CFG=cfg; W=cfg.width||1920; H=cfg.height||1080; FPS=cfg.fps||30;
+class PostFXPipeline {
+  constructor(){
+    this.enabled=false;this.quality='high';
+    this.fboMain=null;this.fboBloom=null;
+  }
+  init(w,h,quality){
+    this.quality=quality==='auto'?detectQuality():quality;
+    this.enabled=this.quality!=='low';
+    if(!this.enabled)return;
+    this.fboMain=createFBO(w,h);
+    if(this.quality==='ultra'||this.quality==='high'){
+      this.fboBloom=createFBO(Math.floor(w/2),Math.floor(h/2));
+    }
+    this._pBloom=mkProg(
+      `#version 300 es
+       in vec2 a_p,a_uv;out vec2 v_uv;
+       void main(){gl_Position=vec4(a_p,0.,1.);v_uv=a_uv;}`,
+      `#version 300 es
+       precision highp float;in vec2 v_uv;uniform sampler2D u_t;
+       uniform float u_threshold;uniform vec2 u_texelSize;out vec4 o;
+       void main(){
+         vec2 pd[13];
+         pd[0]=vec2(0);pd[1]=vec2(-.326,-.406);pd[2]=vec2(-.840,-.074);
+         pd[3]=vec2(-.696,.457);pd[4]=vec2(-.203,.621);pd[5]=vec2(.962,-.195);
+         pd[6]=vec2(.473,-.480);pd[7]=vec2(.519,.767);pd[8]=vec2(.185,-.893);
+         pd[9]=vec2(.507,.064);pd[10]=vec2(-.321,.932);pd[11]=vec2(-.833,-.606);
+         pd[12]=vec2(.786,.478);
+         vec3 sum=vec3(0);
+         for(int i=0;i<13;i++){
+           vec3 s=texture(u_t,v_uv+pd[i]*u_texelSize*4.0).rgb;
+           float br=dot(s,vec3(.2126,.7152,.0722));
+           sum+=s*smoothstep(u_threshold,u_threshold+0.2,br);
+         }
+         o=vec4(sum/13.,1.);
+       }`);
+    this._pComp=mkProg(
+      `#version 300 es
+       in vec2 a_p,a_uv;out vec2 v_uv;
+       void main(){gl_Position=vec4(a_p,0.,1.);v_uv=a_uv;}`,
+      `#version 300 es
+       precision highp float;in vec2 v_uv;
+       uniform sampler2D u_scene,u_bloom;
+       uniform float u_bloomInt,u_ca,u_time;
+       uniform vec4 u_cg;
+       out vec4 o;
+       float hash(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}
+       void main(){
+         vec2 uv=v_uv;
+         float r=texture(u_scene,uv+vec2(u_ca,0.)).r;
+         float g=texture(u_scene,uv).g;
+         float b=texture(u_scene,uv-vec2(u_ca,0.)).b;
+         vec3 color=vec3(r,g,b);
+         vec3 bloom=texture(u_bloom,uv).rgb;
+         color+=bloom*u_bloomInt;
+         float dirt=hash(uv*4.+u_time*0.01)*0.4+hash(uv*8.+u_time*0.007)*0.3
+                   +hash(uv*16.+u_time*0.013)*0.3;
+         color+=bloom*dirt*0.12;
+         float llL=pow(max(0.,1.-uv.x*3.),2.)*smoothstep(0.,0.4,uv.y)*smoothstep(1.,0.6,uv.y);
+         float llR=pow(max(0.,1.-(1.-uv.x)*3.),2.)*smoothstep(0.,0.4,uv.y)*smoothstep(1.,0.6,uv.y);
+         float llAmt=sin(u_time*0.15)*0.5+0.5;
+         color+=vec3(1.,.9,.8)*(llL+llR)*u_cg.w*llAmt;
+         float temp=u_cg.x;
+         color.r+=temp*0.08;color.b-=temp*0.08;
+         float sat=u_cg.y;
+         float luma=dot(color,vec3(.2126,.7152,.0722));
+         color=mix(vec3(luma),color,sat);
+         color=pow(max(color,vec3(0.)),vec3(1./u_cg.z));
+         o=vec4(clamp(color,0.,1.),1.);
+       }`);
+  }
+  bindFBO(){
+    if(!this.enabled)return;
+    gl.bindFramebuffer(gl.FRAMEBUFFER,this.fboMain.fb);
+    gl.viewport(0,0,this.fboMain.w,this.fboMain.h);
+  }
+  apply(){
+    if(!this.enabled)return;
+    const pf=CFG.postfx;
+    const bloomEnabled=this.fboBloom&&pf.bloom.enabled;
+    if(bloomEnabled){
+      gl.bindFramebuffer(gl.FRAMEBUFFER,this.fboBloom.fb);
+      gl.viewport(0,0,this.fboBloom.w,this.fboBloom.h);
+      gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(this._pBloom);
+      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.fboMain.tex);
+      u1i(this._pBloom,'u_t',0);
+      u1f(this._pBloom,'u_threshold',pf.bloom.threshold);
+      u2f(this._pBloom,'u_texelSize',1/this.fboBloom.w,1/this.fboBloom.h);
+      bNorm();drawFSQ(this._pBloom);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    gl.viewport(0,0,W,H);
+    gl.useProgram(this._pComp);
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.fboMain.tex);
+    u1i(this._pComp,'u_scene',0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D,bloomEnabled?this.fboBloom.tex:this.fboMain.tex);
+    u1i(this._pComp,'u_bloom',1);
+    const bloomInt=bloomEnabled?pf.bloom.intensity*sceneDir.bloomMult:0;
+    u1f(this._pComp,'u_bloomInt',bloomInt);
+    const caBase=pf.chromatic_aberration||0.0008;
+    u1f(this._pComp,'u_ca',caBase*(1+BANDS.bassSmooth*2.5*sceneDir.intensity));
+    u1f(this._pComp,'u_time',T);
+    const cg=pf.color_grading;
+    u4f(this._pComp,'u_cg',cg.temperature,cg.saturation,cg.gamma,
+        pf.light_leak.enabled?pf.light_leak.opacity*sceneDir.intensity:0);
+    bNorm();drawFSQ(this._pComp);
+  }
+}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     Section 11: MAIN — initVisualizer + fastForwardTo + renderFrame
+     ═══════════════════════════════════════════════════════════════════ -->
+<script>
+window.initVisualizer = async function({bgImage,logoImage,cfg:userCfg,title,totalFrames,scenes}){
+  CFG = resolveConfig(userCfg||{});
+  SOLO = (Array.isArray(userCfg.debug_solo) && userCfg.debug_solo.length)
+           ? userCfg.debug_solo.slice() : null;
+  W=userCfg.width||1920; H=userCfg.height||1080; FPS=userCfg.fps||30;
   canvas.width=W; canvas.height=H;
   gl.viewport(0,0,W,H);
   gl.enable(gl.BLEND); bNorm();
-  PROJ=ortho(W,H); T=0;
+  BASE_PROJ=ortho(W,H); PROJ=BASE_PROJ; T=0;
 
   DOM_COLOR = await extractDomColor(bgImage);
 
-  mBG       = new BackgroundModule();
-  mHalo     = new HaloModule();
-  mWaves    = new WaveRings();
-  mSpectrum = new AudioSpectrum();
-  mParticles= new ParticleSystem();
-  mCircle   = new CircleModule();
-  mLens     = new LensFlare();
-  mHUD      = new HUD();
+  eventBus   = new EventBus();
+  beatVar    = new BeatVariation(CFG.beat_variation);
+  sceneDir   = new SceneDirector(scenes,totalFrames,CFG.scene_director);
+  idleMotion = new IdleMotion();
+  camera     = new CameraSystem(CFG.camera,eventBus);
+  postfx     = new PostFXPipeline();
+  postfx.init(W,H,CFG.postfx.quality);
+
+  mBG        = new BackgroundModule(eventBus);
+  mHalo      = new HaloModule();
+  mHalo.init(CFG.glow);
+  mWaves     = new WaveRings();
+  mSpectrum  = new AudioSpectrum();
+  mParticles = new ParticleSystem(eventBus);
+  mCircle    = new CircleModule(eventBus);
+  mLens      = new LensFlare(eventBus);
+  mHUD       = new HUD();
 
   await mBG.init(bgImage);
-  await mCircle.init(logoImage, cfg.logo_text||'♫', title,
-                     cfg.title_color||'#fff', cfg.title_font_size||32);
+  await mCircle.init(logoImage,
+    userCfg.logo_text||'♫', title,
+    userCfg.title_color||CFG.hud.title.color,
+    userCfg.title_font_size||CFG.hud.title.font_size);
+  mParticles.init(W/2,H/2);
+
+  eventBus.on('beat', d=>mWaves.onBeat(d,sceneDir));
 };
 
-// Advance simulation state WITHOUT drawing — used to fast-forward a parallel
-// worker page to the first frame of its chunk. Runs entirely inside JS so it
-// costs a single CDP round-trip instead of one per frame.
 window.fastForwardTo = function(allFrames, targetIndex){
   for(let i=0;i<targetIndex && i<allFrames.length;i++){
     window.renderFrame(allFrames[i], true);
@@ -855,73 +1531,61 @@ window.renderFrame = function(fd, skipDraw){
   const dt=1/FPS; T+=dt;
   const cx=W/2, cy=H/2;
 
-  // ── Band separation ──────────────────────────────────────────
-  // Bands are pre-computed in Python (light payload). Fallback: derive
-  // them from the raw spectrum if not provided.
   if(bass!==undefined){
-    BANDS.bass=bass; BANDS.mid=mid; BANDS.high=high; BANDS.presence=presence;
-  } else if(spectrum&&spectrum.length){
-    BANDS.bass     = bandEnergy(spectrum, 0.00, 0.10);
-    BANDS.mid      = bandEnergy(spectrum, 0.10, 0.42);
-    BANDS.high     = bandEnergy(spectrum, 0.42, 0.78);
-    BANDS.presence = bandEnergy(spectrum, 0.78, 1.00);
+    BANDS.bass=bass;BANDS.mid=mid;BANDS.high=high;BANDS.presence=presence;
+  }else if(spectrum&&spectrum.length){
+    BANDS.bass=bandEnergy(spectrum,0.00,0.10);BANDS.mid=bandEnergy(spectrum,0.10,0.42);
+    BANDS.high=bandEnergy(spectrum,0.42,0.78);BANDS.presence=bandEnergy(spectrum,0.78,1.00);
   }
-  BANDS.rms=rms; BANDS.beat=isBeat; BANDS.beatStr=beatStrength||0;
-  // Smoothed values (each band independent decay rate)
-  BANDS.bassSmooth  +=(BANDS.bass      -BANDS.bassSmooth  )*0.22;
-  BANDS.midSmooth   +=(BANDS.mid       -BANDS.midSmooth   )*0.18;
-  BANDS.highSmooth  +=(BANDS.high      -BANDS.highSmooth  )*0.28;
-  BANDS.presSmooth  +=(BANDS.presence  -BANDS.presSmooth  )*0.30;
-  BANDS.rmsSmooth   +=(BANDS.rms       -BANDS.rmsSmooth   )*0.20;
+  BANDS.rms=rms;BANDS.beat=isBeat;BANDS.beatStr=beatStrength||0;
+  BANDS.bassSmooth +=(BANDS.bass    -BANDS.bassSmooth )*0.48;
+  BANDS.midSmooth  +=(BANDS.mid     -BANDS.midSmooth  )*0.35;
+  BANDS.highSmooth +=(BANDS.high    -BANDS.highSmooth )*0.42;
+  BANDS.presSmooth +=(BANDS.presence-BANDS.presSmooth )*0.40;
+  BANDS.rmsSmooth  +=(BANDS.rms     -BANDS.rmsSmooth  )*0.35;
 
-  // ── Module updates (circle first — others follow its center) ──
-  mCircle.update(dt);
-  const [ccx,ccy]=mCircle.center(cx,cy);   // dynamic floating center
-  const circleR=(CFG.circle_radius||200)*mCircle.scale;
+  if(isBeat){
+    const bi=beatVar.trigger(rms,BANDS);
+    eventBus.emit('beat',bi);
+    if(BANDS.bassSmooth>0.6)eventBus.emit('bassPeak',{energy:BANDS.bassSmooth});
+    if(BANDS.midSmooth>0.6)eventBus.emit('midPeak',{energy:BANDS.midSmooth});
+    if(BANDS.highSmooth>0.6)eventBus.emit('highPeak',{energy:BANDS.highSmooth});
+  }
 
-  mBG.update(dt);
-  mHalo.update(dt);
-  if(isBeat) mWaves.onBeat();
-  mWaves.update(dt);
-  mParticles.update(dt, ccx, ccy, circleR);
+  sceneDir.update(frameIndex);
+
+  camera.update(dt,BANDS,sceneDir.cameraInt);
+  PROJ=camera.getProj();
+
+  mCircle.update(dt,BANDS,sceneDir,idleMotion);
+  const [ccx,ccy]=mCircle.center(cx,cy);
+  const circleR=(CFG.circle.radius||200)*mCircle.scale;
+
+  mBG.update(dt,BANDS,sceneDir,idleMotion);
+  mHalo.update(dt,BANDS,sceneDir,idleMotion);
+  mWaves.update(dt,BANDS);
+  mParticles.update(dt,ccx,ccy,circleR,sceneDir,idleMotion);
   mLens.update(dt);
 
-  // Fast-forward mode: state advanced, nothing rendered
   if(skipDraw) return;
 
-  // ══ DRAW ORDER ════════════════════════════════════════════════
+  if(postfx.enabled) postfx.bindFBO();
+
   gl.clearColor(0,0,0,1);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
-  // Layer 1 — Background (always moving)
-  mBG.draw();
+  if(_solo('bg'))       mBG.draw();
+  if(_solo('particles'))mParticles.drawBack();
+  if(_solo('halo'))     mHalo.draw(ccx,ccy);
+  if(_solo('waves'))    mWaves.draw(ccx,ccy,circleR);
+  if(_solo('spectrum')) mSpectrum.draw(ccx,ccy,circleR,spectrum,sceneDir,idleMotion);
+  if(_solo('particles'))mParticles.drawMid();
+  if(_solo('circle'))   mCircle.draw(ccx,ccy);
+  if(_solo('lens'))     mLens.draw(ccx,ccy);
+  if(_solo('particles'))mParticles.drawFront();
+  if(_solo('hud'))      mHUD.draw(progress,ccx,ccy,circleR);
 
-  // Layer 2 — Back particles (far, small, normal blend)
-  mParticles.drawBack();
-
-  // Layer 3 — Halo (diffuse light behind circle, additive)
-  mHalo.draw(ccx,ccy);
-
-  // Layer 4 — Wave rings (mid-driven, additive)
-  mWaves.draw(ccx, ccy, circleR);
-
-  // Layer 5 — Audio spectrum (radial bars, additive)
-  if(CFG.spectrum_enabled) mSpectrum.draw(ccx, ccy, circleR, spectrum);
-
-  // Layer 6 — Mid particles
-  mParticles.drawMid();
-
-  // Layer 7 — Circle (glass + spring + glow + shadow)
-  mCircle.draw(ccx,ccy);
-
-  // Layer 8 — Lens flare (beat driven, additive)
-  if(CFG.lens_flare) mLens.draw(ccx,ccy);
-
-  // Layer 9 — Front particles (near, large, additive)
-  mParticles.drawFront();
-
-  // Layer 10 — HUD (progress bar)
-  mHUD.draw(progress);
+  if(postfx.enabled) postfx.apply();
 };
 </script>
 </body>

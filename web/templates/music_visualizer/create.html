@@ -151,6 +151,55 @@
       <label>Iniciais / texto do círculo (quando sem logo)</label>
       <input type="text" id="mv-logo-text" value="♫" maxlength="4" placeholder="♫">
 
+      <!-- Presets & Motor Cinematográfico -->
+      <h3 class="sub section-toggle" data-target="sec-cinema">🎬 Estilo & Câmera Cinematográfica</h3>
+      <div id="sec-cinema" class="section-body">
+        <label>Preset de Estilo Visual</label>
+        <select id="mv-style-preset">
+          <option value="default" selected>🎨 Padrão (Equilibrado)</option>
+          <option value="neon">⚡ Neon (Glow Intenso & Cores Vibrantes)</option>
+          <option value="epic">⚔️ Epic (Câmera Dinâmica & Efeitos Fortes)</option>
+          <option value="trap">🔊 Trap (Graves Agressivos & Shake Pesado)</option>
+          <option value="lofi">☕ Lofi (Cinematográfico, Grain & Cores Quentes)</option>
+          <option value="synthwave">🌆 Synthwave (Anos 80, Glow Retro)</option>
+          <option value="dark">🌑 Dark (Atmosférico & Escuro)</option>
+          <option value="minimal">🤍 Minimal (Elegante & Limpo)</option>
+        </select>
+        <div class="hint">Os presets ajustam os efeitos automaticamente mantendo suas customizações abaixo.</div>
+
+        <div class="toggle-row">
+          <input type="checkbox" id="mv-camera-enabled" checked>
+          <label for="mv-camera-enabled">Ativar Câmera Virtual Flutuante</label>
+        </div>
+
+        <label>Deriva / Movimento da Câmera (px)</label>
+        <div class="slider-row">
+          <input type="range" id="mv-camera-float" min="0" max="30" step="1" value="12">
+          <span class="slider-val" id="mv-camera-float-val">12px</span>
+        </div>
+
+        <label>Punch de Câmera na Batida</label>
+        <div class="slider-row">
+          <input type="range" id="mv-camera-punch" min="0" max="0.08" step="0.005" value="0.025">
+          <span class="slider-val" id="mv-camera-punch-val">0.025</span>
+        </div>
+
+        <label>Qualidade do Pós-Processamento (PostFX / Bloom)</label>
+        <select id="mv-postfx-quality">
+          <option value="auto" selected>✨ Automático (Detectar GPU)</option>
+          <option value="ultra">🌟 Ultra (Multi-pass Bloom + Lens Dirt + Grain)</option>
+          <option value="high">💎 Alto (Bloom + Lens Dirt)</option>
+          <option value="medium">⚡ Médio (Desempenho Rápido)</option>
+          <option value="low">🚫 Baixo (Pós-processamento Desativado)</option>
+        </select>
+
+        <label>Granulado de Filme (Film Grain)</label>
+        <div class="slider-row">
+          <input type="range" id="mv-film-grain" min="0" max="1" step="0.05" value="0.5">
+          <span class="slider-val" id="mv-film-grain-val">0.50</span>
+        </div>
+      </div>
+
       <!-- Resolução -->
       <h3 class="sub section-toggle" data-target="sec-resolution">📐 Resolução e FPS</h3>
       <div id="sec-resolution" class="section-body">
@@ -420,8 +469,14 @@ let savedTemplates = [];
 
 function visualizerSettings(){
   return {
-    schema_version: 1,
+    schema_version: 2,
     settings: {
+      style_preset: q('mv-style-preset').value || 'default',
+      camera_enabled: bool(q('mv-camera-enabled')),
+      camera_float_amount: Number(q('mv-camera-float').value),
+      camera_punch_strength: Number(q('mv-camera-punch').value),
+      postfx_quality: q('mv-postfx-quality').value || 'auto',
+      film_grain: Number(q('mv-film-grain').value),
       width: Number(q('mv-width').value), height: Number(q('mv-height').value), fps: Number(q('mv-fps').value),
       circle_radius: Number(q('mv-circle-radius').value), circle_max_scale: Number(q('mv-circle-scale').value),
       circle_border_color: q('mv-circle-border-color').value, circle_bg_color: '#000000cc',
@@ -447,6 +502,13 @@ function applyVisualizerSettings(templateData){
   const setValue = (id, value) => { if(value !== undefined && q(id)) q(id).value = value; };
   const setChecked = (id, value) => { if(value !== undefined && q(id)) q(id).checked = Boolean(value); };
 
+  setValue('mv-style-preset', settings.style_preset);
+  setChecked('mv-camera-enabled', settings.camera_enabled);
+  setValue('mv-camera-float', settings.camera_float_amount);
+  setValue('mv-camera-punch', settings.camera_punch_strength);
+  setValue('mv-postfx-quality', settings.postfx_quality);
+  setValue('mv-film-grain', settings.film_grain);
+
   if(settings.width !== undefined && settings.height !== undefined){
     setValue('mv-resolution', `${settings.width}x${settings.height}`);
     setValue('mv-width', settings.width); setValue('mv-height', settings.height);
@@ -454,13 +516,14 @@ function applyVisualizerSettings(templateData){
   }
   ['fps','circle-radius','circle-scale','glow-intensity','wave-rings','wave-opacity','zoom-speed',
    'shake-px','brightness','blur','particle-count','particle-speed','particle-opacity',
-   'sensitivity','beat-threshold'].forEach(id => {
+   'sensitivity','beat-threshold','camera-float','camera-punch','film-grain'].forEach(id => {
     const key = {
       'circle-radius':'circle_radius','circle-scale':'circle_max_scale','glow-intensity':'circle_glow_intensity',
       'wave-rings':'wave_rings','wave-opacity':'wave_opacity_max','zoom-speed':'bg_zoom_speed',
       'shake-px':'bg_beat_shake_px','brightness':'bg_brightness_boost','blur':'bg_blur_ambient',
       'particle-count':'particle_count','particle-speed':'particle_speed','particle-opacity':'particle_opacity_max',
-      'sensitivity':'audio_sensitivity','beat-threshold':'beat_threshold'
+      'sensitivity':'audio_sensitivity','beat-threshold':'beat_threshold',
+      'camera-float':'camera_float_amount','camera-punch':'camera_punch_strength','film-grain':'film_grain'
     }[id] || id;
     setValue(`mv-${id}`, settings[key]);
     if(q(`mv-${id}`)) q(`mv-${id}`).dispatchEvent(new Event('input'));
@@ -565,6 +628,9 @@ const sliders = [
   ['mv-particle-opacity','mv-particle-opacity-val', v => parseFloat(v).toFixed(2)],
   ['mv-sensitivity','mv-sensitivity-val', v => parseFloat(v).toFixed(1)+'×'],
   ['mv-beat-threshold','mv-beat-threshold-val', v => parseFloat(v).toFixed(2)],
+  ['mv-camera-float','mv-camera-float-val', v => v+'px'],
+  ['mv-camera-punch','mv-camera-punch-val', v => parseFloat(v).toFixed(3)],
+  ['mv-film-grain','mv-film-grain-val', v => parseFloat(v).toFixed(2)],
 ];
 sliders.forEach(([id, valId, fmt]) => {
   const el = q(id); const vEl = q(valId);
@@ -735,6 +801,12 @@ submitBtn.addEventListener('click', async () => {
   form.append('title_position', q('mv-title-position').value);
   form.append('audio_sensitivity', q('mv-sensitivity').value);
   form.append('beat_threshold', q('mv-beat-threshold').value);
+  form.append('style_preset', q('mv-style-preset').value || 'default');
+  form.append('camera_enabled', bool(q('mv-camera-enabled')) ? 'on' : 'off');
+  form.append('camera_float_amount', q('mv-camera-float').value);
+  form.append('camera_punch_strength', q('mv-camera-punch').value);
+  form.append('postfx_quality', q('mv-postfx-quality').value || 'auto');
+  form.append('film_grain', q('mv-film-grain').value);
 
   submitBtn.disabled = true;
   progressWrap.classList.remove('hidden');

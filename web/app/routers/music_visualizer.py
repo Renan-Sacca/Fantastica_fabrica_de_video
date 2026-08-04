@@ -278,6 +278,13 @@ async def render_music_visualizer(
     # Áudio
     audio_sensitivity: float = Form(1.0),
     beat_threshold: float = Form(0.6),
+    # Estilo & Câmera (v2)
+    style_preset: str = Form("default"),
+    camera_enabled: str = Form("on"),
+    camera_float_amount: float = Form(12.0),
+    camera_punch_strength: float = Form(0.025),
+    postfx_quality: str = Form("auto"),
+    film_grain: float = Form(0.5),
     # Resolução
     width: int = Form(1920),
     height: int = Form(1080),
@@ -323,6 +330,12 @@ async def render_music_visualizer(
                 "width": width,
                 "height": height,
                 "fps": fps,
+                "style_preset": style_preset,
+                "camera_enabled": camera_enabled in ("on", "true", "1"),
+                "camera_float_amount": camera_float_amount,
+                "camera_punch_strength": camera_punch_strength,
+                "postfx_quality": postfx_quality,
+                "film_grain": film_grain,
                 "circle_radius": circle_radius,
                 "circle_max_scale": circle_max_scale,
                 "circle_border_color": circle_border_color,

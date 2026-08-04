@@ -7,6 +7,9 @@ services:
       - ../credentials.json:/app/credentials.json:ro
       - ../token.json:/app/token.json:ro
       - ../tts3/data:/app/tts3_audio
+      # Libs DirectX/D3D12 do host WSL2 → permitem ao Mesa (driver d3d12)
+      # acessar a GPU NVIDIA via /dev/dxg para WebGL acelerado no Chromium.
+      - /usr/lib/wsl:/usr/lib/wsl:ro
     env_file:
       - .env
     environment:
@@ -14,6 +17,11 @@ services:
       # Habilita todas as capacidades da GPU NVIDIA no container
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video,graphics
+      # ── WebGL na GPU (WSL2) ──
+      # Mesa usa o driver "d3d12" (Dozen) para falar com a RTX via /dev/dxg.
+      - LD_LIBRARY_PATH=/usr/lib/wsl/lib
+      - GALLIUM_DRIVER=d3d12
+      - MESA_LOADER_DRIVER_OVERRIDE=d3d12
     # ── Acesso à GPU NVIDIA (requer NVIDIA Container Toolkit no host) ──
     # Usado para: encode NVENC no ffmpeg + WebGL acelerado no Chromium.
     # Se a GPU não estiver disponível, o worker faz fallback automático

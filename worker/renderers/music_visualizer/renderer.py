@@ -36,7 +36,7 @@ logger = logging.getLogger("MusicVisualizerRenderer")
 DEFAULTS: dict = {
     "width": 1920, "height": 1080, "fps": 30,
     # Círculo
-    "circle_radius": 200, "circle_max_scale": 1.55,
+    "circle_radius": 170, "circle_max_scale": 1.55,
     "circle_border_color": "#ffffff", "circle_bg_color": "#00000099",
     "circle_glow_color": "auto", "circle_glow_intensity": 1.2,
     "circle_border_width": 5,
@@ -77,6 +77,13 @@ DEFAULTS: dict = {
     "title_opacity": 0.85, "title_position": "bottom-center", "title_margin": 56,
     # Áudio
     "audio_sensitivity": 1.3, "beat_threshold": 0.50,
+    # ── Novos sistemas (v2 — Animation Engine) ──
+    "style_preset": "default",
+    "postfx_quality": "auto",
+    "camera_enabled": True,
+    "scene_director_enabled": True,
+    "idle_motion_enabled": True,
+    "beat_variation_enabled": True,
 }
 
 
@@ -249,6 +256,9 @@ class MusicVisualizerRenderer(BaseRenderer):
             beat_strength[i] = last
             last *= 0.82
 
+        # ── Passo 4: Scene Detection ────────────────────────
+        scenes = self._detect_scenes(rms, bass, mid, total_frames, fps)
+
         return {
             "rms": rms.tolist(),
             "spectra": spectra,
@@ -258,6 +268,7 @@ class MusicVisualizerRenderer(BaseRenderer):
             "presence": presence.tolist(),
             "beats": beats.tolist(),
             "beat_strength": beat_strength.tolist(),
+            "scenes": scenes,
             "duration": duration,
             "total_frames": total_frames,
             "fps": fps,
@@ -280,6 +291,75 @@ class MusicVisualizerRenderer(BaseRenderer):
         return np.convolve(arr, np.ones(w) / w, mode="same")
 
     @staticmethod
+    def _detect_scenes(rms, bass, mid, total_frames: int, fps: int) -> list:
+        """Detecta seções da música baseado no envelope de energia.
+
+        Usa janela móvel de 5s sobre energia combinada (rms+bass+mid).
+        Classifica frames por percentil em intro/verse/buildup/drop/chorus/outro.
+        Fallback temporal se detecção falhar.
+        """
+        import numpy as np
+
+        if total_frames < fps * 10:  # música muito curta → fallback
+            return _scene_fallback(total_frames)
+
+        # Energia combinada com peso maior em bass (mais indicativo de seção)
+        combined = (np.array(rms) + np.array(bass) * 1.5 + np.array(mid) * 0.5) / 3.0
+        win = max(1, int(fps * 5))  # janela de 5s
+        kernel = np.ones(win) / win
+        envelope = np.convolve(combined, kernel, mode="same")
+        env_max = envelope.max() or 1.0
+        envelope = envelope / env_max
+
+        # Percentis para classificação
+        p30 = float(np.percentile(envelope, 30))
+        p55 = float(np.percentile(envelope, 55))
+        p78 = float(np.percentile(envelope, 78))
+        p92 = float(np.percentile(envelope, 92))
+
+        def classify(val):
+            if val < p30:
+                return "intro"
+            elif val < p55:
+                return "verse"
+            elif val < p78:
+                return "buildup"
+            elif val < p92:
+                return "chorus"
+            else:
+                return "drop"
+
+        # Segmentar em blocos de ~2s
+        block = max(1, int(fps * 2))
+        raw_segments = []
+        for start in range(0, total_frames, block):
+            end = min(start + block, total_frames)
+            avg = float(envelope[start:end].mean())
+            raw_segments.append({"start": start, "end": end,
+                                 "type": classify(avg), "intensity": avg})
+
+        # Mesclar blocos consecutivos de mesmo tipo
+        scenes = [dict(raw_segments[0])]
+        for seg in raw_segments[1:]:
+            if seg["type"] == scenes[-1]["type"]:
+                scenes[-1]["end"] = seg["end"]
+                scenes[-1]["intensity"] = max(scenes[-1]["intensity"],
+                                              seg["intensity"])
+            else:
+                scenes.append(dict(seg))
+
+        # Forçar último segmento como "outro" se >= 8% do total
+        outro_min = int(total_frames * 0.08)
+        if scenes and scenes[-1]["end"] - scenes[-1]["start"] >= outro_min:
+            scenes[-1]["type"] = "outro"
+
+        # Forçar primeiro segmento como "intro" se energia baixa
+        if scenes and scenes[0]["intensity"] < p55:
+            scenes[0]["type"] = "intro"
+
+        return scenes if len(scenes) >= 2 else _scene_fallback(total_frames)
+
+    @staticmethod
     def _file_to_b64(path: Path) -> str:
         data = path.read_bytes()
         ext = path.suffix.lstrip(".")
@@ -294,12 +374,15 @@ class MusicVisualizerRenderer(BaseRenderer):
 
     @staticmethod
     def _gpu_present() -> bool:
-        """Detecta acesso a GPU NVIDIA no container.
+        """Detecta acesso a GPU NVIDIA/AMD/Intel ou ambiente Windows.
 
-        Cobre os dois cenários:
-        - Linux nativo: /dev/nvidiactl e /proc/driver/nvidia
-        - WSL2: a GPU é exposta via /dev/dxg (não existem /dev/nvidia*)
+        No Windows (sys.platform == 'win32' / os.name == 'nt'), a GPU nativa
+        está sempre disponível via ANGLE (DirectX 11 / OpenGL).
+        No Linux/Docker, checa dispositivos NVIDIA ou WSL2 /dev/dxg.
         """
+        import sys
+        if sys.platform == "win32" or os.name == "nt":
+            return True
         if Path("/dev/nvidiactl").exists() or Path("/proc/driver/nvidia/version").exists():
             return True
         if Path("/dev/dxg").exists():   # WSL2 GPU passthrough
@@ -361,9 +444,47 @@ class MusicVisualizerRenderer(BaseRenderer):
             f"({chunk} frames/página)"
         )
 
-        use_gpu = self._gpu_present()
-        gl_flag = "--use-gl=egl" if use_gpu else "--use-gl=swiftshader"
-        logger.info(f"WebGL backend: {'GPU (EGL)' if use_gpu else 'CPU (SwiftShader)'}")
+        import sys
+        headless = True
+        win = sys.platform == "win32" or os.name == "nt"
+        display = os.environ.get("DISPLAY")
+        # WSL2 (Docker Desktop): GPU via Mesa d3d12 + libs DirectX do host.
+        wsl_gpu = (Path("/dev/dxg").exists()
+                   and Path("/usr/lib/wsl/lib/libd3d12.so").exists())
+
+        if win:
+            # Windows nativo: ANGLE sobre Direct3D 11 usa a GPU direto.
+            gl_flags = [
+                "--enable-gpu", "--ignore-gpu-blocklist",
+                "--enable-gpu-rasterization", "--enable-zero-copy",
+                "--use-gl=angle", "--use-angle=d3d11",
+            ]
+            backend = "GPU (ANGLE/D3D11)"
+        elif wsl_gpu and display:
+            # WSL2: Chromium PRECISA rodar headful (sob Xvfb) para usar a GPU;
+            # em headless o ANGLE cai no SwiftShader (CPU). O driver Mesa d3d12
+            # fala com a RTX via /dev/dxg usando as libs de /usr/lib/wsl/lib.
+            os.environ.setdefault("GALLIUM_DRIVER", "d3d12")
+            os.environ.setdefault("MESA_LOADER_DRIVER_OVERRIDE", "d3d12")
+            if "/usr/lib/wsl/lib" not in os.environ.get("LD_LIBRARY_PATH", ""):
+                os.environ["LD_LIBRARY_PATH"] = (
+                    "/usr/lib/wsl/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
+                )
+            headless = False
+            gl_flags = [
+                "--ignore-gpu-blocklist", "--enable-gpu-rasterization",
+                "--use-gl=angle", "--use-angle=gl",
+            ]
+            backend = "GPU (Mesa d3d12 / WSL2)"
+        else:
+            # Linux sem GPU acessível → SwiftShader (CPU).
+            use_gpu = self._gpu_present()
+            gl_flags = [
+                "--ignore-gpu-blocklist",
+                "--use-gl=egl" if use_gpu else "--use-gl=swiftshader",
+            ]
+            backend = "CPU (SwiftShader)"
+        logger.info(f"WebGL backend: {backend} | headless={headless}")
 
         done_counter = {"n": 0}
 
@@ -373,6 +494,7 @@ class MusicVisualizerRenderer(BaseRenderer):
             "cfg": cfg,
             "title": title,
             "totalFrames": total,
+            "scenes": audio_data.get("scenes", []),
         }
 
         async def render_chunk(ctx, start: int, end: int):
@@ -394,6 +516,20 @@ class MusicVisualizerRenderer(BaseRenderer):
                 "!!document.getElementById('c').getContext('webgl2')"
             ):
                 raise RuntimeError("WebGL2 indisponível no Chromium headless.")
+
+            # Log do backend GL real (só na 1ª página) — GPU vs SwiftShader
+            if start == 0:
+                try:
+                    info = await page.evaluate("() => window.getGLInfo()")
+                    is_sw = "swiftshader" in str(info.get("renderer", "")).lower() \
+                        or "llvmpipe" in str(info.get("renderer", "")).lower()
+                    logger.info(
+                        f"WebGL RENDERER: {info.get('renderer')} | "
+                        f"VENDOR: {info.get('vendor')} | quality={info.get('quality')} | "
+                        f"{'⚠️ SOFTWARE (sem GPU)' if is_sw else '✅ GPU acelerada'}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Não foi possível obter GL info: {e}")
 
             await page.evaluate("(p) => window.initVisualizer(p)", init_payload)
 
@@ -423,18 +559,17 @@ class MusicVisualizerRenderer(BaseRenderer):
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(
-                headless=True,
+                headless=headless,
                 args=[
                     "--no-sandbox", "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--enable-webgl", "--enable-webgl2",
-                    "--ignore-gpu-blocklist",
-                    gl_flag,
                     "--enable-accelerated-2d-canvas",
                     "--no-first-run",
                     "--disable-extensions", "--disable-background-networking",
                     "--allow-file-access-from-files",
                     "--disable-web-security",
+                    *gl_flags,
                 ],
             )
             ctx = await browser.new_context(
@@ -501,3 +636,16 @@ class MusicVisualizerRenderer(BaseRenderer):
                            capture_output=True, text=True, timeout=timeout)
         if r.returncode != 0:
             raise RuntimeError(f"ffmpeg falhou: {r.stderr[-600:]}")
+
+
+def _scene_fallback(total_frames: int) -> list:
+    """Progressão temporal quando a detecção de seções falhar."""
+    T = total_frames
+    return [
+        {"start": 0,               "end": int(T * 0.08), "type": "intro",   "intensity": 0.3},
+        {"start": int(T * 0.08),   "end": int(T * 0.30), "type": "verse",   "intensity": 0.5},
+        {"start": int(T * 0.30),   "end": int(T * 0.45), "type": "buildup", "intensity": 0.7},
+        {"start": int(T * 0.45),   "end": int(T * 0.65), "type": "drop",    "intensity": 1.0},
+        {"start": int(T * 0.65),   "end": int(T * 0.88), "type": "chorus",  "intensity": 0.9},
+        {"start": int(T * 0.88),   "end": T,              "type": "outro",   "intensity": 0.4},
+    ]
